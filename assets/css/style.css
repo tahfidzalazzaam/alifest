@@ -447,6 +447,16 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--green-900);
   margin-bottom: 16px;
 }
+.notice--warning {
+  background: var(--yellow-100);
+  border-color: var(--yellow-600);
+  color: var(--green-900);
+}
+.notice--error {
+  background: #fbe9e7;
+  border-color: var(--danger);
+  color: var(--danger);
+}
 
 /* Anggota tim (futsal) */
 .anggota-list { display: grid; gap: 10px; margin-bottom: 10px; }
