@@ -1,10 +1,21 @@
 // View: Form Pendaftaran ("#/daftar")
+//
+// Urutan sengaja: pilih lomba DULU (Langkah 1), baru Data Diri termasuk
+// tanggal lahir (Langkah 2). Begitu jenjang & tanggal lahir terisi, sistem
+// mengecek usia terhadap tanggal pelaksanaan lomba (diatur panitia):
+//   - sesuai syarat           -> lanjut normal
+//   - meleset tapi masih dalam toleransi -> tetap boleh lanjut, dengan
+//     peringatan bahwa pendaftaran akan diverifikasi manual
+//   - meleset lebih dari toleransi -> langsung ditolak di sini, bagian
+//     selanjutnya (upload berkas, kirim) tetap disembunyikan
+// Pengecekan ini diulang lagi secara otentik di database (fungsi
+// submit_pendaftaran) supaya tidak bisa dilewati dari browser.
 
 const DAFTAR_TEMPLATE = `
 <main class="form-page container">
   <div class="form-header">
     <h1>Formulir Pendaftaran</h1>
-    <p>Isi data dengan benar. Cabang lomba yang bisa dipilih akan menyesuaikan otomatis dengan jenjang dan usia peserta.</p>
+    <p>Pilih cabang lomba dulu, baru isi data diri. Kecocokan usia dicek otomatis begitu tanggal lahir diisi.</p>
   </div>
 
   <div class="form-shell">
@@ -13,6 +24,13 @@ const DAFTAR_TEMPLATE = `
 
       <fieldset>
         <span class="form-step">Langkah 1</span>
+        <legend>Pilih Cabang Lomba</legend>
+        <div class="lomba-choices" id="lomba-choices"></div>
+        <div class="form-error" id="lomba-error" style="margin-top:10px;">Pilih salah satu cabang lomba.</div>
+      </fieldset>
+
+      <fieldset id="fieldset-data-diri" style="display:none;">
+        <span class="form-step">Langkah 2</span>
         <legend>Data Diri Peserta</legend>
 
         <div class="field">
@@ -59,76 +77,73 @@ const DAFTAR_TEMPLATE = `
           <label for="email">Email (opsional)</label>
           <input type="email" id="email" name="email" />
         </div>
+
+        <div class="notice" id="usia-notice" style="display:none;"></div>
       </fieldset>
 
-      <fieldset>
-        <span class="form-step">Langkah 2</span>
-        <legend>Pilih Cabang Lomba</legend>
-        <div class="notice" id="lomba-hint">Isi jenjang dan tanggal lahir di atas dulu — cabang yang sesuai akan aktif di sini.</div>
-        <div class="lomba-choices" id="lomba-choices"></div>
-        <div class="form-error" id="lomba-error" style="margin-top:10px;">Pilih salah satu cabang lomba yang sesuai.</div>
-      </fieldset>
+      <div id="bagian-lanjutan" style="display:none;">
 
-      <fieldset id="fieldset-tim" style="display:none;">
-        <span class="form-step">Khusus Lomba Tim</span>
-        <legend>Data Tim</legend>
+        <fieldset id="fieldset-tim" style="display:none;">
+          <span class="form-step">Khusus Lomba Tim</span>
+          <legend>Data Tim</legend>
 
-        <div class="field-row">
+          <div class="field-row">
+            <div class="field">
+              <label for="namaTim">Nama Tim</label>
+              <input type="text" id="namaTim" name="namaTim" />
+              <div class="form-error">Nama tim wajib diisi.</div>
+            </div>
+            <div class="field">
+              <label for="pembina">Guru Pendamping</label>
+              <input type="text" id="pembina" name="pembina" />
+              <div class="form-error">Nama guru pendamping wajib diisi.</div>
+            </div>
+          </div>
+
           <div class="field">
-            <label for="namaTim">Nama Tim</label>
-            <input type="text" id="namaTim" name="namaTim" />
-            <div class="form-error">Nama tim wajib diisi.</div>
+            <label>Anggota Tim</label>
+            <div class="anggota-list" id="anggota-list"></div>
+            <button type="button" class="btn-add" id="btn-tambah-anggota">+ Tambah anggota</button>
+            <div class="hint" id="anggota-hint"></div>
           </div>
+        </fieldset>
+
+        <fieldset>
+          <span class="form-step">Langkah 3</span>
+          <legend>Unggah Berkas</legend>
+
           <div class="field">
-            <label for="pembina">Guru Pendamping</label>
-            <input type="text" id="pembina" name="pembina" />
-            <div class="form-error">Nama guru pendamping wajib diisi.</div>
+            <label>Surat Keterangan Aktif Sekolah</label>
+            <div class="upload-field" id="upload-surat">
+              <label class="upload-trigger" for="fileSurat">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+              <input type="file" id="fileSurat" name="fileSurat" accept=".jpg,.jpeg,.png,.pdf" />
+              <div class="filename" id="filename-surat">Belum ada berkas dipilih.</div>
+            </div>
+            <div class="form-error">Surat Keterangan Aktif Sekolah wajib diunggah.</div>
           </div>
-        </div>
 
-        <div class="field">
-          <label>Anggota Tim</label>
-          <div class="anggota-list" id="anggota-list"></div>
-          <button type="button" class="btn-add" id="btn-tambah-anggota">+ Tambah anggota</button>
-          <div class="hint" id="anggota-hint"></div>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <span class="form-step">Langkah 3</span>
-        <legend>Unggah Berkas</legend>
-
-        <div class="field">
-          <label>Surat Keterangan Aktif Sekolah</label>
-          <div class="upload-field" id="upload-surat">
-            <label class="upload-trigger" for="fileSurat">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-            <input type="file" id="fileSurat" name="fileSurat" accept=".jpg,.jpeg,.png,.pdf" />
-            <div class="filename" id="filename-surat">Belum ada berkas dipilih.</div>
+          <div class="field">
+            <label>Kartu Pelajar</label>
+            <div class="upload-field" id="upload-kartu">
+              <label class="upload-trigger" for="fileKartu">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+              <input type="file" id="fileKartu" name="fileKartu" accept=".jpg,.jpeg,.png,.pdf" />
+              <div class="filename" id="filename-kartu">Belum ada berkas dipilih.</div>
+            </div>
+            <div class="form-error">Kartu Pelajar wajib diunggah.</div>
           </div>
-          <div class="form-error">Surat Keterangan Aktif Sekolah wajib diunggah.</div>
+        </fieldset>
+
+        <fieldset>
+          <label class="checkbox-field">
+            <input type="checkbox" id="konfirmasi" name="konfirmasi" required />
+            <span>Saya menyatakan data yang diisi sudah benar dan berkas yang diunggah sesuai identitas peserta.</span>
+          </label>
+          <div class="form-error" id="konfirmasi-error">Centang pernyataan ini sebelum mengirim.</div>
+        </fieldset>
+
+        <div class="submit-row">
+          <button type="submit" class="btn btn--primary" id="btn-submit">Kirim Pendaftaran</button>
         </div>
-
-        <div class="field">
-          <label>Kartu Pelajar</label>
-          <div class="upload-field" id="upload-kartu">
-            <label class="upload-trigger" for="fileKartu">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-            <input type="file" id="fileKartu" name="fileKartu" accept=".jpg,.jpeg,.png,.pdf" />
-            <div class="filename" id="filename-kartu">Belum ada berkas dipilih.</div>
-          </div>
-          <div class="form-error">Kartu Pelajar wajib diunggah.</div>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <label class="checkbox-field">
-          <input type="checkbox" id="konfirmasi" name="konfirmasi" required />
-          <span>Saya menyatakan data yang diisi sudah benar dan berkas yang diunggah sesuai identitas peserta.</span>
-        </label>
-        <div class="form-error" id="konfirmasi-error">Centang pernyataan ini sebelum mengirim.</div>
-      </fieldset>
-
-      <div class="submit-row">
-        <button type="submit" class="btn btn--primary" id="btn-submit">Kirim Pendaftaran</button>
       </div>
     </form>
 
@@ -137,7 +152,7 @@ const DAFTAR_TEMPLATE = `
       <h2>Pendaftaran berhasil dikirim</h2>
       <p>Simpan nomor pendaftaran berikut sebagai bukti:</p>
       <div class="reg-number" id="reg-number">—</div>
-      <p>Panitia akan menghubungi melalui WhatsApp untuk info teknis lomba.</p>
+      <p id="hasil-catatan">Panitia akan menghubungi melalui WhatsApp untuk info teknis lomba.</p>
       <button type="button" class="btn btn--ghost" id="btn-daftar-lagi">Daftar Peserta Lain</button>
     </div>
 
@@ -150,8 +165,10 @@ function initDaftar() {
   const jenjangSelect = document.getElementById("jenjang");
   const tanggalLahirInput = document.getElementById("tanggalLahir");
   const lomboaChoicesEl = document.getElementById("lomba-choices");
-  const lombaHint = document.getElementById("lomba-hint");
   const lombaErrorEl = document.getElementById("lomba-error");
+  const fieldsetDataDiri = document.getElementById("fieldset-data-diri");
+  const usiaNotice = document.getElementById("usia-notice");
+  const bagianLanjutan = document.getElementById("bagian-lanjutan");
 
   const fieldsetTim = document.getElementById("fieldset-tim");
   const anggotaListEl = document.getElementById("anggota-list");
@@ -160,6 +177,7 @@ function initDaftar() {
 
   const resultPanel = document.getElementById("result-panel");
   const regNumberEl = document.getElementById("reg-number");
+  const hasilCatatan = document.getElementById("hasil-catatan");
   const btnSubmit = document.getElementById("btn-submit");
   const btnDaftarLagi = document.getElementById("btn-daftar-lagi");
 
@@ -167,6 +185,7 @@ function initDaftar() {
   let jumlahMap = {};        // { lombaId: jumlahTerisi } dari lomba_counter
   let selectedLomba = null;
   let anggotaCount = 0;
+  let bolehLanjut = false;   // hasil terakhir evaluasiKelayakan()
 
   btnDaftarLagi.addEventListener("click", function () {
     window.gotoRoute("#/daftar");
@@ -174,15 +193,13 @@ function initDaftar() {
 
   /* ---------------- Muat data lomba dari Supabase ---------------- */
   async function muatDataLomba() {
-    lombaHint.textContent = "Memuat data lomba...";
-
     const [{ data: rules, error: errRules }, { data: counters }] = await Promise.all([
       supabaseClient.from("lomba_rules").select("*").eq("aktif", true).order("urutan"),
       supabaseClient.from("lomba_counter").select("*")
     ]);
 
     if (errRules || !rules) {
-      lombaHint.textContent = "Gagal memuat data lomba. Muat ulang halaman ini.";
+      lomboaChoicesEl.innerHTML = "<p>Gagal memuat data lomba. Muat ulang halaman ini.</p>";
       console.error(errRules);
       return;
     }
@@ -198,7 +215,9 @@ function initDaftar() {
         tipe: r.tipe,
         minAnggota: r.min_anggota,
         maxAnggota: r.max_anggota,
-        kuota: r.kuota
+        kuota: r.kuota,
+        tanggalPelaksanaan: r.tanggal_pelaksanaan,
+        toleransiTahun: r.toleransi_tahun || 0
       };
     });
     (counters || []).forEach(function (c) { jumlahMap[c.lomba_id] = c.jumlah; });
@@ -214,16 +233,17 @@ function initDaftar() {
     jenjangSelect.appendChild(opt);
   });
 
-  /* ---------------- Hitung usia ---------------- */
-  function hitungUsia(tanggalStr) {
-    if (!tanggalStr) return null;
-    const lahir = new Date(tanggalStr);
+  /* ---------------- Hitung usia pada tanggal acuan tertentu ---------------- */
+  function hitungUsiaPada(tanggalLahirStr, tanggalAcuanStr) {
+    if (!tanggalLahirStr) return null;
+    const lahir = new Date(tanggalLahirStr);
     if (isNaN(lahir.getTime())) return null;
-    const sekarang = new Date();
-    let usia = sekarang.getFullYear() - lahir.getFullYear();
+    const acuan = tanggalAcuanStr ? new Date(tanggalAcuanStr) : new Date();
+    if (isNaN(acuan.getTime())) return null;
+    let usia = acuan.getFullYear() - lahir.getFullYear();
     const belumUlangTahun =
-      sekarang.getMonth() < lahir.getMonth() ||
-      (sekarang.getMonth() === lahir.getMonth() && sekarang.getDate() < lahir.getDate());
+      acuan.getMonth() < lahir.getMonth() ||
+      (acuan.getMonth() === lahir.getMonth() && acuan.getDate() < lahir.getDate());
     if (belumUlangTahun) usia--;
     return usia;
   }
@@ -233,7 +253,7 @@ function initDaftar() {
     return (jumlahMap[lomba.id] || 0) >= lomba.kuota;
   }
 
-  /* ---------------- Render pilihan lomba ---------------- */
+  /* ---------------- Render pilihan lomba (Langkah 1) ---------------- */
   function renderLombaChoices() {
     lomboaChoicesEl.innerHTML = LOMBA_LIST.map(function (lomba) {
       return (
@@ -251,76 +271,105 @@ function initDaftar() {
       );
     }).join("");
 
+    LOMBA_LIST.forEach(function (lomba) {
+      const wrap = lomboaChoicesEl.querySelector('.lomba-choice[data-id="' + lomba.id + '"]');
+      const input = wrap.querySelector('input[type="radio"]');
+      const note = wrap.querySelector(".lomba-choice__note");
+      if (kuotaPenuh(lomba)) {
+        wrap.classList.add("is-disabled");
+        input.disabled = true;
+        note.textContent = "Kuota penuh";
+      }
+    });
+
     lomboaChoicesEl.querySelectorAll('input[name="lombaId"]').forEach(function (input) {
       input.addEventListener("change", onLombaChange);
     });
-
-    updateLombaEligibility();
   }
 
-  function updateLombaEligibility() {
-    const jenjang = jenjangSelect.value;
-    const usia = hitungUsia(tanggalLahirInput.value);
-    const siapDicek = jenjang && usia !== null;
-
-    lombaHint.textContent = "Isi jenjang dan tanggal lahir di atas dulu — cabang yang sesuai akan aktif di sini.";
-    lombaHint.style.display = siapDicek ? "none" : "block";
-
-    LOMBA_LIST.forEach(function (lomba) {
-      const wrap = lomboaChoicesEl.querySelector('.lomba-choice[data-id="' + lomba.id + '"]');
-      if (!wrap) return;
-      const input = wrap.querySelector('input[type="radio"]');
-      const note = wrap.querySelector(".lomba-choice__note");
-      const penuh = kuotaPenuh(lomba);
-
-      if (!siapDicek) {
-        wrap.classList.add("is-disabled");
-        input.disabled = true;
-        note.textContent = "";
-        return;
-      }
-
-      const jenjangCocok = lomba.jenjang.indexOf(jenjang) !== -1;
-      const usiaCocok = usia >= lomba.usiaMin && usia <= lomba.usiaMax;
-      const eligible = jenjangCocok && usiaCocok && !penuh;
-
-      wrap.classList.toggle("is-disabled", !eligible);
-      input.disabled = !eligible;
-
-      if (eligible) {
-        note.textContent = "";
-      } else if (penuh) {
-        note.textContent = "Kuota penuh";
-      } else if (!jenjangCocok) {
-        note.textContent = "Khusus " + lomba.jenjang.join("/");
-      } else {
-        note.textContent = "Usia " + lomba.usiaMin + "–" + lomba.usiaMax + " th";
-      }
-
-      if (!eligible && input.checked) {
-        input.checked = false;
-        onLombaChange();
-      }
-    });
-  }
-
-  jenjangSelect.addEventListener("change", updateLombaEligibility);
-  tanggalLahirInput.addEventListener("change", updateLombaEligibility);
-
-  /* ---------------- Pilih lomba -> tampilkan field tim jika perlu ---------------- */
+  /* ---------------- Pilih lomba -> tampilkan Data Diri (Langkah 2) ---------------- */
   function onLombaChange() {
     const checked = lomboaChoicesEl.querySelector('input[name="lombaId"]:checked');
     selectedLomba = checked ? LOMBA_LIST.find(function (l) { return l.id === checked.value; }) : null;
 
-    if (selectedLomba && selectedLomba.tipe === "tim") {
-      fieldsetTim.style.display = "block";
+    if (!selectedLomba) {
+      fieldsetDataDiri.style.display = "none";
+      evaluasiKelayakan();
+      return;
+    }
+
+    fieldsetDataDiri.style.display = "block";
+
+    if (selectedLomba.tipe === "tim") {
       resetAnggota(selectedLomba.minAnggota);
     } else {
-      fieldsetTim.style.display = "none";
       anggotaListEl.innerHTML = "";
       anggotaCount = 0;
     }
+
+    evaluasiKelayakan();
   }
+
+  /* ---------------- Cek kecocokan jenjang & usia ---------------- */
+  function terapkanLanjutan(visible) {
+    bolehLanjut = visible;
+    bagianLanjutan.style.display = visible ? "block" : "none";
+    fieldsetTim.style.display = (visible && selectedLomba && selectedLomba.tipe === "tim") ? "block" : "none";
+  }
+
+  function tampilkanNotice(jenis, teks) {
+    usiaNotice.className = "notice notice--" + jenis;
+    usiaNotice.textContent = teks;
+    usiaNotice.style.display = "block";
+  }
+
+  function evaluasiKelayakan() {
+    if (!selectedLomba) {
+      usiaNotice.style.display = "none";
+      terapkanLanjutan(false);
+      return;
+    }
+
+    const jenjang = jenjangSelect.value;
+    const tgl = tanggalLahirInput.value;
+
+    if (!jenjang || !tgl) {
+      usiaNotice.style.display = "none";
+      terapkanLanjutan(false);
+      return;
+    }
+
+    if (selectedLomba.jenjang.indexOf(jenjang) === -1) {
+      tampilkanNotice("error", "Jenjang " + jenjang + " tidak termasuk syarat lomba ini (" + selectedLomba.jenjang.join("/") + "). Silakan pilih cabang lomba lain.");
+      terapkanLanjutan(false);
+      return;
+    }
+
+    const usia = hitungUsiaPada(tgl, selectedLomba.tanggalPelaksanaan);
+    const toleransi = selectedLomba.toleransiTahun || 0;
+    const batasBawah = selectedLomba.usiaMin - toleransi;
+    const batasAtas = selectedLomba.usiaMax + toleransi;
+    const keteranganAcuan = selectedLomba.tanggalPelaksanaan ? " pada tanggal pelaksanaan lomba" : "";
+
+    if (usia >= selectedLomba.usiaMin && usia <= selectedLomba.usiaMax) {
+      usiaNotice.style.display = "none";
+      terapkanLanjutan(true);
+    } else if (usia >= batasBawah && usia <= batasAtas) {
+      tampilkanNotice("warning",
+        "Usia peserta (" + usia + " tahun" + keteranganAcuan + ") sedikit di luar ketentuan (" +
+        selectedLomba.usiaMin + "–" + selectedLomba.usiaMax + " tahun). Pendaftaran tetap bisa dilanjutkan, " +
+        "tapi akan diverifikasi manual oleh panitia sebelum diterima.");
+      terapkanLanjutan(true);
+    } else {
+      tampilkanNotice("error",
+        "Mohon maaf, usia peserta (" + usia + " tahun" + keteranganAcuan + ") di luar syarat lomba ini (" +
+        selectedLomba.usiaMin + "–" + selectedLomba.usiaMax + " tahun). Silakan pilih cabang lomba lain yang sesuai.");
+      terapkanLanjutan(false);
+    }
+  }
+
+  jenjangSelect.addEventListener("change", evaluasiKelayakan);
+  tanggalLahirInput.addEventListener("change", evaluasiKelayakan);
 
   /* ---------------- Anggota tim (dinamis) ---------------- */
   function buatBarisAnggota(index) {
@@ -426,6 +475,10 @@ function initDaftar() {
   function validateForm() {
     let valid = true;
 
+    const lombaChecked = lomboaChoicesEl.querySelector('input[name="lombaId"]:checked');
+    lombaErrorEl.style.display = lombaChecked ? "none" : "block";
+    if (!lombaChecked) valid = false;
+
     ["namaLengkap", "jenjang", "kelas", "tanggalLahir", "whatsapp", "asalSekolah"].forEach(function (id) {
       const input = document.getElementById(id);
       const fieldEl = input.closest(".field");
@@ -434,9 +487,7 @@ function initDaftar() {
       if (!ok) valid = false;
     });
 
-    const lombaChecked = lomboaChoicesEl.querySelector('input[name="lombaId"]:checked');
-    lombaErrorEl.style.display = lombaChecked ? "none" : "block";
-    if (!lombaChecked) valid = false;
+    if (!bolehLanjut) valid = false;
 
     if (selectedLomba && selectedLomba.tipe === "tim") {
       ["namaTim", "pembina"].forEach(function (id) {
@@ -519,7 +570,6 @@ function initDaftar() {
           p_jenjang: document.getElementById("jenjang").value,
           p_kelas: document.getElementById("kelas").value.trim(),
           p_tanggal_lahir: document.getElementById("tanggalLahir").value,
-          p_usia: hitungUsia(document.getElementById("tanggalLahir").value),
           p_asal_sekolah: document.getElementById("asalSekolah").value.trim(),
           p_whatsapp: document.getElementById("whatsapp").value.trim(),
           p_email: document.getElementById("email").value.trim(),
@@ -536,6 +586,11 @@ function initDaftar() {
         if (data.success) {
           form.style.display = "none";
           regNumberEl.textContent = data.nomor_pendaftaran || "-";
+          if (data.status === "Perlu Verifikasi Usia") {
+            hasilCatatan.textContent = "Usia peserta sedikit di luar ketentuan, jadi pendaftaran ini akan diverifikasi manual oleh panitia sebelum dipastikan diterima. Panitia akan menghubungi lewat WhatsApp.";
+          } else {
+            hasilCatatan.textContent = "Panitia akan menghubungi melalui WhatsApp untuk info teknis lomba.";
+          }
           resultPanel.classList.add("is-visible");
           resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
