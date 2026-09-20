@@ -85,8 +85,10 @@ async function initBeranda() {
         '<div class="lomba-card__stub">' +
           '<div class="stub-row"><span>Jenjang</span><strong>' + lomba.jenjang.join(" · ") + '</strong></div>' +
           '<div class="stub-row"><span>Usia</span><strong>' + lomba.usia_min + '–' + lomba.usia_max + ' tahun</strong></div>' +
+          '<div class="stub-row"><span>Gender</span><strong>' + (lomba.gender_diizinkan === "semua" ? "Putra & Putri" : (lomba.gender_diizinkan === "laki-laki" ? "Khusus Putra" : "Khusus Putri")) + '</strong></div>' +
           '<div class="stub-row"><span>Tipe</span><strong>' + tipeLabel + '</strong></div>' +
           '<div class="stub-row"><span>Kuota</span><strong>' + kuotaLabel + '</strong></div>' +
+          '<div class="stub-row"><span>Maks/Sekolah</span><strong>' + (lomba.maks_utusan_per_lembaga || 2) + ' peserta</strong></div>' +
         '</div>' +
       '</article>'
     );
