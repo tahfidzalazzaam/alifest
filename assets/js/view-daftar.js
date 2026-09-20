@@ -23,6 +23,11 @@ const DAFTAR_TEMPLATE = `
 
     <form id="form-daftar" novalidate>
 
+      <div class="admin-tabs" id="mode-toggle" style="margin-bottom:24px;">
+        <button type="button" class="admin-tab is-active" data-mode="individu">Peserta Individu</button>
+        <button type="button" class="admin-tab" data-mode="lembaga">Perwakilan Lembaga/Sekolah</button>
+      </div>
+
       <fieldset>
         <span class="form-step">Langkah 1</span>
         <legend>Pilih Cabang Lomba</legend>
@@ -55,6 +60,19 @@ const DAFTAR_TEMPLATE = `
           </div>
         </div>
 
+        <div class="field">
+          <label>Jenis Kelamin</label>
+          <div>
+            <label style="font-weight:400;display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
+              <input type="radio" name="jenisKelamin" value="laki-laki" required /> Laki-laki
+            </label>
+            <label style="font-weight:400;display:inline-flex;align-items:center;gap:6px;">
+              <input type="radio" name="jenisKelamin" value="perempuan" /> Perempuan
+            </label>
+          </div>
+          <div class="form-error" id="jenis-kelamin-error">Pilih jenis kelamin peserta.</div>
+        </div>
+
         <div class="field-row">
           <div class="field">
             <label for="tanggalLahir">Tanggal Lahir</label>
@@ -72,6 +90,12 @@ const DAFTAR_TEMPLATE = `
           <label for="asalSekolah">Asal Sekolah</label>
           <input type="text" id="asalSekolah" name="asalSekolah" required />
           <div class="form-error">Asal sekolah wajib diisi.</div>
+        </div>
+
+        <div class="field" id="field-penanggung-jawab" style="display:none;">
+          <label for="penanggungJawab">Nama Penanggung Jawab / Koordinator</label>
+          <input type="text" id="penanggungJawab" name="penanggungJawab" placeholder="Nama guru/koordinator yang mendaftarkan" />
+          <div class="form-error">Nama penanggung jawab wajib diisi untuk pendaftaran perwakilan lembaga.</div>
         </div>
 
         <div class="field">
@@ -181,6 +205,8 @@ function initDaftar() {
   const fieldsetDataDiri = document.getElementById("fieldset-data-diri");
   const usiaNotice = document.getElementById("usia-notice");
   const bagianLanjutan = document.getElementById("bagian-lanjutan");
+  const modeToggle = document.getElementById("mode-toggle");
+  const fieldPenanggungJawab = document.getElementById("field-penanggung-jawab");
 
   const fieldsetTim = document.getElementById("fieldset-tim");
   const anggotaListEl = document.getElementById("anggota-list");
@@ -198,9 +224,52 @@ function initDaftar() {
   let selectedLomba = null;
   let anggotaCount = 0;
   let bolehLanjut = false;   // hasil terakhir evaluasiKelayakan()
+  let tipePendaftar = "individu"; // "individu" | "lembaga"
+
+  /* ---------------- Mode: Individu / Perwakilan Lembaga ---------------- */
+  modeToggle.querySelectorAll(".admin-tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      modeToggle.querySelectorAll(".admin-tab").forEach(function (t) { t.classList.remove("is-active"); });
+      tab.classList.add("is-active");
+      tipePendaftar = tab.getAttribute("data-mode");
+      fieldPenanggungJawab.style.display = tipePendaftar === "lembaga" ? "block" : "none";
+    });
+  });
 
   btnDaftarLagi.addEventListener("click", function () {
-    window.gotoRoute("#/daftar");
+    const preserveLembaga = tipePendaftar === "lembaga";
+    const asalSekolahVal = document.getElementById("asalSekolah").value;
+    const penanggungJawabVal = document.getElementById("penanggungJawab").value;
+    const whatsappVal = document.getElementById("whatsapp").value;
+
+    form.reset();
+    form.style.display = "block";
+    resultPanel.classList.remove("is-visible");
+    form.querySelectorAll(".has-error").forEach(function (el) { el.classList.remove("has-error"); });
+
+    ["surat", "kartu", "ig"].forEach(function (key) {
+      document.getElementById("upload-" + key).classList.remove("has-file");
+      document.getElementById("filename-" + key).textContent = "Belum ada berkas dipilih.";
+    });
+
+    fieldsetDataDiri.style.display = "none";
+    usiaNotice.style.display = "none";
+    selectedLomba = null;
+    anggotaListEl.innerHTML = "";
+    anggotaCount = 0;
+    terapkanLanjutan(false);
+    renderLombaChoices(); // segarkan status kuota tiap lomba
+
+    if (preserveLembaga) {
+      document.getElementById("asalSekolah").value = asalSekolahVal;
+      document.getElementById("penanggungJawab").value = penanggungJawabVal;
+      document.getElementById("whatsapp").value = whatsappVal;
+      fieldPenanggungJawab.style.display = "block";
+    }
+
+    btnSubmit.disabled = false;
+    btnSubmit.textContent = "Kirim Pendaftaran";
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
   /* ---------------- Link unduh Petunjuk Teknis (kalau sudah diupload admin) ---------------- */
@@ -239,7 +308,9 @@ function initDaftar() {
         maxAnggota: r.max_anggota,
         kuota: r.kuota,
         tanggalPelaksanaan: r.tanggal_pelaksanaan,
-        toleransiTahun: r.toleransi_tahun || 0
+        toleransiTahun: r.toleransi_tahun || 0,
+        genderDiizinkan: r.gender_diizinkan || "semua",
+        maksUtusanPerLembaga: r.maks_utusan_per_lembaga || 2
       };
     });
     (counters || []).forEach(function (c) { jumlahMap[c.lomba_id] = c.jumlah; });
@@ -278,6 +349,7 @@ function initDaftar() {
   /* ---------------- Render pilihan lomba (Langkah 1) ---------------- */
   function renderLombaChoices() {
     lomboaChoicesEl.innerHTML = LOMBA_LIST.map(function (lomba) {
+      const genderLabel = lomba.genderDiizinkan !== "semua" ? (" · Khusus " + lomba.genderDiizinkan) : "";
       return (
         '<div class="lomba-choice" data-id="' + lomba.id + '">' +
           '<label>' +
@@ -285,7 +357,8 @@ function initDaftar() {
             '<span class="lomba-choice__icon">' + lomba.ikon + '</span>' +
             '<span class="lomba-choice__text">' +
               '<strong>' + lomba.nama + '</strong>' +
-              '<span>' + lomba.jenjang.join("/") + ' · ' + lomba.usiaMin + '-' + lomba.usiaMax + ' th</span>' +
+              '<span>' + lomba.jenjang.join("/") + ' · ' + lomba.usiaMin + '-' + lomba.usiaMax + ' th' + genderLabel +
+                ' · Maks ' + lomba.maksUtusanPerLembaga + ' peserta/sekolah</span>' +
             '</span>' +
             '<span class="lomba-choice__note"></span>' +
           '</label>' +
@@ -354,8 +427,10 @@ function initDaftar() {
 
     const jenjang = jenjangSelect.value;
     const tgl = tanggalLahirInput.value;
+    const genderChecked = document.querySelector('input[name="jenisKelamin"]:checked');
+    const gender = genderChecked ? genderChecked.value : "";
 
-    if (!jenjang || !tgl) {
+    if (!jenjang || !tgl || !gender) {
       usiaNotice.style.display = "none";
       terapkanLanjutan(false);
       return;
@@ -363,6 +438,12 @@ function initDaftar() {
 
     if (selectedLomba.jenjang.indexOf(jenjang) === -1) {
       tampilkanNotice("error", "Jenjang " + jenjang + " tidak termasuk syarat lomba ini (" + selectedLomba.jenjang.join("/") + "). Silakan pilih cabang lomba lain.");
+      terapkanLanjutan(false);
+      return;
+    }
+
+    if (selectedLomba.genderDiizinkan !== "semua" && gender !== selectedLomba.genderDiizinkan) {
+      tampilkanNotice("error", "Lomba ini khusus peserta " + selectedLomba.genderDiizinkan + ". Silakan pilih cabang lomba lain.");
       terapkanLanjutan(false);
       return;
     }
@@ -392,6 +473,9 @@ function initDaftar() {
 
   jenjangSelect.addEventListener("change", evaluasiKelayakan);
   tanggalLahirInput.addEventListener("change", evaluasiKelayakan);
+  document.querySelectorAll('input[name="jenisKelamin"]').forEach(function (radio) {
+    radio.addEventListener("change", evaluasiKelayakan);
+  });
 
   /* ---------------- Anggota tim (dinamis) ---------------- */
   function buatBarisAnggota(index) {
@@ -510,6 +594,17 @@ function initDaftar() {
       if (!ok) valid = false;
     });
 
+    const genderOk = !!document.querySelector('input[name="jenisKelamin"]:checked');
+    document.getElementById("jenis-kelamin-error").style.display = genderOk ? "none" : "block";
+    if (!genderOk) valid = false;
+
+    if (tipePendaftar === "lembaga") {
+      const penanggungJawabInput = document.getElementById("penanggungJawab");
+      const pjOk = penanggungJawabInput.value.trim() !== "";
+      setFieldError(penanggungJawabInput.closest(".field"), !pjOk);
+      if (!pjOk) valid = false;
+    }
+
     if (!bolehLanjut) valid = false;
 
     if (selectedLomba && selectedLomba.tipe === "tim") {
@@ -595,11 +690,16 @@ function initDaftar() {
             })
           : [];
 
+        const genderChecked = document.querySelector('input[name="jenisKelamin"]:checked');
+
         return supabaseClient.rpc("submit_pendaftaran", {
           p_lomba_id: selectedLomba.id,
+          p_tipe_pendaftar: tipePendaftar,
+          p_penanggung_jawab: tipePendaftar === "lembaga" ? document.getElementById("penanggungJawab").value.trim() : null,
           p_nama_lengkap: document.getElementById("namaLengkap").value.trim(),
           p_jenjang: document.getElementById("jenjang").value,
           p_kelas: document.getElementById("kelas").value.trim(),
+          p_jenis_kelamin: genderChecked ? genderChecked.value : null,
           p_tanggal_lahir: document.getElementById("tanggalLahir").value,
           p_asal_sekolah: document.getElementById("asalSekolah").value.trim(),
           p_whatsapp: document.getElementById("whatsapp").value.trim(),
