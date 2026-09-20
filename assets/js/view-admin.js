@@ -84,6 +84,7 @@ function renderDashboard(root, session) {
       '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
       '<button type="button" class="admin-tab" data-tab="lomba">Kelola Lomba</button>' +
       '<button type="button" class="admin-tab" data-tab="logo">Logo Situs</button>' +
+      '<button type="button" class="admin-tab" data-tab="juknis">Petunjuk Teknis</button>' +
     '</div>' +
     '<div id="admin-content"></div>';
 
@@ -101,6 +102,7 @@ function renderDashboard(root, session) {
       if (nama === "pendaftar") loadTabPendaftar();
       if (nama === "lomba") loadTabLomba();
       if (nama === "logo") loadTabLogo();
+      if (nama === "juknis") loadTabJuknis();
     });
   });
 
@@ -178,7 +180,8 @@ async function loadTabPendaftar() {
           '<td>' + r.jenjang + ' / ' + r.kelas + '</td>' +
           '<td>' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
-          '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a></td>' +
+          '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
+            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>') + '</td>' +
           '<td><select class="status-select" data-id="' + r.id + '">' +
             ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
@@ -520,6 +523,99 @@ async function loadTabLogo() {
       }
       if (typeof window.terapkanLogo === "function") window.terapkanLogo(null);
       loadTabLogo();
+    });
+  }
+}
+
+/* ==================== TAB 4: PETUNJUK TEKNIS (PDF) ==================== */
+
+async function loadTabJuknis() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat data juknis...</p>';
+
+  const { data } = await supabaseClient.from("site_settings").select("juknis_url,juknis_nama").eq("id", 1).single();
+  const juknisUrl = data ? data.juknis_url : null;
+  const juknisNama = data ? data.juknis_nama : null;
+
+  content.innerHTML =
+    '<div class="form-shell" style="max-width:480px;">' +
+      '<h3>Petunjuk Teknis (Juknis)</h3>' +
+      '<p>Format PDF saja. File ini akan muncul sebagai tombol unduh di Beranda dan halaman Daftar Lomba.</p>' +
+      '<div id="juknis-preview" style="margin:16px 0;">' +
+        (juknisUrl
+          ? '<a href="' + juknisUrl + '" target="_blank" rel="noopener">📄 ' + (juknisNama || "Lihat juknis saat ini") + '</a>'
+          : '<p class="hint">Belum ada juknis diunggah — tombol unduh belum tampil di situs.</p>') +
+      '</div>' +
+      '<div class="field">' +
+        '<label for="input-juknis">Pilih file PDF</label>' +
+        '<input type="file" id="input-juknis" accept=".pdf,application/pdf" />' +
+      '</div>' +
+      '<div class="form-error" id="juknis-error" style="display:none;"></div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-upload-juknis">Upload Juknis</button>' +
+        (juknisUrl ? '<button type="button" class="btn btn--ghost" id="btn-hapus-juknis">Hapus Juknis</button>' : "") +
+      '</div>' +
+    '</div>';
+
+  document.getElementById("btn-upload-juknis").addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-juknis");
+    const errEl = document.getElementById("juknis-error");
+    errEl.style.display = "none";
+
+    const file = fileInput.files[0];
+    if (!file) {
+      errEl.textContent = "Pilih file PDF dulu.";
+      errEl.style.display = "block";
+      return;
+    }
+    if (file.type !== "application/pdf") {
+      errEl.textContent = "File harus berformat PDF.";
+      errEl.style.display = "block";
+      return;
+    }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+
+    const path = "juknis/juknis-" + Date.now() + ".pdf";
+    const { error: uploadError } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "application/pdf" });
+
+    if (uploadError) {
+      btn.disabled = false;
+      btn.textContent = "Upload Juknis";
+      errEl.textContent = "Gagal mengunggah: " + uploadError.message;
+      errEl.style.display = "block";
+      return;
+    }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    const { error: updateError } = await supabaseClient.from("site_settings")
+      .update({ juknis_url: pub.publicUrl, juknis_nama: file.name })
+      .eq("id", 1);
+
+    btn.disabled = false;
+    btn.textContent = "Upload Juknis";
+
+    if (updateError) {
+      errEl.textContent = "Berkas terunggah tapi gagal menyimpan pengaturan: " + updateError.message;
+      errEl.style.display = "block";
+      return;
+    }
+
+    loadTabJuknis();
+  });
+
+  const btnHapus = document.getElementById("btn-hapus-juknis");
+  if (btnHapus) {
+    btnHapus.addEventListener("click", async function () {
+      if (!confirm("Hapus juknis? Tombol unduh akan hilang dari situs sampai diupload lagi.")) return;
+      const { error } = await supabaseClient.from("site_settings").update({ juknis_url: null, juknis_nama: null }).eq("id", 1);
+      if (error) {
+        alert("Gagal: " + error.message);
+        return;
+      }
+      loadTabJuknis();
     });
   }
 }
