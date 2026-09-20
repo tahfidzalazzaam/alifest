@@ -111,6 +111,34 @@ function renderDashboard(root, session) {
 
 /* ==================== TAB 1: DATA PENDAFTAR ==================== */
 
+/* ==================== Helper: hapus berkas & mundurkan nomor urut ==================== */
+
+// Ambil path relatif (di dalam bucket) dari URL publik Supabase Storage,
+// supaya bisa dipakai untuk storage.remove().
+function ekstrakPathBerkas(url) {
+  const penanda = "/object/public/berkas-pendaftaran/";
+  const idx = url.indexOf(penanda);
+  if (idx === -1) return null;
+  return decodeURIComponent(url.substring(idx + penanda.length));
+}
+
+// Nomor pendaftaran (mis. "MHQ-005") hanya dimundurkan kalau yang dihapus
+// adalah nomor TERAKHIR untuk lomba itu — supaya tidak pernah membuat dua
+// pendaftaran punya nomor yang sama. Kalau yang dihapus bukan nomor
+// terakhir, urutan dibiarkan bolong (aman, tidak ada risiko tabrakan nomor).
+// Efeknya: hapus semua data uji coba satu per satu (urutan bebas) akan
+// otomatis mengembalikan hitungan ke 0.
+async function mundurkanNomorJikaTerakhir(lombaId, nomorPendaftaran) {
+  const bagian = nomorPendaftaran.split("-");
+  const angka = parseInt(bagian[bagian.length - 1], 10);
+  if (isNaN(angka)) return;
+
+  const { data: counterRow } = await supabaseClient.from("lomba_counter").select("jumlah").eq("lomba_id", lombaId).single();
+  if (!counterRow || counterRow.jumlah !== angka) return;
+
+  await supabaseClient.from("lomba_counter").update({ jumlah: angka - 1 }).eq("lomba_id", lombaId);
+}
+
 async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
@@ -213,13 +241,34 @@ async function loadTabPendaftar() {
         const id = btn.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
         const label = row ? (row.nama_lengkap + " (" + row.nomor_pendaftaran + ")") : "";
-        if (!confirm('Hapus pendaftaran "' + label + '"? Tindakan ini tidak bisa dibatalkan.')) return;
+        if (!confirm('Hapus pendaftaran "' + label + '"? Berkas yang sudah diunggah (Surat, Kartu, Screenshot IG) juga akan ikut terhapus permanen. Tindakan ini tidak bisa dibatalkan.')) return;
+
+        btn.disabled = true;
+        btn.textContent = "Menghapus...";
+
+        if (row) {
+          const pathBerkas = [row.url_surat_aktif, row.url_kartu_pelajar, row.url_bukti_follow_ig]
+            .filter(Boolean)
+            .map(ekstrakPathBerkas)
+            .filter(Boolean);
+          if (pathBerkas.length > 0) {
+            const { error: errHapusBerkas } = await supabaseClient.storage.from("berkas-pendaftaran").remove(pathBerkas);
+            if (errHapusBerkas) console.error("Sebagian/semua berkas gagal dihapus:", errHapusBerkas);
+            // tetap lanjut hapus datanya walau ada berkas yang gagal terhapus,
+            // supaya panitia tidak buntu hanya karena satu file bermasalah.
+          }
+        }
 
         const { error } = await supabaseClient.from("pendaftaran").delete().eq("id", id);
         if (error) {
           alert("Gagal menghapus: " + error.message);
+          btn.disabled = false;
+          btn.textContent = "Hapus";
           return;
         }
+
+        if (row) await mundurkanNomorJikaTerakhir(row.lomba_id, row.nomor_pendaftaran);
+
         rows = rows.filter(function (r) { return r.id !== id; });
         renderBaris();
       });
