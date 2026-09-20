@@ -569,7 +569,12 @@ function initDaftar() {
       contentType: file.type,
       upsert: false
     });
-    if (error) throw new Error("Gagal mengunggah " + label + ": " + error.message);
+    if (error) {
+      console.error("Detail error upload (" + label + "):", error);
+      let detail = "";
+      try { detail = " | detail: " + JSON.stringify(error); } catch (e) { detail = ""; }
+      throw new Error("Gagal mengunggah " + label + ": " + error.message + detail);
+    }
     const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
     return data.publicUrl;
   }
