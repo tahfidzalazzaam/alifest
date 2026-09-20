@@ -135,6 +135,7 @@ async function loadTabPendaftar() {
       '<select id="filter-status">' +
         '<option value="">Semua status</option>' +
         '<option value="Menunggu Verifikasi">Menunggu Verifikasi</option>' +
+        '<option value="Perlu Verifikasi Usia">Perlu Verifikasi Usia</option>' +
         '<option value="Diterima">Diterima</option>' +
         '<option value="Ditolak">Ditolak</option>' +
       '</select>' +
@@ -179,7 +180,7 @@ async function loadTabPendaftar() {
           '<td>' + r.whatsapp + '</td>' +
           '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a></td>' +
           '<td><select class="status-select" data-id="' + r.id + '">' +
-            ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
+            ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
           '</select></td>' +
@@ -260,7 +261,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Kuota</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Kuota</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
@@ -276,6 +277,8 @@ async function loadTabLomba() {
           '<td>' + l.usia_min + '–' + l.usia_max + '</td>' +
           '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
           '<td>' + (l.kuota == null ? "Tanpa batas" : l.kuota) + '</td>' +
+          '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
+          '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
           '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
           '<td>' +
             '<button type="button" class="btn-link btn-edit-lomba" data-id="' + l.id + '">Edit</button> · ' +
@@ -352,6 +355,12 @@ async function loadTabLomba() {
             '<div class="field"><label>Kuota (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" /></div>' +
             '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
           '</div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Tanggal Pelaksanaan</label><input type="date" id="lm-tanggal-pelaksanaan" value="' + (existing && existing.tanggal_pelaksanaan ? existing.tanggal_pelaksanaan : "") + '" />' +
+              '<div class="hint">Acuan hitung usia peserta. Kosongkan untuk pakai tanggal hari ini.</div></div>' +
+            '<div class="field"><label>Toleransi Usia (tahun)</label><input type="number" id="lm-toleransi" min="0" value="' + (existing && existing.toleransi_tahun != null ? existing.toleransi_tahun : 0) + '" />' +
+              '<div class="hint">Selisih usia yang masih ditoleransi (masuk "Perlu Verifikasi Usia"), bukan langsung ditolak. 0 = tanpa toleransi.</div></div>' +
+          '</div>' +
           '<div class="field"><label>Deskripsi</label><textarea id="lm-deskripsi">' + (existing ? existing.deskripsi : "") + '</textarea></div>' +
           '<label class="checkbox-field"><input type="checkbox" id="lm-aktif" ' + (!existing || existing.aktif ? "checked" : "") + ' /> <span>Aktif (tampil di situs)</span></label>' +
           '<div class="form-error" id="lomba-form-error" style="display:none;"></div>' +
@@ -398,6 +407,8 @@ async function loadTabLomba() {
         max_anggota: tipe === "tim" ? parseInt(document.getElementById("lm-max-anggota").value, 10) : null,
         kuota: kuotaVal === "" ? null : parseInt(kuotaVal, 10),
         urutan: parseInt(document.getElementById("lm-urutan").value, 10) || 0,
+        tanggal_pelaksanaan: document.getElementById("lm-tanggal-pelaksanaan").value || null,
+        toleransi_tahun: parseInt(document.getElementById("lm-toleransi").value, 10) || 0,
         deskripsi: document.getElementById("lm-deskripsi").value.trim(),
         aktif: document.getElementById("lm-aktif").checked
       };
