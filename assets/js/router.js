@@ -9,7 +9,8 @@
 
 const ROUTES = {
   "#/": window.ViewBeranda,
-  "#/daftar": window.ViewDaftar
+  "#/daftar": window.ViewDaftar,
+  "#/admin": window.ViewAdmin
 };
 
 function normalisasiHash() {
@@ -43,6 +44,7 @@ function router() {
 
 window.addEventListener("hashchange", router);
 window.addEventListener("DOMContentLoaded", router);
+window.addEventListener("DOMContentLoaded", muatLogoNavbar);
 
 // Navigasi terprogram — dipakai tombol seperti "Daftar Peserta Lain".
 // Kalau hash tujuan sama dengan hash sekarang, hashchange TIDAK akan
@@ -53,5 +55,26 @@ window.gotoRoute = function (hash) {
     router();
   } else {
     window.location.hash = hash;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Logo navbar — bagian shell (index.html), bukan bagian view mana pun, jadi
+// dimuat sekali di sini, terpisah dari router(). Kalau panitia sudah upload
+// logo lewat "#/admin", tampilkan sebagai <img> apa adanya (TIDAK dipotong
+// bulat) menggantikan ikon bulan bawaan.
+// ---------------------------------------------------------------------------
+async function muatLogoNavbar() {
+  const { data } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
+  if (data && data.logo_url) window.terapkanLogo(data.logo_url);
+}
+
+window.terapkanLogo = function (url) {
+  const mark = document.getElementById("site-logo-mark");
+  if (!mark) return;
+  if (url) {
+    mark.outerHTML = '<img src="' + url + '" alt="Logo" class="navbar__brand-logo" id="site-logo-mark" />';
+  } else {
+    mark.outerHTML = '<span class="mark" id="site-logo-mark">🌙</span>';
   }
 };
