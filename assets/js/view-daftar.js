@@ -16,6 +16,7 @@ const DAFTAR_TEMPLATE = `
   <div class="form-header">
     <h1>Formulir Pendaftaran</h1>
     <p>Pilih cabang lomba dulu, baru isi data diri. Kecocokan usia dicek otomatis begitu tanggal lahir diisi.</p>
+    <div id="juknis-link-wrap"></div>
   </div>
 
   <div class="form-shell">
@@ -131,6 +132,17 @@ const DAFTAR_TEMPLATE = `
             </div>
             <div class="form-error">Kartu Pelajar wajib diunggah.</div>
           </div>
+
+          <div class="field">
+            <label>Screenshot Bukti Follow Instagram</label>
+            <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following").</p>
+            <div class="upload-field" id="upload-ig">
+              <label class="upload-trigger" for="fileIg">Pilih berkas (JPG/PNG, maks 4MB)</label>
+              <input type="file" id="fileIg" name="fileIg" accept=".jpg,.jpeg,.png,.pdf" />
+              <div class="filename" id="filename-ig">Belum ada berkas dipilih.</div>
+            </div>
+            <div class="form-error">Screenshot bukti follow Instagram wajib diunggah.</div>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -190,6 +202,16 @@ function initDaftar() {
   btnDaftarLagi.addEventListener("click", function () {
     window.gotoRoute("#/daftar");
   });
+
+  /* ---------------- Link unduh Petunjuk Teknis (kalau sudah diupload admin) ---------------- */
+  async function muatLinkJuknis() {
+    const wrap = document.getElementById("juknis-link-wrap");
+    const { data } = await supabaseClient.from("site_settings").select("juknis_url,juknis_nama").eq("id", 1).single();
+    if (data && data.juknis_url) {
+      wrap.innerHTML = '<a class="btn btn--ghost" href="' + data.juknis_url + '" target="_blank" rel="noopener" style="margin-top:14px;display:inline-flex;">📄 Unduh Petunjuk Teknis</a>';
+    }
+  }
+  muatLinkJuknis();
 
   /* ---------------- Muat data lomba dari Supabase ---------------- */
   async function muatDataLomba() {
@@ -449,6 +471,7 @@ function initDaftar() {
   }
   setupUpload("fileSurat", "upload-surat", "filename-surat");
   setupUpload("fileKartu", "upload-kartu", "filename-kartu");
+  setupUpload("fileIg", "upload-ig", "filename-ig");
 
   /* ---------------- Upload ke Supabase Storage ---------------- */
   function ekstensi(file) {
@@ -524,6 +547,12 @@ function initDaftar() {
     setFieldError(fileKartuField, !kartuOk);
     if (!kartuOk) valid = false;
 
+    const fileIg = document.getElementById("fileIg");
+    const fileIgField = fileIg.closest(".field");
+    const igOk = fileIg.files.length > 0 && fileIg.closest(".upload-field").classList.contains("has-file");
+    setFieldError(fileIgField, !igOk);
+    if (!igOk) valid = false;
+
     const konfirmasi = document.getElementById("konfirmasi");
     document.getElementById("konfirmasi-error").style.display = konfirmasi.checked ? "none" : "block";
     if (!konfirmasi.checked) valid = false;
@@ -549,10 +578,12 @@ function initDaftar() {
 
     const fileSurat = document.getElementById("fileSurat").files[0];
     const fileKartu = document.getElementById("fileKartu").files[0];
+    const fileIg = document.getElementById("fileIg").files[0];
 
     Promise.all([
       uploadKeStorage(fileSurat, "surat-aktif"),
-      uploadKeStorage(fileKartu, "kartu-pelajar")
+      uploadKeStorage(fileKartu, "kartu-pelajar"),
+      uploadKeStorage(fileIg, "bukti-follow-ig")
     ])
       .then(function (urls) {
         const anggotaTim = selectedLomba.tipe === "tim"
@@ -577,6 +608,7 @@ function initDaftar() {
           p_pembina: selectedLomba.tipe === "tim" ? document.getElementById("pembina").value.trim() : null,
           p_url_surat_aktif: urls[0],
           p_url_kartu_pelajar: urls[1],
+          p_url_bukti_follow_ig: urls[2],
           p_anggota_tim: anggotaTim
         });
       })
