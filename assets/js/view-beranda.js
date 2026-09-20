@@ -4,10 +4,11 @@ const BERANDA_TEMPLATE = `
 <section class="hero container">
   <span class="hero__eyebrow">Al Azzaam Islamic Fair</span>
   <h1>Unjuk bakat, rebut juara di <em>ALIF 5.0</em></h1>
-  <p class="lede">Lima cabang lomba untuk santri dan pelajar tingkat SD, SMP, dan SMA. Daftar online, cukup lampirkan Surat Keterangan Aktif Sekolah dan Kartu Pelajar.</p>
+  <p class="lede">Lima cabang lomba untuk santri dan pelajar tingkat SD, SMP, dan SMA. Daftar online, cukup lampirkan Surat Keterangan Aktif Sekolah, Kartu Pelajar, dan bukti follow Instagram.</p>
   <div class="hero__actions">
     <a href="#/daftar" class="btn btn--primary">Daftar Sekarang</a>
     <a href="#lomba" class="btn btn--ghost">Lihat Cabang Lomba</a>
+    <span id="juknis-btn-wrap"></span>
   </div>
   <div class="hero__stats">
     <div><strong>5</strong><span>Cabang lomba</span></div>
@@ -30,7 +31,7 @@ const BERANDA_TEMPLATE = `
   <div class="info-banner">
     <div class="info-banner__item">
       <h4>Berkas yang perlu disiapkan</h4>
-      <p>Surat Keterangan Aktif Sekolah dan Kartu Pelajar (foto/scan, JPG/PNG/PDF, maksimal 4MB per berkas).</p>
+      <p>Surat Keterangan Aktif Sekolah, Kartu Pelajar, dan screenshot bukti follow Instagram <strong>@al.azzaam.id</strong> &amp; <strong>@alifest.26</strong> (JPG/PNG/PDF, maksimal 4MB per berkas).</p>
     </div>
     <div class="info-banner__item">
       <h4>Lomba tim</h4>
@@ -45,6 +46,8 @@ const BERANDA_TEMPLATE = `
 `;
 
 async function initBeranda() {
+  muatTombolJuknis();
+
   const grid = document.getElementById("lomba-grid");
   if (!grid) return;
 
@@ -88,6 +91,15 @@ async function initBeranda() {
       '</article>'
     );
   }).join("");
+}
+
+async function muatTombolJuknis() {
+  const wrap = document.getElementById("juknis-btn-wrap");
+  if (!wrap) return;
+  const { data } = await supabaseClient.from("site_settings").select("juknis_url").eq("id", 1).single();
+  if (data && data.juknis_url) {
+    wrap.innerHTML = '<a href="' + data.juknis_url + '" target="_blank" rel="noopener" class="btn btn--ghost">📄 Unduh Juknis</a>';
+  }
 }
 
 window.ViewBeranda = { template: BERANDA_TEMPLATE, init: initBeranda };
