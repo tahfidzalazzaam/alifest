@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ALIF 5.0 — Al Azzaam Islamic Fair | Pendaftaran Lomba</title>
+<meta name="description" content="Pendaftaran lomba ALIF 5.0 (Al Azzaam Islamic Fair): Adzan, Panahan, MHQ, Kaligrafi, dan Futsal." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+<div class="bunting" aria-hidden="true">
+  <span></span><span></span><span></span><span></span><span></span>
+  <span></span><span></span><span></span><span></span><span></span>
+  <span></span><span></span><span></span><span></span><span></span>
+</div>
+
+<header class="navbar">
+  <a href="#/" class="navbar__brand">
+    <span class="mark">🌙</span> ALIF 5.0
+  </a>
+  <nav class="navbar__links">
+    <a href="#/" class="nav-link" data-route="#/">Beranda</a>
+    <a href="#/daftar" class="nav-link nav-link--cta" data-route="#/daftar">Daftar Lomba</a>
+  </nav>
+</header>
+
+<!-- Router (assets/js/router.js) mengisi konten di bawah ini sesuai hash URL,
+     tanpa reload halaman — satu file HTML, terasa seperti banyak halaman. -->
+<div id="app"></div>
+
+<footer class="footer container">
+  <p>ALIF 5.0 — Al Azzaam Islamic Fair · Diselenggarakan oleh PPTQ Al Azzaam</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabase-client.js"></script>
+<script src="assets/js/view-beranda.js"></script>
+<script src="assets/js/view-daftar.js"></script>
+<script src="assets/js/router.js"></script>
+</body>
+</html>
