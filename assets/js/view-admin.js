@@ -1,0 +1,516 @@
+// View: Panitia ("#/admin") — login khusus panitia (Supabase Auth), lalu
+// tiga tab: Data Pendaftar, Kelola Lomba, Logo Situs.
+//
+// Akun panitia TIDAK bisa didaftarkan sendiri lewat situs ini — hanya bisa
+// dibuat oleh pengelola lewat Supabase Dashboard -> Authentication -> Users.
+// Lihat README.md bagian "Setup Halaman Panitia".
+
+const ADMIN_TEMPLATE = `
+<main class="admin-page container">
+  <div id="admin-root"></div>
+</main>
+`;
+
+async function initAdmin() {
+  const root = document.getElementById("admin-root");
+  root.innerHTML = '<p class="hint">Memeriksa sesi masuk...</p>';
+
+  const { data } = await supabaseClient.auth.getSession();
+  if (data && data.session) {
+    renderDashboard(root, data.session);
+  } else {
+    renderLogin(root);
+  }
+}
+
+/* ==================== LOGIN ==================== */
+
+function renderLogin(root) {
+  root.innerHTML =
+    '<div class="form-shell admin-login">' +
+      '<h1>Masuk Panitia</h1>' +
+      '<p>Khusus tim panitia ALIF 5.0. Belum punya akun? Minta dibuatkan oleh pengelola situs.</p>' +
+      '<form id="form-login" novalidate>' +
+        '<div class="field">' +
+          '<label for="admin-email">Email</label>' +
+          '<input type="email" id="admin-email" required />' +
+        '</div>' +
+        '<div class="field">' +
+          '<label for="admin-password">Kata Sandi</label>' +
+          '<input type="password" id="admin-password" required />' +
+        '</div>' +
+        '<div class="form-error" id="login-error" style="display:none;"></div>' +
+        '<div class="submit-row">' +
+          '<button type="submit" class="btn btn--primary" id="btn-login">Masuk</button>' +
+        '</div>' +
+      '</form>' +
+    '</div>';
+
+  const form = document.getElementById("form-login");
+  const errorEl = document.getElementById("login-error");
+  const btn = document.getElementById("btn-login");
+
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    errorEl.style.display = "none";
+    btn.disabled = true;
+    btn.textContent = "Memeriksa...";
+
+    const email = document.getElementById("admin-email").value.trim();
+    const password = document.getElementById("admin-password").value;
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+
+    btn.disabled = false;
+    btn.textContent = "Masuk";
+
+    if (error) {
+      errorEl.textContent = "Gagal masuk: email atau kata sandi salah.";
+      errorEl.style.display = "block";
+      return;
+    }
+    renderDashboard(root, data.session);
+  });
+}
+
+/* ==================== DASHBOARD SHELL ==================== */
+
+function renderDashboard(root, session) {
+  root.innerHTML =
+    '<div class="admin-header">' +
+      '<div><h1>Panel Panitia</h1><p>Masuk sebagai ' + session.user.email + '</p></div>' +
+      '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
+    '</div>' +
+    '<div class="admin-tabs">' +
+      '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
+      '<button type="button" class="admin-tab" data-tab="lomba">Kelola Lomba</button>' +
+      '<button type="button" class="admin-tab" data-tab="logo">Logo Situs</button>' +
+    '</div>' +
+    '<div id="admin-content"></div>';
+
+  document.getElementById("btn-logout").addEventListener("click", async function () {
+    await supabaseClient.auth.signOut();
+    renderLogin(root);
+  });
+
+  const tabs = root.querySelectorAll(".admin-tab");
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      tabs.forEach(function (t) { t.classList.remove("is-active"); });
+      tab.classList.add("is-active");
+      const nama = tab.getAttribute("data-tab");
+      if (nama === "pendaftar") loadTabPendaftar();
+      if (nama === "lomba") loadTabLomba();
+      if (nama === "logo") loadTabLogo();
+    });
+  });
+
+  loadTabPendaftar();
+}
+
+/* ==================== TAB 1: DATA PENDAFTAR ==================== */
+
+async function loadTabPendaftar() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
+
+  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama").order("urutan");
+  const rowsRes = await supabaseClient.from("pendaftaran").select("*").order("created_at", { ascending: false });
+
+  if (rowsRes.error) {
+    content.innerHTML = "<p>Gagal memuat data pendaftar: " + rowsRes.error.message + "</p>";
+    return;
+  }
+
+  const rules = rulesRes.data || [];
+  let rows = rowsRes.data || [];
+
+  const opsiLomba = rules.map(function (r) {
+    return '<option value="' + r.id + '">' + r.nama + '</option>';
+  }).join("");
+
+  content.innerHTML =
+    '<div class="admin-filters">' +
+      '<input type="text" id="filter-cari" placeholder="Cari nama / nomor pendaftaran..." />' +
+      '<select id="filter-lomba"><option value="">Semua lomba</option>' + opsiLomba + '</select>' +
+      '<select id="filter-status">' +
+        '<option value="">Semua status</option>' +
+        '<option value="Menunggu Verifikasi">Menunggu Verifikasi</option>' +
+        '<option value="Diterima">Diterima</option>' +
+        '<option value="Ditolak">Ditolak</option>' +
+      '</select>' +
+    '</div>' +
+    '<p class="hint" id="jumlah-hint"></p>' +
+    '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
+    '</tr></thead><tbody></tbody></table></div>';
+
+  function renderBaris() {
+    const cari = document.getElementById("filter-cari").value.toLowerCase();
+    const lombaFilter = document.getElementById("filter-lomba").value;
+    const statusFilter = document.getElementById("filter-status").value;
+
+    const tampil = rows.filter(function (r) {
+      if (lombaFilter && r.lomba_id !== lombaFilter) return false;
+      if (statusFilter && r.status !== statusFilter) return false;
+      if (cari && r.nama_lengkap.toLowerCase().indexOf(cari) === -1 &&
+          r.nomor_pendaftaran.toLowerCase().indexOf(cari) === -1) return false;
+      return true;
+    });
+
+    document.getElementById("jumlah-hint").textContent = "Menampilkan " + tampil.length + " dari " + rows.length + " pendaftar.";
+
+    const tbody = document.querySelector("#tabel-pendaftar tbody");
+    if (tampil.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9">Tidak ada data yang cocok.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = tampil.map(function (r) {
+      const tombolTim = r.tipe === "tim"
+        ? ' <button type="button" class="btn-link btn-lihat-tim" data-nomor="' + r.nomor_pendaftaran + '">(lihat tim)</button>'
+        : "";
+      return (
+        '<tr>' +
+          '<td>' + r.nomor_pendaftaran + '</td>' +
+          '<td>' + r.nama_lengkap + tombolTim + '</td>' +
+          '<td>' + r.lomba_nama + '</td>' +
+          '<td>' + r.jenjang + ' / ' + r.kelas + '</td>' +
+          '<td>' + r.asal_sekolah + '</td>' +
+          '<td>' + r.whatsapp + '</td>' +
+          '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a></td>' +
+          '<td><select class="status-select" data-id="' + r.id + '">' +
+            ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
+              return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
+            }).join("") +
+          '</select></td>' +
+          '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
+        '</tr>' +
+        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="9"></td></tr>'
+      );
+    }).join("");
+
+    tbody.querySelectorAll(".status-select").forEach(function (sel) {
+      sel.addEventListener("change", async function () {
+        const id = sel.getAttribute("data-id");
+        const { error } = await supabaseClient.from("pendaftaran").update({ status: sel.value }).eq("id", id);
+        if (error) {
+          alert("Gagal mengubah status: " + error.message);
+          return;
+        }
+        const row = rows.find(function (r) { return r.id === id; });
+        if (row) row.status = sel.value;
+      });
+    });
+
+    tbody.querySelectorAll(".btn-hapus-pendaftar").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const id = btn.getAttribute("data-id");
+        const row = rows.find(function (r) { return r.id === id; });
+        const label = row ? (row.nama_lengkap + " (" + row.nomor_pendaftaran + ")") : "";
+        if (!confirm('Hapus pendaftaran "' + label + '"? Tindakan ini tidak bisa dibatalkan.')) return;
+
+        const { error } = await supabaseClient.from("pendaftaran").delete().eq("id", id);
+        if (error) {
+          alert("Gagal menghapus: " + error.message);
+          return;
+        }
+        rows = rows.filter(function (r) { return r.id !== id; });
+        renderBaris();
+      });
+    });
+
+    tbody.querySelectorAll(".btn-lihat-tim").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const nomor = btn.getAttribute("data-nomor");
+        const detailRow = tbody.querySelector('.anggota-detail[data-detail-for="' + nomor + '"]');
+        if (detailRow.style.display === "none") {
+          const { data: anggota, error } = await supabaseClient.from("anggota_tim").select("*").eq("nomor_pendaftaran", nomor);
+          if (error) {
+            detailRow.querySelector("td").textContent = "Gagal memuat anggota tim.";
+          } else {
+            detailRow.querySelector("td").textContent = "Anggota tim: " +
+              (anggota || []).map(function (a) { return a.nama + " (" + a.kelas + ")"; }).join(", ");
+          }
+          detailRow.style.display = "table-row";
+        } else {
+          detailRow.style.display = "none";
+        }
+      });
+    });
+  }
+
+  renderBaris();
+  document.getElementById("filter-cari").addEventListener("input", renderBaris);
+  document.getElementById("filter-lomba").addEventListener("change", renderBaris);
+  document.getElementById("filter-status").addEventListener("change", renderBaris);
+}
+
+/* ==================== TAB 2: KELOLA LOMBA ==================== */
+
+async function loadTabLomba() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat data lomba...</p>';
+
+  const { data, error } = await supabaseClient.from("lomba_rules").select("*").order("urutan");
+  if (error) {
+    content.innerHTML = "<p>Gagal memuat data lomba: " + error.message + "</p>";
+    return;
+  }
+  let lombaList = data || [];
+
+  content.innerHTML =
+    '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Kuota</th><th>Aktif</th><th></th>' +
+    '</tr></thead><tbody></tbody></table></div>' +
+    '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
+    '<div id="form-lomba-wrap"></div>';
+
+  function renderTabel() {
+    const tbody = document.querySelector("#tabel-lomba tbody");
+    tbody.innerHTML = lombaList.map(function (l) {
+      return (
+        '<tr>' +
+          '<td>' + l.ikon + '</td>' +
+          '<td>' + l.nama + '</td>' +
+          '<td>' + l.jenjang.join("/") + '</td>' +
+          '<td>' + l.usia_min + '–' + l.usia_max + '</td>' +
+          '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
+          '<td>' + (l.kuota == null ? "Tanpa batas" : l.kuota) + '</td>' +
+          '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
+          '<td>' +
+            '<button type="button" class="btn-link btn-edit-lomba" data-id="' + l.id + '">Edit</button> · ' +
+            '<button type="button" class="btn-link btn-hapus-lomba" data-id="' + l.id + '">Hapus</button>' +
+          '</td>' +
+        '</tr>'
+      );
+    }).join("");
+
+    tbody.querySelectorAll(".btn-edit-lomba").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const l = lombaList.find(function (x) { return x.id === btn.getAttribute("data-id"); });
+        tampilkanForm(l);
+      });
+    });
+
+    tbody.querySelectorAll(".btn-hapus-lomba").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const id = btn.getAttribute("data-id");
+        const l = lombaList.find(function (x) { return x.id === id; });
+        if (!confirm('Hapus lomba "' + (l ? l.nama : id) + '"? Kalau sudah ada pendaftar di lomba ini, lebih baik nonaktifkan saja lewat "Edit".')) return;
+
+        const { error } = await supabaseClient.from("lomba_rules").delete().eq("id", id);
+        if (error) {
+          if (error.code === "23503") {
+            alert('Tidak bisa dihapus karena sudah ada pendaftar di lomba ini. Nonaktifkan saja lewat "Edit" (matikan centang Aktif).');
+          } else {
+            alert("Gagal menghapus: " + error.message);
+          }
+          return;
+        }
+        lombaList = lombaList.filter(function (x) { return x.id !== id; });
+        renderTabel();
+      });
+    });
+  }
+
+  function tampilkanForm(existing) {
+    const wrap = document.getElementById("form-lomba-wrap");
+    const isEdit = !!existing;
+
+    const jenjangCheckboxes = JENJANG_LIST.map(function (j) {
+      const checked = existing && existing.jenjang.indexOf(j) !== -1 ? "checked" : "";
+      return '<label style="margin-right:14px;font-weight:400;display:inline-flex;align-items:center;gap:6px;">' +
+        '<input type="checkbox" class="lm-jenjang" value="' + j + '" ' + checked + ' /> ' + j + '</label>';
+    }).join("");
+
+    wrap.innerHTML =
+      '<div class="form-shell" style="margin-top:16px;">' +
+        '<h3>' + (isEdit ? "Edit Lomba" : "Tambah Lomba Baru") + '</h3>' +
+        '<form id="form-lomba" novalidate>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Kode unik (id)</label>' +
+              '<input type="text" id="lm-id" ' + (isEdit ? "disabled" : "") + ' value="' + (existing ? existing.id : "") + '" placeholder="mis. tahfidz" />' +
+              (isEdit ? '<div class="hint">Kode tidak bisa diubah setelah dibuat.</div>' : '<div class="hint">Huruf kecil, tanpa spasi, tidak bisa diubah nanti.</div>') +
+            '</div>' +
+            '<div class="field"><label>Ikon (emoji)</label><input type="text" id="lm-ikon" value="' + (existing ? existing.ikon : "🏆") + '" /></div>' +
+          '</div>' +
+          '<div class="field"><label>Nama Lomba</label><input type="text" id="lm-nama" value="' + (existing ? existing.nama.replace(/"/g, "&quot;") : "") + '" /></div>' +
+          '<div class="field"><label>Jenjang</label><div>' + jenjangCheckboxes + '</div></div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Usia Minimal</label><input type="number" id="lm-usia-min" value="' + (existing ? existing.usia_min : 7) + '" /></div>' +
+            '<div class="field"><label>Usia Maksimal</label><input type="number" id="lm-usia-max" value="' + (existing ? existing.usia_max : 18) + '" /></div>' +
+          '</div>' +
+          '<div class="field"><label>Tipe</label><select id="lm-tipe">' +
+            '<option value="individu"' + (existing && existing.tipe === "individu" ? " selected" : "") + '>Individu</option>' +
+            '<option value="tim"' + (existing && existing.tipe === "tim" ? " selected" : "") + '>Tim</option>' +
+          '</select></div>' +
+          '<div class="field-row" id="lm-anggota-wrap" style="display:' + (existing && existing.tipe === "tim" ? "grid" : "none") + ';">' +
+            '<div class="field"><label>Min Anggota</label><input type="number" id="lm-min-anggota" value="' + (existing && existing.min_anggota != null ? existing.min_anggota : 5) + '" /></div>' +
+            '<div class="field"><label>Max Anggota</label><input type="number" id="lm-max-anggota" value="' + (existing && existing.max_anggota != null ? existing.max_anggota : 10) + '" /></div>' +
+          '</div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Kuota (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" /></div>' +
+            '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
+          '</div>' +
+          '<div class="field"><label>Deskripsi</label><textarea id="lm-deskripsi">' + (existing ? existing.deskripsi : "") + '</textarea></div>' +
+          '<label class="checkbox-field"><input type="checkbox" id="lm-aktif" ' + (!existing || existing.aktif ? "checked" : "") + ' /> <span>Aktif (tampil di situs)</span></label>' +
+          '<div class="form-error" id="lomba-form-error" style="display:none;"></div>' +
+          '<div class="submit-row" style="margin-top:16px;display:flex;gap:10px;">' +
+            '<button type="submit" class="btn btn--primary">Simpan</button>' +
+            '<button type="button" class="btn btn--ghost" id="btn-batal-lomba">Batal</button>' +
+          '</div>' +
+        '</form>' +
+      '</div>';
+
+    wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    document.getElementById("lm-tipe").addEventListener("change", function () {
+      document.getElementById("lm-anggota-wrap").style.display = this.value === "tim" ? "grid" : "none";
+    });
+    document.getElementById("btn-batal-lomba").addEventListener("click", function () { wrap.innerHTML = ""; });
+
+    document.getElementById("form-lomba").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const errEl = document.getElementById("lomba-form-error");
+      errEl.style.display = "none";
+
+      const id = document.getElementById("lm-id").value.trim();
+      const jenjangTerpilih = Array.from(document.querySelectorAll(".lm-jenjang:checked")).map(function (c) { return c.value; });
+      const tipe = document.getElementById("lm-tipe").value;
+      const kuotaVal = document.getElementById("lm-kuota").value;
+      const namaVal = document.getElementById("lm-nama").value.trim();
+
+      if (!id || !namaVal || jenjangTerpilih.length === 0) {
+        errEl.textContent = "Kode, nama, dan minimal satu jenjang wajib diisi.";
+        errEl.style.display = "block";
+        return;
+      }
+
+      const payload = {
+        id: id,
+        ikon: document.getElementById("lm-ikon").value.trim() || "🏆",
+        nama: namaVal,
+        jenjang: jenjangTerpilih,
+        usia_min: parseInt(document.getElementById("lm-usia-min").value, 10),
+        usia_max: parseInt(document.getElementById("lm-usia-max").value, 10),
+        tipe: tipe,
+        min_anggota: tipe === "tim" ? parseInt(document.getElementById("lm-min-anggota").value, 10) : null,
+        max_anggota: tipe === "tim" ? parseInt(document.getElementById("lm-max-anggota").value, 10) : null,
+        kuota: kuotaVal === "" ? null : parseInt(kuotaVal, 10),
+        urutan: parseInt(document.getElementById("lm-urutan").value, 10) || 0,
+        deskripsi: document.getElementById("lm-deskripsi").value.trim(),
+        aktif: document.getElementById("lm-aktif").checked
+      };
+
+      const result = isEdit
+        ? await supabaseClient.from("lomba_rules").update(payload).eq("id", existing.id)
+        : await supabaseClient.from("lomba_rules").insert(payload);
+
+      if (result.error) {
+        errEl.textContent = "Gagal menyimpan: " + result.error.message;
+        errEl.style.display = "block";
+        return;
+      }
+
+      wrap.innerHTML = "";
+      loadTabLomba();
+    });
+  }
+
+  document.getElementById("btn-tambah-lomba").addEventListener("click", function () { tampilkanForm(null); });
+  renderTabel();
+}
+
+/* ==================== TAB 3: LOGO SITUS ==================== */
+
+async function loadTabLogo() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat logo...</p>';
+
+  const { data } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
+  const logoUrl = data ? data.logo_url : null;
+
+  content.innerHTML =
+    '<div class="form-shell" style="max-width:480px;">' +
+      '<h3>Logo Situs</h3>' +
+      '<p>Format PNG saja. Logo akan tampil apa adanya di navbar — tidak dipotong bulat seperti ikon bawaan.</p>' +
+      '<div id="logo-preview" style="margin:16px 0;">' +
+        (logoUrl
+          ? '<img src="' + logoUrl + '" alt="Logo saat ini" style="max-height:80px;display:block;" />'
+          : '<p class="hint">Belum ada logo — situs masih memakai ikon bulan default.</p>') +
+      '</div>' +
+      '<div class="field">' +
+        '<label for="input-logo">Pilih file PNG</label>' +
+        '<input type="file" id="input-logo" accept=".png,image/png" />' +
+      '</div>' +
+      '<div class="form-error" id="logo-error" style="display:none;"></div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-upload-logo">Upload Logo</button>' +
+        (logoUrl ? '<button type="button" class="btn btn--ghost" id="btn-hapus-logo">Kembalikan ke Ikon Default</button>' : "") +
+      '</div>' +
+    '</div>';
+
+  document.getElementById("btn-upload-logo").addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-logo");
+    const errEl = document.getElementById("logo-error");
+    errEl.style.display = "none";
+
+    const file = fileInput.files[0];
+    if (!file) {
+      errEl.textContent = "Pilih file PNG dulu.";
+      errEl.style.display = "block";
+      return;
+    }
+    if (file.type !== "image/png") {
+      errEl.textContent = "File harus berformat PNG.";
+      errEl.style.display = "block";
+      return;
+    }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+
+    const path = "logo/logo-" + Date.now() + ".png";
+    const { error: uploadError } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
+
+    if (uploadError) {
+      btn.disabled = false;
+      btn.textContent = "Upload Logo";
+      errEl.textContent = "Gagal mengunggah: " + uploadError.message;
+      errEl.style.display = "block";
+      return;
+    }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    const { error: updateError } = await supabaseClient.from("site_settings").update({ logo_url: pub.publicUrl }).eq("id", 1);
+
+    btn.disabled = false;
+    btn.textContent = "Upload Logo";
+
+    if (updateError) {
+      errEl.textContent = "Berkas terunggah tapi gagal menyimpan pengaturan: " + updateError.message;
+      errEl.style.display = "block";
+      return;
+    }
+
+    if (typeof window.terapkanLogo === "function") window.terapkanLogo(pub.publicUrl);
+    loadTabLogo();
+  });
+
+  const btnHapus = document.getElementById("btn-hapus-logo");
+  if (btnHapus) {
+    btnHapus.addEventListener("click", async function () {
+      if (!confirm("Kembalikan navbar ke ikon default?")) return;
+      const { error } = await supabaseClient.from("site_settings").update({ logo_url: null }).eq("id", 1);
+      if (error) {
+        alert("Gagal: " + error.message);
+        return;
+      }
+      if (typeof window.terapkanLogo === "function") window.terapkanLogo(null);
+      loadTabLogo();
+    });
+  }
+}
+
+window.ViewAdmin = { template: ADMIN_TEMPLATE, init: initAdmin };
