@@ -144,7 +144,7 @@ async function loadTabPendaftar() {
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
-      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>L/P</th><th>Tipe</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   function renderBaris() {
@@ -178,6 +178,8 @@ async function loadTabPendaftar() {
           '<td>' + r.nama_lengkap + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
           '<td>' + r.jenjang + ' / ' + r.kelas + '</td>' +
+          '<td>' + (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-") + '</td>' +
+          '<td>' + (r.tipe_pendaftar === "lembaga" ? ("Lembaga" + (r.penanggung_jawab_lembaga ? " (PJ: " + r.penanggung_jawab_lembaga + ")" : "")) : "Individu") + '</td>' +
           '<td>' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
           '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
@@ -189,7 +191,7 @@ async function loadTabPendaftar() {
           '</select></td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>' +
-        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="9"></td></tr>'
+        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="11"></td></tr>'
       );
     }).join("");
 
@@ -264,7 +266,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Kuota</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
@@ -279,9 +281,11 @@ async function loadTabLomba() {
           '<td>' + l.jenjang.join("/") + '</td>' +
           '<td>' + l.usia_min + '–' + l.usia_max + '</td>' +
           '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
+          '<td>' + (l.gender_diizinkan === "semua" ? "Semua" : l.gender_diizinkan) + '</td>' +
           '<td>' + (l.kuota == null ? "Tanpa batas" : l.kuota) + '</td>' +
           '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
           '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
+          '<td>' + (l.maks_utusan_per_lembaga || 2) + '</td>' +
           '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
           '<td>' +
             '<button type="button" class="btn-link btn-edit-lomba" data-id="' + l.id + '">Edit</button> · ' +
@@ -364,6 +368,15 @@ async function loadTabLomba() {
             '<div class="field"><label>Toleransi Usia (tahun)</label><input type="number" id="lm-toleransi" min="0" value="' + (existing && existing.toleransi_tahun != null ? existing.toleransi_tahun : 0) + '" />' +
               '<div class="hint">Selisih usia yang masih ditoleransi (masuk "Perlu Verifikasi Usia"), bukan langsung ditolak. 0 = tanpa toleransi.</div></div>' +
           '</div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Gender Diizinkan</label><select id="lm-gender">' +
+              '<option value="semua"' + (!existing || existing.gender_diizinkan === "semua" ? " selected" : "") + '>Semua (laki-laki & perempuan)</option>' +
+              '<option value="laki-laki"' + (existing && existing.gender_diizinkan === "laki-laki" ? " selected" : "") + '>Khusus Laki-laki</option>' +
+              '<option value="perempuan"' + (existing && existing.gender_diizinkan === "perempuan" ? " selected" : "") + '>Khusus Perempuan</option>' +
+            '</select></div>' +
+            '<div class="field"><label>Maks Peserta per Sekolah</label><input type="number" id="lm-maks-utusan" min="1" value="' + (existing && existing.maks_utusan_per_lembaga != null ? existing.maks_utusan_per_lembaga : (existing && existing.tipe === "tim" ? 1 : 2)) + '" />' +
+              '<div class="hint">Batas jumlah pendaftar dari sekolah yang sama untuk lomba ini (hitung per baris pendaftaran, bukan per anggota tim).</div></div>' +
+          '</div>' +
           '<div class="field"><label>Deskripsi</label><textarea id="lm-deskripsi">' + (existing ? existing.deskripsi : "") + '</textarea></div>' +
           '<label class="checkbox-field"><input type="checkbox" id="lm-aktif" ' + (!existing || existing.aktif ? "checked" : "") + ' /> <span>Aktif (tampil di situs)</span></label>' +
           '<div class="form-error" id="lomba-form-error" style="display:none;"></div>' +
@@ -412,6 +425,8 @@ async function loadTabLomba() {
         urutan: parseInt(document.getElementById("lm-urutan").value, 10) || 0,
         tanggal_pelaksanaan: document.getElementById("lm-tanggal-pelaksanaan").value || null,
         toleransi_tahun: parseInt(document.getElementById("lm-toleransi").value, 10) || 0,
+        gender_diizinkan: document.getElementById("lm-gender").value,
+        maks_utusan_per_lembaga: parseInt(document.getElementById("lm-maks-utusan").value, 10) || 1,
         deskripsi: document.getElementById("lm-deskripsi").value.trim(),
         aktif: document.getElementById("lm-aktif").checked
       };
