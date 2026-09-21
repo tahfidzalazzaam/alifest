@@ -17,7 +17,7 @@ const EVENT_NAME = "ALIF 5.0";
 const EVENT_FULL_NAME = "Al Azzaam Islamic Fair 5.0";
 
 // Jenjang yang dikenal sistem, untuk isi dropdown pada form.
-const JENJANG_LIST = ["SD", "SMP", "SMA"];
+const JENJANG_LIST = ["SD", "SMP"];
 
 // Batas ukuran tiap file upload (MB).
 const MAX_FILE_SIZE_MB = 4;
