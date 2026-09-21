@@ -167,23 +167,12 @@ async function loadTabPendaftar() {
 
   const rules = rulesRes.data || [];
   let rows = rowsRes.data || [];
-
-  const opsiLomba = rules.map(function (r) {
-    return '<option value="' + r.id + '">' + r.nama + '</option>';
-  }).join("");
+  let lombaFilter = ""; // diatur dengan mengetuk kartu rekap, bukan dropdown lagi
 
   content.innerHTML =
     '<div class="rekap-grid" id="rekap-grid"></div>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari" placeholder="Cari nama / nomor pendaftaran..." />' +
-      '<select id="filter-lomba"><option value="">Semua lomba</option>' + opsiLomba + '</select>' +
-      '<select id="filter-status">' +
-        '<option value="">Semua status</option>' +
-        '<option value="Menunggu Verifikasi">Menunggu Verifikasi</option>' +
-        '<option value="Perlu Verifikasi Usia">Perlu Verifikasi Usia</option>' +
-        '<option value="Diterima">Diterima</option>' +
-        '<option value="Ditolak">Ditolak</option>' +
-      '</select>' +
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
@@ -208,9 +197,7 @@ async function loadTabPendaftar() {
       else if (r.jenis_kelamin === "perempuan") totalP++;
     });
 
-    const lombaAktif = document.getElementById("filter-lomba") ? document.getElementById("filter-lomba").value : "";
-
-    let html = '<div class="rekap-card' + (lombaAktif === "" ? " is-active" : "") + '" data-lomba="">' +
+    let html = '<div class="rekap-card' + (lombaFilter === "" ? " is-active" : "") + '" data-lomba="">' +
       '<div class="rekap-card__label">Semua Lomba</div>' +
       '<div class="rekap-card__total">' + rows.length + '</div>' +
       '<div class="rekap-card__gender">L: ' + totalL + ' · P: ' + totalP + '</div>' +
@@ -218,7 +205,7 @@ async function loadTabPendaftar() {
 
     html += rules.map(function (r) {
       const d = perLomba[r.id] || { total: 0, l: 0, p: 0 };
-      return '<div class="rekap-card' + (lombaAktif === r.id ? " is-active" : "") + '" data-lomba="' + r.id + '">' +
+      return '<div class="rekap-card' + (lombaFilter === r.id ? " is-active" : "") + '" data-lomba="' + r.id + '">' +
         '<div class="rekap-card__label">' + (r.ikon || "") + ' ' + r.nama + '</div>' +
         '<div class="rekap-card__total">' + d.total + '</div>' +
         '<div class="rekap-card__gender">L: ' + d.l + ' · P: ' + d.p + '</div>' +
@@ -229,8 +216,7 @@ async function loadTabPendaftar() {
 
     rekapEl.querySelectorAll(".rekap-card").forEach(function (card) {
       card.addEventListener("click", function () {
-        document.getElementById("filter-lomba").value = card.getAttribute("data-lomba");
-        document.getElementById("filter-status").value = "";
+        lombaFilter = card.getAttribute("data-lomba");
         document.getElementById("filter-cari").value = "";
         renderBaris();
         renderRekap();
@@ -240,12 +226,9 @@ async function loadTabPendaftar() {
 
   function renderBaris() {
     const cari = document.getElementById("filter-cari").value.toLowerCase();
-    const lombaFilter = document.getElementById("filter-lomba").value;
-    const statusFilter = document.getElementById("filter-status").value;
 
     const tampil = rows.filter(function (r) {
       if (lombaFilter && r.lomba_id !== lombaFilter) return false;
-      if (statusFilter && r.status !== statusFilter) return false;
       if (cari && r.nama_lengkap.toLowerCase().indexOf(cari) === -1 &&
           r.nomor_pendaftaran.toLowerCase().indexOf(cari) === -1) return false;
       return true;
@@ -368,8 +351,6 @@ async function loadTabPendaftar() {
   renderRekap();
   renderBaris();
   document.getElementById("filter-cari").addEventListener("input", renderBaris);
-  document.getElementById("filter-lomba").addEventListener("change", function () { renderBaris(); renderRekap(); });
-  document.getElementById("filter-status").addEventListener("change", renderBaris);
 }
 
 /* ==================== TAB 2: KELOLA LOMBA ==================== */
@@ -387,7 +368,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
@@ -480,7 +461,8 @@ async function loadTabLomba() {
             '<div class="field"><label>Max Anggota</label><input type="number" id="lm-max-anggota" value="' + (existing && existing.max_anggota != null ? existing.max_anggota : 10) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
-            '<div class="field"><label>Kuota (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" /></div>' +
+            '<div class="field"><label>Kuota per Jenis Kelamin (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" />' +
+              '<div class="hint">Angka ini berlaku TERPISAH untuk laki-laki dan perempuan. Isi 20 berarti maks 20 peserta laki-laki DAN maks 20 peserta perempuan (total bisa sampai 40).</div></div>' +
             '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
