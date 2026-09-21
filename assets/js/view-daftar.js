@@ -220,7 +220,7 @@ function initDaftar() {
   const btnDaftarLagi = document.getElementById("btn-daftar-lagi");
 
   let LOMBA_LIST = [];       // diisi dari Supabase saat view dibuka
-  let jumlahMap = {};        // { lombaId: jumlahTerisi } dari lomba_counter
+  let genderCountMap = {};   // { lombaId: { "laki-laki": n, "perempuan": n } } dari rekap_gender_lomba()
   let selectedLomba = null;
   let anggotaCount = 0;
   let bolehLanjut = false;   // hasil terakhir evaluasiKelayakan()
@@ -284,9 +284,9 @@ function initDaftar() {
 
   /* ---------------- Muat data lomba dari Supabase ---------------- */
   async function muatDataLomba() {
-    const [{ data: rules, error: errRules }, { data: counters }] = await Promise.all([
+    const [{ data: rules, error: errRules }, { data: rekapGender }] = await Promise.all([
       supabaseClient.from("lomba_rules").select("*").eq("aktif", true).order("urutan"),
-      supabaseClient.from("lomba_counter").select("*")
+      supabaseClient.rpc("rekap_gender_lomba")
     ]);
 
     if (errRules || !rules) {
@@ -313,7 +313,12 @@ function initDaftar() {
         maksUtusanPerLembaga: r.maks_utusan_per_lembaga || 2
       };
     });
-    (counters || []).forEach(function (c) { jumlahMap[c.lomba_id] = c.jumlah; });
+
+    genderCountMap = {};
+    (rekapGender || []).forEach(function (row) {
+      if (!genderCountMap[row.lomba_id]) genderCountMap[row.lomba_id] = {};
+      genderCountMap[row.lomba_id][row.jenis_kelamin] = row.jumlah;
+    });
 
     renderLombaChoices();
   }
@@ -341,15 +346,28 @@ function initDaftar() {
     return usia;
   }
 
+  // Dipakai di Langkah 1 (jenis kelamin belum diketahui) — lomba dianggap
+  // penuh hanya kalau kuota LAKI-LAKI dan PEREMPUAN dua-duanya sudah penuh.
   function kuotaPenuh(lomba) {
     if (!lomba.kuota) return false;
-    return (jumlahMap[lomba.id] || 0) >= lomba.kuota;
+    const g = genderCountMap[lomba.id] || {};
+    const lakiPenuh = (g["laki-laki"] || 0) >= lomba.kuota;
+    const perempuanPenuh = (g["perempuan"] || 0) >= lomba.kuota;
+    return lakiPenuh && perempuanPenuh;
+  }
+
+  // Dipakai di Langkah 2, setelah jenis kelamin peserta diketahui.
+  function kuotaGenderPenuh(lomba, gender) {
+    if (!lomba.kuota) return false;
+    const g = genderCountMap[lomba.id] || {};
+    return (g[gender] || 0) >= lomba.kuota;
   }
 
   /* ---------------- Render pilihan lomba (Langkah 1) ---------------- */
   function renderLombaChoices() {
     lomboaChoicesEl.innerHTML = LOMBA_LIST.map(function (lomba) {
       const genderLabel = lomba.genderDiizinkan !== "semua" ? (" · Khusus " + lomba.genderDiizinkan) : "";
+      const kuotaLabel = lomba.kuota ? (" · Kuota " + lomba.kuota + "/gender") : "";
       return (
         '<div class="lomba-choice" data-id="' + lomba.id + '">' +
           '<label>' +
@@ -357,7 +375,7 @@ function initDaftar() {
             '<span class="lomba-choice__icon">' + lomba.ikon + '</span>' +
             '<span class="lomba-choice__text">' +
               '<strong>' + lomba.nama + '</strong>' +
-              '<span>' + lomba.jenjang.join("/") + ' · ' + lomba.usiaMin + '-' + lomba.usiaMax + ' th' + genderLabel +
+              '<span>' + lomba.jenjang.join("/") + ' · ' + lomba.usiaMin + '-' + lomba.usiaMax + ' th' + genderLabel + kuotaLabel +
                 ' · Maks ' + lomba.maksUtusanPerLembaga + ' peserta/sekolah</span>' +
             '</span>' +
             '<span class="lomba-choice__note"></span>' +
@@ -444,6 +462,12 @@ function initDaftar() {
 
     if (selectedLomba.genderDiizinkan !== "semua" && gender !== selectedLomba.genderDiizinkan) {
       tampilkanNotice("error", "Lomba ini khusus peserta " + selectedLomba.genderDiizinkan + ". Silakan pilih cabang lomba lain.");
+      terapkanLanjutan(false);
+      return;
+    }
+
+    if (kuotaGenderPenuh(selectedLomba, gender)) {
+      tampilkanNotice("error", "Mohon maaf, kuota peserta " + gender + " untuk lomba ini sudah penuh (maksimal " + selectedLomba.kuota + " " + gender + "). Silakan pilih cabang lomba lain.");
       terapkanLanjutan(false);
       return;
     }
