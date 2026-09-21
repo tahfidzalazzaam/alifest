@@ -113,6 +113,20 @@ function renderDashboard(root, session) {
 
 /* ==================== Helper: hapus berkas & mundurkan nomor urut ==================== */
 
+const BULAN_ID = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+// "2013-05-12" -> "12 Mei 2013". Parsing manual (bukan lewat objek Date)
+// supaya tidak meleset sehari akibat konversi zona waktu.
+function formatTanggalLahir(tgl) {
+  if (!tgl) return "-";
+  const bagian = String(tgl).split("-");
+  if (bagian.length !== 3) return tgl;
+  const tahun = bagian[0];
+  const bulan = BULAN_ID[parseInt(bagian[1], 10) - 1] || bagian[1];
+  const hari = parseInt(bagian[2], 10);
+  return hari + " " + bulan + " " + tahun;
+}
+
 // Ambil path relatif (di dalam bucket) dari URL publik Supabase Storage,
 // supaya bisa dipakai untuk storage.remove().
 function ekstrakPathBerkas(url) {
@@ -172,7 +186,7 @@ async function loadTabPendaftar() {
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
-      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>L/P</th><th>Tipe</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Tgl. Lahir</th><th>Usia</th><th>L/P</th><th>Tipe</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   function renderBaris() {
@@ -206,6 +220,8 @@ async function loadTabPendaftar() {
           '<td>' + r.nama_lengkap + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
           '<td>' + r.jenjang + ' / ' + r.kelas + '</td>' +
+          '<td>' + formatTanggalLahir(r.tanggal_lahir) + '</td>' +
+          '<td>' + (r.usia != null ? r.usia + " th" : "-") + '</td>' +
           '<td>' + (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-") + '</td>' +
           '<td>' + (r.tipe_pendaftar === "lembaga" ? ("Lembaga" + (r.penanggung_jawab_lembaga ? " (PJ: " + r.penanggung_jawab_lembaga + ")" : "")) : "Individu") + '</td>' +
           '<td>' + r.asal_sekolah + '</td>' +
@@ -219,7 +235,7 @@ async function loadTabPendaftar() {
           '</select></td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>' +
-        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="11"></td></tr>'
+        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="13"></td></tr>'
       );
     }).join("");
 
