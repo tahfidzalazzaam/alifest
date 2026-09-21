@@ -639,6 +639,97 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .btn-link:hover { text-decoration: underline; }
 
+/* ==========================================================================
+   TAMPILAN MOBILE (≤640px)
+   ==========================================================================
+   Padding & ukuran font di atas dioptimalkan untuk layar desktop. Blok ini
+   mengecilkan/merampingkan semuanya khusus layar kecil supaya tidak terasa
+   besar & berdesak-desakan di HP — tanpa mengubah tampilan desktop.
+   ========================================================================== */
+@media (max-width: 640px) {
+  .container { padding: 0 16px; }
+  .bunting { padding: 0 16px; height: 16px; gap: 4px; }
+
+  /* Navbar */
+  .navbar { padding: 12px 16px; }
+  .navbar__brand { font-size: 1rem; gap: 8px; }
+  .navbar__brand span.mark { width: 32px; height: 32px; font-size: 0.95rem; }
+  .navbar__brand-logo { height: 30px; max-width: 110px; }
+  .navbar__links { gap: 2px; }
+  .nav-link { padding: 7px 12px; font-size: 0.82rem; }
+
+  /* Tombol, dipakai di mana-mana */
+  .btn { padding: 11px 20px; font-size: 0.9rem; gap: 6px; }
+
+  /* Hero */
+  .hero { padding: 32px 0 36px; }
+  .hero__eyebrow { font-size: 0.76rem; padding: 5px 12px; margin-bottom: 14px; }
+  .hero h1 { font-size: 1.75rem; line-height: 1.25; margin-bottom: 14px; }
+  .hero p.lede { font-size: 0.94rem; margin-bottom: 22px; }
+  .hero__actions { gap: 10px; }
+  .hero__stats { gap: 20px; margin-top: 30px; }
+  .hero__stats strong { font-size: 1.35rem; }
+  .hero__stats span { font-size: 0.78rem; }
+
+  /* Section umum */
+  .section { padding: 32px 0; }
+  .section__head { margin-bottom: 24px; }
+  .section__head h2 { font-size: 1.45rem; }
+  .section__head p { font-size: 0.9rem; }
+
+  /* Kartu lomba */
+  .lomba-grid { gap: 14px; }
+  .lomba-card__main { padding: 18px 16px 14px; }
+  .lomba-card__icon { width: 42px; height: 42px; font-size: 1.25rem; border-radius: 12px; margin-bottom: 12px; }
+  .lomba-card__main h3 { font-size: 1.02rem; }
+  .lomba-card__main p { font-size: 0.86rem; }
+  .lomba-card__stub { padding: 14px 16px; }
+  .stub-row { font-size: 0.8rem; }
+
+  /* Info banner */
+  .info-banner { padding: 20px; grid-template-columns: 1fr; gap: 18px; border-radius: var(--radius-md); }
+  .info-banner__item h4 { font-size: 0.92rem; }
+  .info-banner__item p { font-size: 0.86rem; }
+
+  /* Form pendaftaran & Panitia */
+  .form-page, .admin-page { padding: 20px 0 48px; }
+  .form-header { margin-bottom: 22px; }
+  .form-header h1 { font-size: 1.5rem; }
+  .form-header p { font-size: 0.88rem; }
+  .form-shell { padding: 18px; border-radius: var(--radius-md); }
+  .admin-login h1 { font-size: 1.35rem; }
+
+  fieldset { margin-bottom: 24px; }
+  fieldset legend { font-size: 1rem; margin-bottom: 14px; }
+  .form-step { font-size: 0.72rem; padding: 3px 10px; }
+  .field { margin-bottom: 14px; }
+  .field label { font-size: 0.86rem; }
+  input[type="text"], input[type="date"], input[type="tel"],
+  input[type="email"], input[type="number"], select, textarea {
+    padding: 10px 12px;
+    font-size: 0.92rem;
+  }
+
+  /* Pilihan lomba: cegah info panjang (jenjang/usia/gender/kuota) berdesakan
+     dengan ikon & catatan di satu baris — catatan turun ke baris sendiri. */
+  .lomba-choice { padding: 12px 14px; }
+  .lomba-choice label { flex-wrap: wrap; row-gap: 4px; }
+  .lomba-choice__icon { font-size: 1.15rem; }
+  .lomba-choice__text strong { font-size: 0.9rem; }
+  .lomba-choice__text span { font-size: 0.74rem; }
+  .lomba-choice__note { flex-basis: 100%; margin-left: 0; text-align: left; }
+
+  .notice { padding: 10px 12px; font-size: 0.82rem; }
+  .upload-field { padding: 14px; }
+  .checkbox-field { font-size: 0.84rem; }
+
+  /* Halaman Panitia */
+  .admin-header h1 { font-size: 1.3rem; }
+  .admin-tabs { gap: 2px; }
+  .admin-tab { padding: 8px 12px; font-size: 0.84rem; }
+  .admin-filters input, .admin-filters select { font-size: 0.86rem; padding: 9px 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { transition: none !important; }
