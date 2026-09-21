@@ -157,7 +157,7 @@ async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
 
-  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama").order("urutan");
+  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon").order("urutan");
   const rowsRes = await supabaseClient.from("pendaftaran").select("*").order("created_at", { ascending: false });
 
   if (rowsRes.error) {
@@ -173,6 +173,7 @@ async function loadTabPendaftar() {
   }).join("");
 
   content.innerHTML =
+    '<div class="rekap-grid" id="rekap-grid"></div>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari" placeholder="Cari nama / nomor pendaftaran..." />' +
       '<select id="filter-lomba"><option value="">Semua lomba</option>' + opsiLomba + '</select>' +
@@ -186,8 +187,56 @@ async function loadTabPendaftar() {
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
-      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Tgl. Lahir</th><th>Usia</th><th>L/P</th><th>Tipe</th><th>Sekolah</th><th>WhatsApp</th><th>Berkas</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Lahir/Usia</th><th>Tipe</th><th>Sekolah</th><th>WA</th><th>Berkas</th><th>Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
+
+  /* -------- Rekap kartu (jumlah per lomba + jenis kelamin) -------- */
+  function renderRekap() {
+    const rekapEl = document.getElementById("rekap-grid");
+    if (!rekapEl) return;
+
+    const perLomba = {};
+    rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0 }; });
+    let totalL = 0, totalP = 0;
+    rows.forEach(function (r) {
+      if (perLomba[r.lomba_id]) {
+        perLomba[r.lomba_id].total++;
+        if (r.jenis_kelamin === "laki-laki") perLomba[r.lomba_id].l++;
+        else if (r.jenis_kelamin === "perempuan") perLomba[r.lomba_id].p++;
+      }
+      if (r.jenis_kelamin === "laki-laki") totalL++;
+      else if (r.jenis_kelamin === "perempuan") totalP++;
+    });
+
+    const lombaAktif = document.getElementById("filter-lomba") ? document.getElementById("filter-lomba").value : "";
+
+    let html = '<div class="rekap-card' + (lombaAktif === "" ? " is-active" : "") + '" data-lomba="">' +
+      '<div class="rekap-card__label">Semua Lomba</div>' +
+      '<div class="rekap-card__total">' + rows.length + '</div>' +
+      '<div class="rekap-card__gender">L: ' + totalL + ' · P: ' + totalP + '</div>' +
+    '</div>';
+
+    html += rules.map(function (r) {
+      const d = perLomba[r.id] || { total: 0, l: 0, p: 0 };
+      return '<div class="rekap-card' + (lombaAktif === r.id ? " is-active" : "") + '" data-lomba="' + r.id + '">' +
+        '<div class="rekap-card__label">' + (r.ikon || "") + ' ' + r.nama + '</div>' +
+        '<div class="rekap-card__total">' + d.total + '</div>' +
+        '<div class="rekap-card__gender">L: ' + d.l + ' · P: ' + d.p + '</div>' +
+      '</div>';
+    }).join("");
+
+    rekapEl.innerHTML = html;
+
+    rekapEl.querySelectorAll(".rekap-card").forEach(function (card) {
+      card.addEventListener("click", function () {
+        document.getElementById("filter-lomba").value = card.getAttribute("data-lomba");
+        document.getElementById("filter-status").value = "";
+        document.getElementById("filter-cari").value = "";
+        renderBaris();
+        renderRekap();
+      });
+    });
+  }
 
   function renderBaris() {
     const cari = document.getElementById("filter-cari").value.toLowerCase();
@@ -206,25 +255,30 @@ async function loadTabPendaftar() {
 
     const tbody = document.querySelector("#tabel-pendaftar tbody");
     if (tampil.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9">Tidak ada data yang cocok.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11">Tidak ada data yang cocok.</td></tr>';
       return;
     }
 
     tbody.innerHTML = tampil.map(function (r) {
       const tombolTim = r.tipe === "tim"
-        ? ' <button type="button" class="btn-link btn-lihat-tim" data-nomor="' + r.nomor_pendaftaran + '">(lihat tim)</button>'
+        ? ' <button type="button" class="btn-link btn-lihat-tim" data-nomor="' + r.nomor_pendaftaran + '">(tim)</button>'
         : "";
+      const lpBadge = r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-";
+      const tipeIkon = r.tipe_pendaftar === "lembaga" ? "🏫" : "🎓";
+      const tipeJudul = r.tipe_pendaftar === "lembaga"
+        ? ("Perwakilan Lembaga" + (r.penanggung_jawab_lembaga ? " · PJ: " + r.penanggung_jawab_lembaga : ""))
+        : "Peserta Individu";
+      const lahirUsia = formatTanggalLahir(r.tanggal_lahir) + (r.usia != null ? " (" + r.usia + "th)" : "");
+
       return (
         '<tr>' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
-          '<td>' + r.nama_lengkap + tombolTim + '</td>' +
+          '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + lpBadge + '</span>' + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
-          '<td>' + r.jenjang + ' / ' + r.kelas + '</td>' +
-          '<td>' + formatTanggalLahir(r.tanggal_lahir) + '</td>' +
-          '<td>' + (r.usia != null ? r.usia + " th" : "-") + '</td>' +
-          '<td>' + (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-") + '</td>' +
-          '<td>' + (r.tipe_pendaftar === "lembaga" ? ("Lembaga" + (r.penanggung_jawab_lembaga ? " (PJ: " + r.penanggung_jawab_lembaga + ")" : "")) : "Individu") + '</td>' +
-          '<td>' + r.asal_sekolah + '</td>' +
+          '<td>' + r.jenjang + '/' + r.kelas + '</td>' +
+          '<td>' + lahirUsia + '</td>' +
+          '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
+          '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
           '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
             (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>') + '</td>' +
@@ -235,7 +289,7 @@ async function loadTabPendaftar() {
           '</select></td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>' +
-        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="13"></td></tr>'
+        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="11"></td></tr>'
       );
     }).join("");
 
@@ -287,6 +341,7 @@ async function loadTabPendaftar() {
 
         rows = rows.filter(function (r) { return r.id !== id; });
         renderBaris();
+        renderRekap();
       });
     });
 
@@ -310,9 +365,10 @@ async function loadTabPendaftar() {
     });
   }
 
+  renderRekap();
   renderBaris();
   document.getElementById("filter-cari").addEventListener("input", renderBaris);
-  document.getElementById("filter-lomba").addEventListener("change", renderBaris);
+  document.getElementById("filter-lomba").addEventListener("change", function () { renderBaris(); renderRekap(); });
   document.getElementById("filter-status").addEventListener("change", renderBaris);
 }
 
