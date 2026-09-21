@@ -94,12 +94,29 @@ async function muatLogoNavbar() {
   if (data && data.logo_url) window.terapkanLogo(data.logo_url);
 }
 
+// Favicon default (ikon bulan) — direkam sekali di awal supaya bisa
+// dikembalikan lagi kalau logo dihapus lewat halaman Panitia.
+const FAVICON_DEFAULT = document.getElementById("site-favicon")
+  ? document.getElementById("site-favicon").getAttribute("href")
+  : "";
+
 window.terapkanLogo = function (url) {
   const mark = document.getElementById("site-logo-mark");
-  if (!mark) return;
-  if (url) {
-    mark.outerHTML = '<img src="' + url + '" alt="Logo" class="navbar__brand-logo" id="site-logo-mark" />';
-  } else {
-    mark.outerHTML = '<span class="mark" id="site-logo-mark">🌙</span>';
+  if (mark) {
+    if (url) {
+      mark.outerHTML = '<img src="' + url + '" alt="Logo" class="navbar__brand-logo" id="site-logo-mark" />';
+    } else {
+      mark.outerHTML = '<span class="mark" id="site-logo-mark">🌙</span>';
+    }
+  }
+
+  const favicon = document.getElementById("site-favicon");
+  if (favicon) {
+    favicon.setAttribute("href", url || FAVICON_DEFAULT);
+    if (url) {
+      favicon.setAttribute("type", "image/png");
+    } else {
+      favicon.removeAttribute("type");
+    }
   }
 };
