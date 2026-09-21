@@ -302,6 +302,34 @@ img { max-width: 100%; display: block; }
 .stub-row span { color: var(--ink-400); }
 .stub-row strong { color: var(--green-900); text-align: right; }
 
+/* ---------- Kartu Syarat Berkas ---------- */
+.syarat-card {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.syarat-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px 26px;
+  border-bottom: 1px solid #f0eee4;
+}
+.syarat-item:last-child { border-bottom: none; }
+.syarat-item__icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: var(--green-100);
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+}
+.syarat-item__text strong { display: block; color: var(--ink-900); font-size: 0.98rem; margin-bottom: 3px; }
+.syarat-item__text p { margin: 0; font-size: 0.88rem; }
+
 /* ---------- Info banner ---------- */
 .info-banner {
   background: var(--green-900);
@@ -583,6 +611,43 @@ textarea { resize: vertical; min-height: 80px; }
 .admin-tab:hover { color: var(--green-700); }
 .admin-tab.is-active { color: var(--green-900); border-bottom-color: var(--green-600); }
 
+/* Rekap kartu — ringkasan jumlah pendaftar per lomba + jenis kelamin,
+   diketuk untuk memfilter tabel di bawahnya */
+.rekap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.rekap-card {
+  background: var(--white);
+  border: 1.5px solid #e3e0d3;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.rekap-card:hover { border-color: var(--green-500); }
+.rekap-card.is-active { border-color: var(--green-600); background: var(--green-100); }
+.rekap-card__label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink-600);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.rekap-card__total {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--green-900);
+  line-height: 1.1;
+}
+.rekap-card__gender { font-size: 0.72rem; color: var(--ink-400); margin-top: 2px; }
+
 .admin-filters {
   display: flex;
   gap: 10px;
@@ -603,11 +668,10 @@ textarea { resize: vertical; min-height: 80px; }
   width: 100%;
   border-collapse: collapse;
   background: var(--white);
-  font-size: 0.86rem;
-  min-width: 720px;
+  font-size: 0.76rem;
 }
 .admin-table th, .admin-table td {
-  padding: 10px 14px;
+  padding: 7px 9px;
   text-align: left;
   border-bottom: 1px solid #f0eee4;
   white-space: nowrap;
@@ -617,15 +681,32 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--green-900);
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
 }
 .admin-table td { color: var(--ink-900); }
-.admin-table tr.anggota-detail td { white-space: normal; background: var(--yellow-100); font-size: 0.85rem; }
+.admin-table tr.anggota-detail td { white-space: normal; background: var(--yellow-100); font-size: 0.78rem; }
 .admin-table select.status-select {
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: var(--radius-sm);
   border: 1.5px solid #e3e0d3;
-  font-size: 0.84rem;
+  font-size: 0.74rem;
+}
+/* Kolom yang bisa panjang (nama, sekolah) dipotong dengan "..." — teks
+   lengkapnya muncul lewat tooltip (atribut title) saat kursor diarahkan. */
+.admin-table td.col-truncate {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lp-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--green-700);
+  background: var(--green-100);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 2px;
 }
 
 .btn-link {
@@ -691,6 +772,12 @@ textarea { resize: vertical; min-height: 80px; }
   .info-banner__item h4 { font-size: 0.92rem; }
   .info-banner__item p { font-size: 0.86rem; }
 
+  /* Kartu syarat berkas */
+  .syarat-item { padding: 16px 18px; gap: 12px; }
+  .syarat-item__icon { width: 38px; height: 38px; font-size: 1.1rem; border-radius: 11px; }
+  .syarat-item__text strong { font-size: 0.9rem; }
+  .syarat-item__text p { font-size: 0.82rem; }
+
   /* Form pendaftaran & Panitia */
   .form-page, .admin-page { padding: 20px 0 48px; }
   .form-header { margin-bottom: 22px; }
@@ -728,6 +815,9 @@ textarea { resize: vertical; min-height: 80px; }
   .admin-tabs { gap: 2px; }
   .admin-tab { padding: 8px 12px; font-size: 0.84rem; }
   .admin-filters input, .admin-filters select { font-size: 0.86rem; padding: 9px 12px; }
+  .rekap-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+  .rekap-card { padding: 10px 12px; }
+  .rekap-card__total { font-size: 1.2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
