@@ -4,7 +4,7 @@ const BERANDA_TEMPLATE = `
 <section class="hero container">
   <span class="hero__eyebrow">Al Azzaam Islamic Fair</span>
   <h1>Unjuk bakat, rebut juara di <em>ALIF 5.0</em></h1>
-  <p class="lede">Lima cabang lomba untuk santri dan pelajar tingkat SD, SMP, dan SMA. Daftar online, cukup lampirkan Surat Keterangan Aktif Sekolah, Kartu Pelajar, dan bukti follow Instagram.</p>
+  <p class="lede">Lima cabang lomba untuk santri dan pelajar tingkat SD dan SMP. Daftar online, cukup lampirkan beberapa berkas singkat.</p>
   <div class="hero__actions">
     <a href="#/daftar" class="btn btn--primary">Daftar Sekarang</a>
     <a href="#lomba" class="btn btn--ghost">Lihat Cabang Lomba</a>
@@ -12,7 +12,7 @@ const BERANDA_TEMPLATE = `
   </div>
   <div class="hero__stats">
     <div><strong>5</strong><span>Cabang lomba</span></div>
-    <div><strong>SD–SMA</strong><span>Jenjang peserta</span></div>
+    <div><strong>SD–SMP</strong><span>Jenjang peserta</span></div>
     <div><strong>Online</strong><span>Pendaftaran & berkas</span></div>
   </div>
 </section>
@@ -28,11 +28,37 @@ const BERANDA_TEMPLATE = `
 </section>
 
 <section class="section container">
-  <div class="info-banner">
-    <div class="info-banner__item">
-      <h4>Berkas yang perlu disiapkan</h4>
-      <p>Surat Keterangan Aktif Sekolah, Kartu Pelajar, dan screenshot bukti follow Instagram <strong>@al.azzaam.id</strong> &amp; <strong>@alifest.26</strong> (JPG/PNG/PDF, maksimal 4MB per berkas).</p>
+  <div class="section__head">
+    <h2>Syarat Berkas Pendaftaran</h2>
+    <p>Siapkan tiga berkas ini dulu sebelum mulai mengisi form, supaya prosesnya lancar tanpa bolak-balik.</p>
+  </div>
+  <div class="syarat-card">
+    <div class="syarat-item">
+      <span class="syarat-item__icon">📄</span>
+      <div class="syarat-item__text">
+        <strong>Surat Keterangan Aktif Sekolah</strong>
+        <p>Diterbitkan oleh sekolah, format JPG/PNG/PDF, maksimal 4MB.</p>
+      </div>
     </div>
+    <div class="syarat-item">
+      <span class="syarat-item__icon">🪪</span>
+      <div class="syarat-item__text">
+        <strong>Kartu Pelajar</strong>
+        <p>Foto atau scan kartu pelajar yang masih berlaku, format JPG/PNG/PDF, maksimal 4MB.</p>
+      </div>
+    </div>
+    <div class="syarat-item">
+      <span class="syarat-item__icon">📸</span>
+      <div class="syarat-item__text">
+        <strong>Screenshot Bukti Follow Instagram</strong>
+        <p>Follow <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following").</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section container">
+  <div class="info-banner">
     <div class="info-banner__item">
       <h4>Lomba tim</h4>
       <p>Lomba Futsal mewakili sekolah, satu tim terdiri dari 5–10 pemain ditambah satu guru pendamping.</p>
