@@ -85,6 +85,7 @@ function renderDashboard(root, session) {
       '<button type="button" class="admin-tab" data-tab="lomba">Kelola Lomba</button>' +
       '<button type="button" class="admin-tab" data-tab="logo">Logo Situs</button>' +
       '<button type="button" class="admin-tab" data-tab="juknis">Petunjuk Teknis</button>' +
+      '<button type="button" class="admin-tab" data-tab="kartu">Kartu Peserta</button>' +
     '</div>' +
     '<div id="admin-content"></div>';
 
@@ -103,6 +104,7 @@ function renderDashboard(root, session) {
       if (nama === "lomba") loadTabLomba();
       if (nama === "logo") loadTabLogo();
       if (nama === "juknis") loadTabJuknis();
+      if (nama === "kartu") loadTabKartu();
     });
   });
 
@@ -736,6 +738,345 @@ async function loadTabJuknis() {
       loadTabJuknis();
     });
   }
+}
+
+/* ==================== TAB 5: KARTU PESERTA & PENDAMPING ==================== */
+
+const FIELD_PESERTA = [
+  { key: "nama", label: "Nama" },
+  { key: "jenjang", label: "Jenjang" },
+  { key: "lomba", label: "Lomba" }
+];
+const FIELD_PENDAMPING = [
+  { key: "nama", label: "Nama" },
+  { key: "lomba", label: "Lomba/Sekolah" }
+];
+const DEFAULT_LAYOUT_KARTU = {
+  peserta: {
+    nama: { x: 40, y: 40, font: 28 },
+    jenjang: { x: 40, y: 90, font: 20 },
+    lomba: { x: 40, y: 125, font: 20 },
+    qr: { x: 40, y: 170, size: 120 }
+  },
+  pendamping: {
+    nama: { x: 40, y: 40, font: 28 },
+    lomba: { x: 40, y: 90, font: 20 },
+    qr: { x: 40, y: 140, size: 120 }
+  }
+};
+
+let libKartuSiap = false;
+function muatScript(src) {
+  return new Promise(function (resolve, reject) {
+    if (document.querySelector('script[src="' + src + '"]')) { resolve(); return; }
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = function () { resolve(); };
+    s.onerror = function () { reject(new Error("Gagal memuat " + src)); };
+    document.head.appendChild(s);
+  });
+}
+async function pastikanLibKartu() {
+  if (libKartuSiap) return;
+  await muatScript("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js");
+  await muatScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
+  libKartuSiap = true;
+}
+
+function muatGambar(url) {
+  return new Promise(function (resolve, reject) {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function () { resolve(img); };
+    img.onerror = function () { reject(new Error("Gagal memuat gambar template.")); };
+    img.src = url;
+  });
+}
+
+function gambarQR(ctx, teks, x, y, size) {
+  const qr = window.qrcode(0, "M");
+  qr.addData(teks);
+  qr.make();
+  const count = qr.getModuleCount();
+  const cell = size / count;
+  ctx.fillStyle = "#000000";
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      if (qr.isDark(r, c)) ctx.fillRect(x + c * cell, y + r * cell, cell, cell);
+    }
+  }
+}
+
+function gambarKartu(canvas, templateImg, layout, data, fields) {
+  canvas.width = templateImg.naturalWidth;
+  canvas.height = templateImg.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(templateImg, 0, 0);
+  ctx.fillStyle = "#000000";
+  ctx.textBaseline = "top";
+  fields.forEach(function (f) {
+    const pos = (layout && layout[f.key]) || { x: 40, y: 40, font: 22 };
+    ctx.font = "600 " + pos.font + "px 'Plus Jakarta Sans', sans-serif";
+    ctx.fillText(data[f.key] || "-", pos.x, pos.y);
+  });
+  const qrPos = (layout && layout.qr) || { x: 40, y: 170, size: 120 };
+  gambarQR(ctx, data.qrText, qrPos.x, qrPos.y, qrPos.size);
+}
+
+function bacaLayoutDariInput(jenis, fields) {
+  const layout = {};
+  fields.forEach(function (f) {
+    layout[f.key] = {
+      x: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-x").value, 10) || 0,
+      y: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-y").value, 10) || 0,
+      font: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-font").value, 10) || 20
+    };
+  });
+  layout.qr = {
+    x: parseInt(document.getElementById("pos-" + jenis + "-qr-x").value, 10) || 0,
+    y: parseInt(document.getElementById("pos-" + jenis + "-qr-y").value, 10) || 0,
+    size: parseInt(document.getElementById("pos-" + jenis + "-qr-size").value, 10) || 100
+  };
+  return layout;
+}
+
+function isiLayoutKeInput(jenis, fields, layoutTersimpan) {
+  const layout = Object.assign({}, DEFAULT_LAYOUT_KARTU[jenis], layoutTersimpan || {});
+  fields.forEach(function (f) {
+    const pos = layout[f.key] || DEFAULT_LAYOUT_KARTU[jenis][f.key];
+    document.getElementById("pos-" + jenis + "-" + f.key + "-x").value = pos.x;
+    document.getElementById("pos-" + jenis + "-" + f.key + "-y").value = pos.y;
+    document.getElementById("pos-" + jenis + "-" + f.key + "-font").value = pos.font;
+  });
+  const qrPos = layout.qr || DEFAULT_LAYOUT_KARTU[jenis].qr;
+  document.getElementById("pos-" + jenis + "-qr-x").value = qrPos.x;
+  document.getElementById("pos-" + jenis + "-qr-y").value = qrPos.y;
+  document.getElementById("pos-" + jenis + "-qr-size").value = qrPos.size;
+}
+
+function kartuEditorHTML(jenis, judul, fields, existingUrl) {
+  const inputsHTML = fields.map(function (f) {
+    return (
+      '<div class="kartu-pos-group">' +
+        '<span class="kartu-pos-group__label">' + f.label + '</span>' +
+        '<label>X <input type="number" id="pos-' + jenis + '-' + f.key + '-x" /></label>' +
+        '<label>Y <input type="number" id="pos-' + jenis + '-' + f.key + '-y" /></label>' +
+        '<label>Font <input type="number" id="pos-' + jenis + '-' + f.key + '-font" /></label>' +
+      '</div>'
+    );
+  }).join("");
+
+  return (
+    '<div class="form-shell" style="margin-bottom:20px;">' +
+      '<h3>' + judul + '</h3>' +
+      '<div class="field">' +
+        '<label>Template (PNG)</label>' +
+        '<input type="file" id="input-template-' + jenis + '" accept=".png,image/png" />' +
+      '</div>' +
+      '<button type="button" class="btn btn--ghost" id="btn-upload-template-' + jenis + '" style="margin-bottom:16px;">Upload Template Baru</button>' +
+      '<div class="kartu-preview-wrap" id="preview-wrap-' + jenis + '">' +
+        (existingUrl ? '<canvas id="preview-' + jenis + '"></canvas>' : '<p class="hint">Belum ada template. Upload dulu untuk melihat pratinjau.</p>') +
+      '</div>' +
+      '<div class="kartu-pos-grid">' +
+        inputsHTML +
+        '<div class="kartu-pos-group">' +
+          '<span class="kartu-pos-group__label">QR Code</span>' +
+          '<label>X <input type="number" id="pos-' + jenis + '-qr-x" /></label>' +
+          '<label>Y <input type="number" id="pos-' + jenis + '-qr-y" /></label>' +
+          '<label>Ukuran <input type="number" id="pos-' + jenis + '-qr-size" /></label>' +
+        '</div>' +
+      '</div>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-' + jenis + '" style="margin-top:14px;">Simpan Posisi</button>' +
+      '<span class="hint" id="status-posisi-' + jenis + '" style="margin-left:10px;"></span>' +
+    '</div>'
+  );
+}
+
+async function setupKartuEditor(jenis, fields, existingUrl, savedLayout) {
+  isiLayoutKeInput(jenis, fields, savedLayout);
+
+  let templateImg = null;
+
+  function renderPratinjauSekarang() {
+    if (!templateImg) return;
+    const canvas = document.getElementById("preview-" + jenis);
+    if (!canvas) return;
+    const layout = bacaLayoutDariInput(jenis, fields);
+    const sample = {};
+    fields.forEach(function (f) { sample[f.key] = "Contoh " + f.label; });
+    sample.qrText = "ALIF5-CONTOH";
+    gambarKartu(canvas, templateImg, layout, sample, fields);
+  }
+
+  if (existingUrl) {
+    try {
+      templateImg = await muatGambar(existingUrl);
+      renderPratinjauSekarang();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  document.querySelectorAll('[id^="pos-' + jenis + '-"]').forEach(function (inp) {
+    inp.addEventListener("input", renderPratinjauSekarang);
+  });
+
+  document.getElementById("btn-upload-template-" + jenis).addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-template-" + jenis);
+    const file = fileInput.files[0];
+    if (!file) { alert("Pilih file PNG dulu."); return; }
+    if (file.type !== "image/png") { alert("File harus berformat PNG."); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+
+    const path = "kartu/" + jenis + "-" + Date.now() + ".png";
+    const { error: upErr } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
+    if (upErr) {
+      btn.disabled = false;
+      btn.textContent = "Upload Template Baru";
+      alert("Gagal mengunggah: " + upErr.message);
+      return;
+    }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    const kolom = jenis === "peserta" ? "kartu_peserta_url" : "kartu_pendamping_url";
+    const payload = {};
+    payload[kolom] = pub.publicUrl;
+    const { error: updErr } = await supabaseClient.from("site_settings").update(payload).eq("id", 1);
+
+    btn.disabled = false;
+    btn.textContent = "Upload Template Baru";
+
+    if (updErr) {
+      alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message);
+      return;
+    }
+    loadTabKartu();
+  });
+
+  document.getElementById("btn-simpan-posisi-" + jenis).addEventListener("click", async function () {
+    const layout = bacaLayoutDariInput(jenis, fields);
+    const { data: current } = await supabaseClient.from("site_settings").select("kartu_layout").eq("id", 1).single();
+    const merged = Object.assign({}, current ? current.kartu_layout : {});
+    merged[jenis] = layout;
+    const { error } = await supabaseClient.from("site_settings").update({ kartu_layout: merged }).eq("id", 1);
+    const statusEl = document.getElementById("status-posisi-" + jenis);
+    statusEl.textContent = error ? ("Gagal: " + error.message) : "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+}
+
+async function cetakKartuPDF(jenis) {
+  const statusEl = document.getElementById("cetak-status");
+  const lombaFilter = document.getElementById("cetak-filter-lomba").value;
+
+  const { data: settings } = await supabaseClient.from("site_settings").select("kartu_peserta_url,kartu_pendamping_url,kartu_layout").eq("id", 1).single();
+  const templateUrl = jenis === "peserta" ? (settings && settings.kartu_peserta_url) : (settings && settings.kartu_pendamping_url);
+  if (!templateUrl) {
+    alert("Upload template " + jenis + " dulu sebelum mencetak.");
+    return;
+  }
+  const layout = (settings && settings.kartu_layout && settings.kartu_layout[jenis]) || DEFAULT_LAYOUT_KARTU[jenis];
+  const fields = jenis === "peserta" ? FIELD_PESERTA : FIELD_PENDAMPING;
+
+  let query = supabaseClient.from("pendaftaran").select("*");
+  if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
+  const { data: rows, error } = await query;
+  if (error) { alert("Gagal memuat data: " + error.message); return; }
+  if (!rows || rows.length === 0) { alert("Tidak ada data pendaftar yang cocok."); return; }
+
+  let daftarData;
+  if (jenis === "peserta") {
+    daftarData = rows.map(function (r) {
+      return { nama: r.nama_lengkap, jenjang: r.jenjang, lomba: r.lomba_nama, qrText: "ALIF5-" + r.nomor_pendaftaran };
+    });
+  } else {
+    const sudahAda = {};
+    daftarData = [];
+    rows.forEach(function (r) {
+      const namaPj = r.pembina || r.penanggung_jawab_lembaga;
+      if (!namaPj) return;
+      const kunci = namaPj.trim().toLowerCase() + "|" + (r.asal_sekolah || "").trim().toLowerCase();
+      if (sudahAda[kunci]) return;
+      sudahAda[kunci] = true;
+      daftarData.push({ nama: namaPj, lomba: r.lomba_nama + " · " + r.asal_sekolah, qrText: "ALIF5-" + r.nomor_pendaftaran + "-PJ" });
+    });
+    if (daftarData.length === 0) {
+      alert("Tidak ada data penanggung jawab/pendamping pada data yang cocok (Futsal punya guru pendamping, pendaftaran Perwakilan Lembaga punya penanggung jawab).");
+      return;
+    }
+  }
+
+  statusEl.textContent = "Menyiapkan " + daftarData.length + " kartu, mohon tunggu...";
+
+  let templateImg;
+  try {
+    templateImg = await muatGambar(templateUrl);
+  } catch (e) {
+    statusEl.textContent = "";
+    alert("Gagal memuat gambar template kartu.");
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "px", format: [templateImg.naturalWidth, templateImg.naturalHeight] });
+
+  daftarData.forEach(function (data, i) {
+    gambarKartu(canvas, templateImg, layout, data, fields);
+    const imgData = canvas.toDataURL("image/png");
+    if (i > 0) doc.addPage([templateImg.naturalWidth, templateImg.naturalHeight]);
+    doc.addImage(imgData, "PNG", 0, 0, templateImg.naturalWidth, templateImg.naturalHeight);
+  });
+
+  doc.save("kartu-" + jenis + "-alif5.pdf");
+  statusEl.textContent = "Selesai — " + daftarData.length + " kartu terunduh.";
+}
+
+async function loadTabKartu() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat...</p>';
+
+  try {
+    await pastikanLibKartu();
+  } catch (e) {
+    content.innerHTML = "<p>Gagal memuat pustaka QR/PDF — periksa koneksi internet, lalu buka tab ini lagi.</p>";
+    return;
+  }
+
+  const { data: settings } = await supabaseClient.from("site_settings")
+    .select("kartu_peserta_url,kartu_pendamping_url,kartu_layout").eq("id", 1).single();
+  const layoutTersimpan = (settings && settings.kartu_layout) || {};
+
+  const { data: rulesData } = await supabaseClient.from("lomba_rules").select("id,nama").order("urutan");
+  const opsiLombaCetak = (rulesData || []).map(function (r) {
+    return '<option value="' + r.id + '">' + r.nama + '</option>';
+  }).join("");
+
+  content.innerHTML =
+    '<div class="form-shell" style="margin-bottom:20px;">' +
+      '<h3>🪪 Kartu Peserta &amp; Pendamping</h3>' +
+      '<p>Upload desain kartu (PNG), atur posisi nama/jenjang/lomba/QR lewat angka di bawah (pratinjau berubah langsung), lalu cetak kartu semua peserta sekaligus sebagai satu file PDF siap cetak. QR di tiap kartu berisi kode unik yang nanti dipakai untuk absen kedatangan & pemberian snack.</p>' +
+    '</div>' +
+    kartuEditorHTML("peserta", "Kartu Peserta", FIELD_PESERTA, settings && settings.kartu_peserta_url) +
+    kartuEditorHTML("pendamping", "Kartu Pendamping / Penanggung Jawab", FIELD_PENDAMPING, settings && settings.kartu_pendamping_url) +
+    '<div class="form-shell" style="margin-top:20px;max-width:520px;">' +
+      '<h3>Cetak Kartu</h3>' +
+      '<div class="field"><label>Cabang Lomba</label><select id="cetak-filter-lomba"><option value="">Semua Lomba</option>' + opsiLombaCetak + '</select></div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+        '<button type="button" class="btn btn--primary" id="btn-cetak-peserta">Unduh Kartu Peserta (PDF)</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-cetak-pendamping">Unduh Kartu Pendamping (PDF)</button>' +
+      '</div>' +
+      '<p class="hint" id="cetak-status"></p>' +
+    '</div>';
+
+  setupKartuEditor("peserta", FIELD_PESERTA, settings && settings.kartu_peserta_url, layoutTersimpan.peserta);
+  setupKartuEditor("pendamping", FIELD_PENDAMPING, settings && settings.kartu_pendamping_url, layoutTersimpan.pendamping);
+
+  document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
+  document.getElementById("btn-cetak-pendamping").addEventListener("click", function () { cetakKartuPDF("pendamping"); });
 }
 
 window.ViewAdmin = { template: ADMIN_TEMPLATE, init: initAdmin };
