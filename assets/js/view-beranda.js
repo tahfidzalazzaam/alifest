@@ -77,9 +77,9 @@ async function initBeranda() {
   const grid = document.getElementById("lomba-grid");
   if (!grid) return;
 
-  const [{ data: rules, error: errRules }, { data: counters }] = await Promise.all([
+  const [{ data: rules, error: errRules }, { data: rekapGender }] = await Promise.all([
     supabaseClient.from("lomba_rules").select("*").eq("aktif", true).order("urutan"),
-    supabaseClient.from("lomba_counter").select("*")
+    supabaseClient.rpc("rekap_gender_lomba")
   ]);
 
   if (errRules) {
@@ -88,17 +88,22 @@ async function initBeranda() {
     return;
   }
 
-  const jumlahMap = {};
-  (counters || []).forEach(function (c) { jumlahMap[c.lomba_id] = c.jumlah; });
+  const genderMap = {};
+  (rekapGender || []).forEach(function (row) {
+    if (!genderMap[row.lomba_id]) genderMap[row.lomba_id] = {};
+    genderMap[row.lomba_id][row.jenis_kelamin] = row.jumlah;
+  });
 
   grid.innerHTML = rules.map(function (lomba) {
     const tipeLabel = lomba.tipe === "tim"
       ? "Tim (" + lomba.min_anggota + "–" + lomba.max_anggota + " orang)"
       : "Individu";
 
-    const terisi = jumlahMap[lomba.id] || 0;
+    const g = genderMap[lomba.id] || {};
+    const terisiL = g["laki-laki"] || 0;
+    const terisiP = g["perempuan"] || 0;
     const kuotaLabel = lomba.kuota
-      ? (terisi >= lomba.kuota ? "Penuh" : terisi + " / " + lomba.kuota)
+      ? ("L " + terisiL + "/" + lomba.kuota + " · P " + terisiP + "/" + lomba.kuota)
       : "Tidak dibatasi";
 
     return (
