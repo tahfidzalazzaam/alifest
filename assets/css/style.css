@@ -722,6 +722,55 @@ textarea { resize: vertical; min-height: 80px; }
   margin-left: 2px;
 }
 
+/* ---------- Editor Kartu Peserta ---------- */
+.kartu-preview-wrap {
+  border: 1.5px dashed #cfd9d1;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin: 12px 0;
+  text-align: center;
+  background: #faf9f4;
+}
+.kartu-preview-wrap canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+.kartu-pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+.kartu-pos-group {
+  border: 1.5px solid #e3e0d3;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.kartu-pos-group__label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--green-900);
+  margin-bottom: 8px;
+}
+.kartu-pos-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--ink-600);
+  margin-right: 8px;
+}
+.kartu-pos-group input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 0.76rem;
+  border-radius: 6px;
+  border: 1.5px solid #e3e0d3;
+}
+
 .btn-link {
   background: none;
   border: none;
