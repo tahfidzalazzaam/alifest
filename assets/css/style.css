@@ -74,12 +74,25 @@ img { max-width: 100%; display: block; }
   flex: 1;
   clip-path: polygon(50% 100%, 0 0, 100% 0);
   max-width: 34px;
+  transform-origin: top center;
+  animation: bendera-berkibar 2.6s ease-in-out infinite;
 }
 .bunting span:nth-child(5n+1) { background: var(--green-500); }
 .bunting span:nth-child(5n+2) { background: var(--yellow-500); }
 .bunting span:nth-child(5n+3) { background: var(--white); border: 1px solid var(--green-100); }
 .bunting span:nth-child(5n+4) { background: var(--green-700); }
 .bunting span:nth-child(5n+5) { background: var(--yellow-300); }
+/* Delay berbeda-beda tiap bendera (kombinasi 2 pola modulus) supaya
+   kibarannya terlihat acak/alami, bukan serempak seperti robot. */
+.bunting span:nth-child(2n) { animation-delay: 0.25s; }
+.bunting span:nth-child(3n) { animation-delay: 0.5s; }
+.bunting span:nth-child(4n) { animation-delay: 0.75s; }
+.bunting span:nth-child(7n) { animation-delay: 1.05s; }
+
+@keyframes bendera-berkibar {
+  0%, 100% { transform: skewX(0deg) rotate(0deg); }
+  50% { transform: skewX(-7deg) rotate(-3deg); }
+}
 
 /* ---------- Navbar ---------- */
 .navbar {
@@ -822,5 +835,5 @@ textarea { resize: vertical; min-height: 80px; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }
