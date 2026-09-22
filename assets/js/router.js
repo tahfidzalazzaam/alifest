@@ -84,14 +84,17 @@ window.gotoRoute = function (hash) {
 };
 
 // ---------------------------------------------------------------------------
-// Logo navbar — bagian shell (index.html), bukan bagian view mana pun, jadi
-// dimuat sekali di sini, terpisah dari router(). Kalau panitia sudah upload
-// logo lewat "#/admin", tampilkan sebagai <img> apa adanya (TIDAK dipotong
-// bulat) menggantikan ikon bulan bawaan.
+// Logo navbar & status buka/tutup pendaftaran — bagian shell (index.html),
+// bukan bagian view mana pun, jadi dimuat sekali di sini, terpisah dari
+// router(). Kalau panitia sudah upload logo lewat "#/admin", tampilkan
+// sebagai <img> apa adanya (TIDAK dipotong bulat) menggantikan ikon bulan
+// bawaan. Kalau pendaftaran ditutup, tombol "Daftar Lomba" di navbar diberi
+// ikon gembok.
 // ---------------------------------------------------------------------------
 async function muatLogoNavbar() {
-  const { data } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
+  const { data } = await supabaseClient.from("site_settings").select("logo_url,pendaftaran_dibuka").eq("id", 1).single();
   if (data && data.logo_url) window.terapkanLogo(data.logo_url);
+  window.terapkanStatusPendaftaran(!data || data.pendaftaran_dibuka !== false);
 }
 
 // Favicon default (ikon bulan) — direkam sekali di awal supaya bisa
@@ -118,5 +121,15 @@ window.terapkanLogo = function (url) {
     } else {
       favicon.removeAttribute("type");
     }
+  }
+};
+
+// Dipanggil saat halaman dimuat (navbar) dan oleh view Beranda/Daftar untuk
+// menyamakan tampilan tombol pendaftaran di seluruh situs.
+window.terapkanStatusPendaftaran = function (dibuka) {
+  const navCta = document.getElementById("nav-cta-daftar");
+  if (navCta) {
+    navCta.classList.toggle("is-locked", !dibuka);
+    navCta.innerHTML = dibuka ? "Daftar Lomba" : "🔒 Daftar Lomba";
   }
 };
