@@ -282,6 +282,25 @@ function initDaftar() {
   }
   muatLinkJuknis();
 
+  /* ---------------- Kunci form kalau pendaftaran sedang ditutup panitia ---------------- */
+  async function cekStatusPendaftaran() {
+    const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
+    const dibuka = !data || data.pendaftaran_dibuka !== false;
+    if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(dibuka);
+    if (!dibuka) {
+      const shell = document.querySelector(".form-shell");
+      if (shell) {
+        shell.innerHTML =
+          '<div style="text-align:center;padding:20px 0;">' +
+            '<div style="font-size:2.4rem;margin-bottom:12px;">🔒</div>' +
+            '<h2>Pendaftaran Sedang Ditutup</h2>' +
+            '<p>Mohon maaf, pendaftaran ALIF 5.0 sedang tidak dibuka sementara oleh panitia. Silakan cek kembali nanti atau hubungi panitia untuk informasi lebih lanjut.</p>' +
+          '</div>';
+      }
+    }
+  }
+  cekStatusPendaftaran();
+
   /* ---------------- Muat data lomba dari Supabase ---------------- */
   async function muatDataLomba() {
     const [{ data: rules, error: errRules }, { data: rekapGender }] = await Promise.all([
