@@ -6,7 +6,7 @@ const BERANDA_TEMPLATE = `
   <h1>Unjuk bakat, rebut juara di <em>ALIF 5.0</em></h1>
   <p class="lede">Lima cabang lomba untuk santri dan pelajar tingkat SD dan SMP. Daftar online, cukup lampirkan beberapa berkas singkat.</p>
   <div class="hero__actions">
-    <a href="#/daftar" class="btn btn--primary">Daftar Sekarang</a>
+    <a href="#/daftar" class="btn btn--primary" id="hero-cta-daftar">Daftar Sekarang</a>
     <a href="#lomba" class="btn btn--ghost">Lihat Cabang Lomba</a>
     <span id="juknis-btn-wrap"></span>
   </div>
@@ -128,11 +128,19 @@ async function initBeranda() {
 
 async function muatTombolJuknis() {
   const wrap = document.getElementById("juknis-btn-wrap");
-  if (!wrap) return;
-  const { data } = await supabaseClient.from("site_settings").select("juknis_url").eq("id", 1).single();
-  if (data && data.juknis_url) {
+  const { data } = await supabaseClient.from("site_settings").select("juknis_url,pendaftaran_dibuka").eq("id", 1).single();
+
+  if (wrap && data && data.juknis_url) {
     wrap.innerHTML = '<a href="' + data.juknis_url + '" target="_blank" rel="noopener" class="btn btn--ghost">📄 Unduh Juknis</a>';
   }
+
+  const dibuka = !data || data.pendaftaran_dibuka !== false;
+  const heroCta = document.getElementById("hero-cta-daftar");
+  if (heroCta) {
+    heroCta.classList.toggle("is-locked", !dibuka);
+    heroCta.innerHTML = dibuka ? "Daftar Sekarang" : "🔒 Daftar Sekarang";
+  }
+  if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(dibuka);
 }
 
 window.ViewBeranda = { template: BERANDA_TEMPLATE, init: initBeranda };
