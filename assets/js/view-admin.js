@@ -74,11 +74,17 @@ function renderLogin(root) {
 
 /* ==================== DASHBOARD SHELL ==================== */
 
-function renderDashboard(root, session) {
+async function renderDashboard(root, session) {
+  const { data: settings } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
+  let dibuka = !settings || settings.pendaftaran_dibuka !== false;
+
   root.innerHTML =
     '<div class="admin-header">' +
       '<div><h1>Panel Panitia</h1><p>Masuk sebagai ' + session.user.email + '</p></div>' +
-      '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<button type="button" id="btn-toggle-pendaftaran"></button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
+      '</div>' +
     '</div>' +
     '<div class="admin-tabs">' +
       '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
@@ -88,6 +94,30 @@ function renderDashboard(root, session) {
       '<button type="button" class="admin-tab" data-tab="kartu">Kartu Peserta</button>' +
     '</div>' +
     '<div id="admin-content"></div>';
+
+  const btnToggle = document.getElementById("btn-toggle-pendaftaran");
+  function perbaruiTombolToggle() {
+    btnToggle.className = "btn " + (dibuka ? "btn--primary" : "btn--ghost");
+    btnToggle.textContent = dibuka ? "🟢 Pendaftaran Dibuka" : "🔒 Pendaftaran Ditutup";
+    btnToggle.title = dibuka ? "Ketuk untuk menutup pendaftaran" : "Ketuk untuk membuka pendaftaran";
+  }
+  perbaruiTombolToggle();
+
+  btnToggle.addEventListener("click", async function () {
+    const aksi = dibuka ? "menutup" : "membuka";
+    if (!confirm('Yakin ingin ' + aksi + ' pendaftaran? Perubahan langsung berlaku di situs publik.')) return;
+
+    btnToggle.disabled = true;
+    const { error } = await supabaseClient.from("site_settings").update({ pendaftaran_dibuka: !dibuka }).eq("id", 1);
+    btnToggle.disabled = false;
+
+    if (error) {
+      alert("Gagal mengubah status: " + error.message);
+      return;
+    }
+    dibuka = !dibuka;
+    perbaruiTombolToggle();
+  });
 
   document.getElementById("btn-logout").addEventListener("click", async function () {
     await supabaseClient.auth.signOut();
