@@ -158,6 +158,18 @@ img { max-width: 100%; display: block; }
 .nav-link--cta:hover { background: var(--green-900); color: var(--white); transform: translateY(-1px); }
 .nav-link--cta.is-active { background: var(--green-900); color: var(--white); }
 
+/* Tombol pendaftaran saat panitia menutup pendaftaran sementara */
+.nav-link--cta.is-locked,
+.btn.is-locked {
+  background: var(--ink-400);
+  box-shadow: none;
+}
+.nav-link--cta.is-locked:hover,
+.btn.is-locked:hover {
+  background: var(--ink-600);
+  transform: none;
+}
+
 /* Kontainer yang diisi router.js — sedikit fade tiap ganti "halaman".
    Class-nya ditambahkan ulang lewat JS di tiap navigasi (lihat router.js),
    supaya animasinya terpicu lagi meski elemen #app-nya sama. */
