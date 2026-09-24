@@ -400,7 +400,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Jenjang/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
@@ -416,7 +416,7 @@ async function loadTabLomba() {
           '<td>' + l.usia_min + '–' + l.usia_max + '</td>' +
           '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
           '<td>' + (l.gender_diizinkan === "semua" ? "Semua" : l.gender_diizinkan) + '</td>' +
-          '<td>' + (l.kuota == null ? "Tanpa batas" : l.kuota) + '</td>' +
+          '<td>' + (l.kuota == null ? "Tanpa batas" : (l.kuota + " → " + Math.floor(l.kuota / (l.jenjang.length || 1)) + "/sel")) + '</td>' +
           '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
           '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
           '<td>' + (l.maks_utusan_per_lembaga || 2) + '</td>' +
@@ -493,8 +493,8 @@ async function loadTabLomba() {
             '<div class="field"><label>Max Anggota</label><input type="number" id="lm-max-anggota" value="' + (existing && existing.max_anggota != null ? existing.max_anggota : 10) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
-            '<div class="field"><label>Kuota per Jenis Kelamin (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" />' +
-              '<div class="hint">Angka ini berlaku TERPISAH untuk laki-laki dan perempuan. Isi 20 berarti maks 20 peserta laki-laki DAN maks 20 peserta perempuan (total bisa sampai 40).</div></div>' +
+            '<div class="field"><label>Kuota per Jenjang & Gender (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" />' +
+              '<div class="hint">Dibagi otomatis ke tiap jenjang & gender. Contoh: isi 40 untuk lomba 2 jenjang = maks 20/jenjang/gender.</div></div>' +
             '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
