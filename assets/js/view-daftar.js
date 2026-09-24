@@ -336,7 +336,8 @@ function initDaftar() {
     genderCountMap = {};
     (rekapGender || []).forEach(function (row) {
       if (!genderCountMap[row.lomba_id]) genderCountMap[row.lomba_id] = {};
-      genderCountMap[row.lomba_id][row.jenis_kelamin] = row.jumlah;
+      if (!genderCountMap[row.lomba_id][row.jenjang]) genderCountMap[row.lomba_id][row.jenjang] = {};
+      genderCountMap[row.lomba_id][row.jenjang][row.jenis_kelamin] = row.jumlah;
     });
 
     renderLombaChoices();
@@ -365,28 +366,44 @@ function initDaftar() {
     return usia;
   }
 
-  // Dipakai di Langkah 1 (jenis kelamin belum diketahui) — lomba dianggap
-  // penuh hanya kalau kuota LAKI-LAKI dan PEREMPUAN dua-duanya sudah penuh.
-  function kuotaPenuh(lomba) {
-    if (!lomba.kuota) return false;
-    const g = genderCountMap[lomba.id] || {};
-    const lakiPenuh = (g["laki-laki"] || 0) >= lomba.kuota;
-    const perempuanPenuh = (g["perempuan"] || 0) >= lomba.kuota;
-    return lakiPenuh && perempuanPenuh;
+  // Kuota diisi admin dibagi rata per jenjang lomba itu (2 jenjang -> setengah,
+  // 3 jenjang -> sepertiga, dst). Ini angka maksimal untuk SATU sel
+  // (jenjang tertentu x gender tertentu).
+  function kuotaEfektifPerSel(lomba) {
+    if (!lomba.kuota) return null;
+    const jumlahJenjang = (lomba.jenjang && lomba.jenjang.length) || 1;
+    return Math.floor(lomba.kuota / jumlahJenjang);
   }
 
-  // Dipakai di Langkah 2, setelah jenis kelamin peserta diketahui.
-  function kuotaGenderPenuh(lomba, gender) {
-    if (!lomba.kuota) return false;
-    const g = genderCountMap[lomba.id] || {};
-    return (g[gender] || 0) >= lomba.kuota;
+  // Dipakai di Langkah 1 (jenjang & jenis kelamin belum diketahui) — lomba
+  // dianggap penuh hanya kalau SEMUA kombinasi jenjang x gender sudah penuh.
+  function kuotaPenuh(lomba) {
+    const efektif = kuotaEfektifPerSel(lomba);
+    if (efektif === null) return false;
+    const jenjangMap = genderCountMap[lomba.id] || {};
+    return lomba.jenjang.every(function (j) {
+      const g = jenjangMap[j] || {};
+      const lakiPenuh = (g["laki-laki"] || 0) >= efektif;
+      const perempuanPenuh = (g["perempuan"] || 0) >= efektif;
+      return lakiPenuh && perempuanPenuh;
+    });
+  }
+
+  // Dipakai di Langkah 2, setelah jenjang & jenis kelamin peserta diketahui.
+  function kuotaSelPenuh(lomba, jenjang, gender) {
+    const efektif = kuotaEfektifPerSel(lomba);
+    if (efektif === null) return false;
+    const jenjangMap = genderCountMap[lomba.id] || {};
+    const g = jenjangMap[jenjang] || {};
+    return (g[gender] || 0) >= efektif;
   }
 
   /* ---------------- Render pilihan lomba (Langkah 1) ---------------- */
   function renderLombaChoices() {
     lomboaChoicesEl.innerHTML = LOMBA_LIST.map(function (lomba) {
       const genderLabel = lomba.genderDiizinkan !== "semua" ? (" · Khusus " + lomba.genderDiizinkan) : "";
-      const kuotaLabel = lomba.kuota ? (" · Kuota " + lomba.kuota + "/gender") : "";
+      const efektif = kuotaEfektifPerSel(lomba);
+      const kuotaLabel = efektif !== null ? (" · Kuota " + efektif + "/jenjang/gender") : "";
       return (
         '<div class="lomba-choice" data-id="' + lomba.id + '">' +
           '<label>' +
@@ -485,8 +502,8 @@ function initDaftar() {
       return;
     }
 
-    if (kuotaGenderPenuh(selectedLomba, gender)) {
-      tampilkanNotice("error", "Mohon maaf, kuota peserta " + gender + " untuk lomba ini sudah penuh (maksimal " + selectedLomba.kuota + " " + gender + "). Silakan pilih cabang lomba lain.");
+    if (kuotaSelPenuh(selectedLomba, jenjang, gender)) {
+      tampilkanNotice("error", "Mohon maaf, kuota peserta " + gender + " jenjang " + jenjang + " untuk lomba ini sudah penuh. Silakan pilih cabang lomba lain.");
       terapkanLanjutan(false);
       return;
     }
