@@ -20,7 +20,7 @@ const BERANDA_TEMPLATE = `
 <section class="section container" id="lomba">
   <div class="section__head">
     <h2>Cabang lomba</h2>
-    <p>Setiap cabang punya syarat jenjang dan usia sendiri — sistem akan memfilter otomatis saat kamu mengisi form pendaftaran.</p>
+    <p>Setiap cabang punya syarat jenjang dan usia sendiri (beda-beda tiap jenjang) — sistem akan memfilter otomatis saat kamu mengisi form pendaftaran.</p>
   </div>
   <div class="lomba-grid" id="lomba-grid">
     <p class="hint">Memuat data lomba...</p>
@@ -30,21 +30,14 @@ const BERANDA_TEMPLATE = `
 <section class="section container">
   <div class="section__head">
     <h2>Syarat Berkas Pendaftaran</h2>
-    <p>Siapkan tiga berkas ini dulu sebelum mulai mengisi form, supaya prosesnya lancar tanpa bolak-balik.</p>
+    <p>Siapkan berkas berikut dulu sebelum mulai mengisi form, supaya prosesnya lancar tanpa bolak-balik.</p>
   </div>
   <div class="syarat-card">
     <div class="syarat-item">
-      <span class="syarat-item__icon">📄</span>
-      <div class="syarat-item__text">
-        <strong>Surat Keterangan Aktif Sekolah</strong>
-        <p>Diterbitkan oleh sekolah, format JPG/PNG/PDF, maksimal 4MB.</p>
-      </div>
-    </div>
-    <div class="syarat-item">
       <span class="syarat-item__icon">🪪</span>
       <div class="syarat-item__text">
-        <strong>Kartu Pelajar</strong>
-        <p>Foto atau scan kartu pelajar yang masih berlaku, format JPG/PNG/PDF, maksimal 4MB.</p>
+        <strong>Kartu Pelajar / Surat Keterangan Aktif Sekolah</strong>
+        <p>Unggah salah satu — kartu pelajar, atau surat keterangan aktif sekolah kalau kartu pelajar belum ada. Format JPG/PNG/PDF, maksimal 4MB.</p>
       </div>
     </div>
     <div class="syarat-item">
@@ -52,6 +45,13 @@ const BERANDA_TEMPLATE = `
       <div class="syarat-item__text">
         <strong>Screenshot Bukti Follow Instagram</strong>
         <p>Follow <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following").</p>
+      </div>
+    </div>
+    <div class="syarat-item">
+      <span class="syarat-item__icon">📋</span>
+      <div class="syarat-item__text">
+        <strong>Surat Delegasi dari Sekolah <em>(khusus Lomba Futsal)</em></strong>
+        <p>Surat resmi dari sekolah yang menugaskan tim mengikuti lomba. Hanya wajib untuk pendaftaran tim Futsal.</p>
       </div>
     </div>
   </div>
@@ -96,6 +96,12 @@ async function initBeranda() {
       ? ("Maks " + Math.floor(lomba.kuota / jumlahJenjang) + "/jenjang/gender")
       : "Tidak dibatasi";
 
+    const usiaRows = lomba.jenjang.map(function (j) {
+      const r = (lomba.usia_per_jenjang || {})[j];
+      const teks = r ? (r.min + "–" + r.max + " tahun") : "Belum diatur";
+      return '<div class="stub-row"><span>Usia ' + j + '</span><strong>' + teks + '</strong></div>';
+    }).join("");
+
     return (
       '<article class="lomba-card">' +
         '<div class="lomba-card__main">' +
@@ -105,11 +111,10 @@ async function initBeranda() {
         '</div>' +
         '<div class="lomba-card__stub">' +
           '<div class="stub-row"><span>Jenjang</span><strong>' + lomba.jenjang.join(" · ") + '</strong></div>' +
-          '<div class="stub-row"><span>Usia</span><strong>' + lomba.usia_min + '–' + lomba.usia_max + ' tahun</strong></div>' +
+          usiaRows +
           '<div class="stub-row"><span>Gender</span><strong>' + (lomba.gender_diizinkan === "semua" ? "Putra & Putri" : (lomba.gender_diizinkan === "laki-laki" ? "Khusus Putra" : "Khusus Putri")) + '</strong></div>' +
           '<div class="stub-row"><span>Tipe</span><strong>' + tipeLabel + '</strong></div>' +
           '<div class="stub-row"><span>Kuota</span><strong>' + kuotaLabel + '</strong></div>' +
-          '<div class="stub-row"><span>Maks/Sekolah</span><strong>' + (lomba.maks_utusan_per_lembaga || 2) + ' peserta</strong></div>' +
         '</div>' +
       '</article>'
     );
