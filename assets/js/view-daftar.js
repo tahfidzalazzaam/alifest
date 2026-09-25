@@ -131,6 +131,17 @@ const DAFTAR_TEMPLATE = `
             <button type="button" class="btn-add" id="btn-tambah-anggota">+ Tambah anggota</button>
             <div class="hint" id="anggota-hint"></div>
           </div>
+
+          <div class="field">
+            <label>Surat Delegasi dari Sekolah</label>
+            <p class="hint" style="margin-top:-4px;">Surat resmi dari sekolah yang menugaskan/mendelegasikan tim ini mengikuti lomba.</p>
+            <div class="upload-field" id="upload-delegasi">
+              <label class="upload-trigger" for="fileDelegasi">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+              <input type="file" id="fileDelegasi" name="fileDelegasi" accept=".jpg,.jpeg,.png,.pdf" />
+              <div class="filename" id="filename-delegasi">Belum ada berkas dipilih.</div>
+            </div>
+            <div class="form-error">Surat Delegasi dari Sekolah wajib diunggah untuk lomba tim.</div>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -138,23 +149,14 @@ const DAFTAR_TEMPLATE = `
           <legend>Unggah Berkas</legend>
 
           <div class="field">
-            <label>Surat Keterangan Aktif Sekolah</label>
-            <div class="upload-field" id="upload-surat">
-              <label class="upload-trigger" for="fileSurat">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-              <input type="file" id="fileSurat" name="fileSurat" accept=".jpg,.jpeg,.png,.pdf" />
-              <div class="filename" id="filename-surat">Belum ada berkas dipilih.</div>
-            </div>
-            <div class="form-error">Surat Keterangan Aktif Sekolah wajib diunggah.</div>
-          </div>
-
-          <div class="field">
-            <label>Kartu Pelajar</label>
+            <label>Kartu Pelajar / Surat Keterangan Aktif Sekolah</label>
+            <p class="hint" style="margin-top:-4px;">Unggah salah satu: kartu pelajar, atau surat keterangan aktif sekolah kalau kartu pelajar belum ada.</p>
             <div class="upload-field" id="upload-kartu">
               <label class="upload-trigger" for="fileKartu">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
               <input type="file" id="fileKartu" name="fileKartu" accept=".jpg,.jpeg,.png,.pdf" />
               <div class="filename" id="filename-kartu">Belum ada berkas dipilih.</div>
             </div>
-            <div class="form-error">Kartu Pelajar wajib diunggah.</div>
+            <div class="form-error">Kartu Pelajar / Surat Keterangan Aktif Sekolah wajib diunggah.</div>
           </div>
 
           <div class="field">
@@ -247,7 +249,7 @@ function initDaftar() {
     resultPanel.classList.remove("is-visible");
     form.querySelectorAll(".has-error").forEach(function (el) { el.classList.remove("has-error"); });
 
-    ["surat", "kartu", "ig"].forEach(function (key) {
+    ["kartu", "ig", "delegasi"].forEach(function (key) {
       document.getElementById("upload-" + key).classList.remove("has-file");
       document.getElementById("filename-" + key).textContent = "Belum ada berkas dipilih.";
     });
@@ -320,16 +322,14 @@ function initDaftar() {
         nama: r.nama,
         ikon: r.ikon,
         jenjang: r.jenjang,
-        usiaMin: r.usia_min,
-        usiaMax: r.usia_max,
+        usiaPerJenjang: r.usia_per_jenjang || {},
         tipe: r.tipe,
         minAnggota: r.min_anggota,
         maxAnggota: r.max_anggota,
         kuota: r.kuota,
         tanggalPelaksanaan: r.tanggal_pelaksanaan,
         toleransiTahun: r.toleransi_tahun || 0,
-        genderDiizinkan: r.gender_diizinkan || "semua",
-        maksUtusanPerLembaga: r.maks_utusan_per_lembaga || 2
+        genderDiizinkan: r.gender_diizinkan || "semua"
       };
     });
 
@@ -404,6 +404,10 @@ function initDaftar() {
       const genderLabel = lomba.genderDiizinkan !== "semua" ? (" · Khusus " + lomba.genderDiizinkan) : "";
       const efektif = kuotaEfektifPerSel(lomba);
       const kuotaLabel = efektif !== null ? (" · Kuota " + efektif + "/jenjang/gender") : "";
+      const usiaLabel = lomba.jenjang.map(function (j) {
+        const r = lomba.usiaPerJenjang[j];
+        return r ? (j + " " + r.min + "-" + r.max + "th") : (j + " -");
+      }).join(", ");
       return (
         '<div class="lomba-choice" data-id="' + lomba.id + '">' +
           '<label>' +
@@ -411,8 +415,7 @@ function initDaftar() {
             '<span class="lomba-choice__icon">' + lomba.ikon + '</span>' +
             '<span class="lomba-choice__text">' +
               '<strong>' + lomba.nama + '</strong>' +
-              '<span>' + lomba.jenjang.join("/") + ' · ' + lomba.usiaMin + '-' + lomba.usiaMax + ' th' + genderLabel + kuotaLabel +
-                ' · Maks ' + lomba.maksUtusanPerLembaga + ' peserta/sekolah</span>' +
+              '<span>' + usiaLabel + genderLabel + kuotaLabel + '</span>' +
             '</span>' +
             '<span class="lomba-choice__note"></span>' +
           '</label>' +
@@ -508,25 +511,34 @@ function initDaftar() {
       return;
     }
 
+    const syaratUsia = selectedLomba.usiaPerJenjang[jenjang];
+    if (!syaratUsia) {
+      tampilkanNotice("error", "Syarat usia untuk jenjang " + jenjang + " belum diatur panitia untuk lomba ini. Silakan hubungi panitia.");
+      terapkanLanjutan(false);
+      return;
+    }
+
     const usia = hitungUsiaPada(tgl, selectedLomba.tanggalPelaksanaan);
     const toleransi = selectedLomba.toleransiTahun || 0;
-    const batasBawah = selectedLomba.usiaMin - toleransi;
-    const batasAtas = selectedLomba.usiaMax + toleransi;
+    const usiaMin = syaratUsia.min;
+    const usiaMax = syaratUsia.max;
+    const batasBawah = usiaMin - toleransi;
+    const batasAtas = usiaMax + toleransi;
     const keteranganAcuan = selectedLomba.tanggalPelaksanaan ? " pada tanggal pelaksanaan lomba" : "";
 
-    if (usia >= selectedLomba.usiaMin && usia <= selectedLomba.usiaMax) {
+    if (usia >= usiaMin && usia <= usiaMax) {
       usiaNotice.style.display = "none";
       terapkanLanjutan(true);
     } else if (usia >= batasBawah && usia <= batasAtas) {
       tampilkanNotice("warning",
-        "Usia peserta (" + usia + " tahun" + keteranganAcuan + ") sedikit di luar ketentuan (" +
-        selectedLomba.usiaMin + "–" + selectedLomba.usiaMax + " tahun). Pendaftaran tetap bisa dilanjutkan, " +
+        "Usia peserta (" + usia + " tahun" + keteranganAcuan + ") sedikit di luar ketentuan untuk jenjang " + jenjang + " (" +
+        usiaMin + "–" + usiaMax + " tahun). Pendaftaran tetap bisa dilanjutkan, " +
         "tapi akan diverifikasi manual oleh panitia sebelum diterima.");
       terapkanLanjutan(true);
     } else {
       tampilkanNotice("error",
-        "Mohon maaf, usia peserta (" + usia + " tahun" + keteranganAcuan + ") di luar syarat lomba ini (" +
-        selectedLomba.usiaMin + "–" + selectedLomba.usiaMax + " tahun). Silakan pilih cabang lomba lain yang sesuai.");
+        "Mohon maaf, usia peserta (" + usia + " tahun" + keteranganAcuan + ") di luar syarat lomba ini untuk jenjang " + jenjang + " (" +
+        usiaMin + "–" + usiaMax + " tahun). Silakan pilih cabang lomba lain yang sesuai.");
       terapkanLanjutan(false);
     }
   }
@@ -613,9 +625,9 @@ function initDaftar() {
       box.classList.add("has-file");
     });
   }
-  setupUpload("fileSurat", "upload-surat", "filename-surat");
   setupUpload("fileKartu", "upload-kartu", "filename-kartu");
   setupUpload("fileIg", "upload-ig", "filename-ig");
+  setupUpload("fileDelegasi", "upload-delegasi", "filename-delegasi");
 
   /* ---------------- Upload ke Supabase Storage ---------------- */
   function ekstensi(file) {
@@ -695,12 +707,6 @@ function initDaftar() {
       });
     }
 
-    const fileSurat = document.getElementById("fileSurat");
-    const fileSuratField = fileSurat.closest(".field");
-    const suratOk = fileSurat.files.length > 0 && fileSurat.closest(".upload-field").classList.contains("has-file");
-    setFieldError(fileSuratField, !suratOk);
-    if (!suratOk) valid = false;
-
     const fileKartu = document.getElementById("fileKartu");
     const fileKartuField = fileKartu.closest(".field");
     const kartuOk = fileKartu.files.length > 0 && fileKartu.closest(".upload-field").classList.contains("has-file");
@@ -712,6 +718,14 @@ function initDaftar() {
     const igOk = fileIg.files.length > 0 && fileIg.closest(".upload-field").classList.contains("has-file");
     setFieldError(fileIgField, !igOk);
     if (!igOk) valid = false;
+
+    if (selectedLomba && selectedLomba.tipe === "tim") {
+      const fileDelegasi = document.getElementById("fileDelegasi");
+      const fileDelegasiField = fileDelegasi.closest(".field");
+      const delegasiOk = fileDelegasi.files.length > 0 && fileDelegasi.closest(".upload-field").classList.contains("has-file");
+      setFieldError(fileDelegasiField, !delegasiOk);
+      if (!delegasiOk) valid = false;
+    }
 
     const konfirmasi = document.getElementById("konfirmasi");
     document.getElementById("konfirmasi-error").style.display = konfirmasi.checked ? "none" : "block";
@@ -736,15 +750,17 @@ function initDaftar() {
     btnSubmit.disabled = true;
     btnSubmit.textContent = "Mengirim...";
 
-    const fileSurat = document.getElementById("fileSurat").files[0];
     const fileKartu = document.getElementById("fileKartu").files[0];
     const fileIg = document.getElementById("fileIg").files[0];
+    const fileDelegasi = selectedLomba.tipe === "tim" ? document.getElementById("fileDelegasi").files[0] : null;
 
-    Promise.all([
-      uploadKeStorage(fileSurat, "surat-aktif"),
+    const uploadPromises = [
       uploadKeStorage(fileKartu, "kartu-pelajar"),
       uploadKeStorage(fileIg, "bukti-follow-ig")
-    ])
+    ];
+    if (fileDelegasi) uploadPromises.push(uploadKeStorage(fileDelegasi, "surat-delegasi"));
+
+    Promise.all(uploadPromises)
       .then(function (urls) {
         const anggotaTim = selectedLomba.tipe === "tim"
           ? Array.from(anggotaListEl.querySelectorAll(".anggota-row")).map(function (row) {
@@ -771,9 +787,9 @@ function initDaftar() {
           p_email: document.getElementById("email").value.trim(),
           p_nama_tim: selectedLomba.tipe === "tim" ? document.getElementById("namaTim").value.trim() : null,
           p_pembina: selectedLomba.tipe === "tim" ? document.getElementById("pembina").value.trim() : null,
-          p_url_surat_aktif: urls[0],
-          p_url_kartu_pelajar: urls[1],
-          p_url_bukti_follow_ig: urls[2],
+          p_url_kartu_pelajar: urls[0],
+          p_url_bukti_follow_ig: urls[1],
+          p_url_surat_delegasi: fileDelegasi ? urls[2] : null,
           p_anggota_tim: anggotaTim
         });
       })
