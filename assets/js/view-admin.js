@@ -295,8 +295,9 @@ async function loadTabPendaftar() {
           '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
           '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
-          '<td><a href="' + r.url_surat_aktif + '" target="_blank" rel="noopener">Surat</a> · <a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
-            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>') + '</td>' +
+          '<td><a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
+            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>') +
+            (r.url_surat_delegasi ? ' · <a href="' + r.url_surat_delegasi + '" target="_blank" rel="noopener">Delegasi</a>' : '') + '</td>' +
           '<td><select class="status-select" data-id="' + r.id + '">' +
             ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
@@ -332,7 +333,7 @@ async function loadTabPendaftar() {
         btn.textContent = "Menghapus...";
 
         if (row) {
-          const pathBerkas = [row.url_surat_aktif, row.url_kartu_pelajar, row.url_bukti_follow_ig]
+          const pathBerkas = [row.url_kartu_pelajar, row.url_bukti_follow_ig, row.url_surat_delegasi]
             .filter(Boolean)
             .map(ekstrakPathBerkas)
             .filter(Boolean);
@@ -400,7 +401,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Jenjang/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Maks/Sekolah</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Jenjang/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
@@ -413,13 +414,15 @@ async function loadTabLomba() {
           '<td>' + l.ikon + '</td>' +
           '<td>' + l.nama + '</td>' +
           '<td>' + l.jenjang.join("/") + '</td>' +
-          '<td>' + l.usia_min + '–' + l.usia_max + '</td>' +
+          '<td>' + l.jenjang.map(function (j) {
+            const r = (l.usia_per_jenjang || {})[j];
+            return r ? (j + " " + r.min + "-" + r.max) : (j + " -");
+          }).join(", ") + '</td>' +
           '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
           '<td>' + (l.gender_diizinkan === "semua" ? "Semua" : l.gender_diizinkan) + '</td>' +
           '<td>' + (l.kuota == null ? "Tanpa batas" : (l.kuota + " → " + Math.floor(l.kuota / (l.jenjang.length || 1)) + "/sel")) + '</td>' +
           '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
           '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
-          '<td>' + (l.maks_utusan_per_lembaga || 2) + '</td>' +
           '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
           '<td>' +
             '<button type="button" class="btn-link btn-edit-lomba" data-id="' + l.id + '">Edit</button> · ' +
@@ -467,6 +470,10 @@ async function loadTabLomba() {
         '<input type="checkbox" class="lm-jenjang" value="' + j + '" ' + checked + ' /> ' + j + '</label>';
     }).join("");
 
+    // Syarat usia disimpan per jenjang. usiaState menyimpan nilai yang
+    // sedang diisi admin, supaya tidak hilang saat centang jenjang diubah.
+    let usiaState = Object.assign({}, existing && existing.usia_per_jenjang);
+
     wrap.innerHTML =
       '<div class="form-shell" style="margin-top:16px;">' +
         '<h3>' + (isEdit ? "Edit Lomba" : "Tambah Lomba Baru") + '</h3>' +
@@ -480,14 +487,16 @@ async function loadTabLomba() {
           '</div>' +
           '<div class="field"><label>Nama Lomba</label><input type="text" id="lm-nama" value="' + (existing ? existing.nama.replace(/"/g, "&quot;") : "") + '" /></div>' +
           '<div class="field"><label>Jenjang</label><div>' + jenjangCheckboxes + '</div></div>' +
-          '<div class="field-row">' +
-            '<div class="field"><label>Usia Minimal</label><input type="number" id="lm-usia-min" value="' + (existing ? existing.usia_min : 7) + '" /></div>' +
-            '<div class="field"><label>Usia Maksimal</label><input type="number" id="lm-usia-max" value="' + (existing ? existing.usia_max : 18) + '" /></div>' +
+          '<div class="field"><label>Syarat Usia per Jenjang</label>' +
+            '<div id="lm-usia-per-jenjang-wrap" class="kartu-pos-grid"></div>' +
           '</div>' +
-          '<div class="field"><label>Tipe</label><select id="lm-tipe">' +
-            '<option value="individu"' + (existing && existing.tipe === "individu" ? " selected" : "") + '>Individu</option>' +
-            '<option value="tim"' + (existing && existing.tipe === "tim" ? " selected" : "") + '>Tim</option>' +
-          '</select></div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label>Tipe</label><select id="lm-tipe">' +
+              '<option value="individu"' + (existing && existing.tipe === "individu" ? " selected" : "") + '>Individu</option>' +
+              '<option value="tim"' + (existing && existing.tipe === "tim" ? " selected" : "") + '>Tim</option>' +
+            '</select></div>' +
+            '<div class="field"></div>' +
+          '</div>' +
           '<div class="field-row" id="lm-anggota-wrap" style="display:' + (existing && existing.tipe === "tim" ? "grid" : "none") + ';">' +
             '<div class="field"><label>Min Anggota</label><input type="number" id="lm-min-anggota" value="' + (existing && existing.min_anggota != null ? existing.min_anggota : 5) + '" /></div>' +
             '<div class="field"><label>Max Anggota</label><input type="number" id="lm-max-anggota" value="' + (existing && existing.max_anggota != null ? existing.max_anggota : 10) + '" /></div>' +
@@ -503,14 +512,12 @@ async function loadTabLomba() {
             '<div class="field"><label>Toleransi Usia (tahun)</label><input type="number" id="lm-toleransi" min="0" value="' + (existing && existing.toleransi_tahun != null ? existing.toleransi_tahun : 0) + '" />' +
               '<div class="hint">Selisih usia yang masih ditoleransi (masuk "Perlu Verifikasi Usia"), bukan langsung ditolak. 0 = tanpa toleransi.</div></div>' +
           '</div>' +
-          '<div class="field-row">' +
-            '<div class="field"><label>Gender Diizinkan</label><select id="lm-gender">' +
+          '<div class="field">' +
+            '<label>Gender Diizinkan</label><select id="lm-gender">' +
               '<option value="semua"' + (!existing || existing.gender_diizinkan === "semua" ? " selected" : "") + '>Semua (laki-laki & perempuan)</option>' +
               '<option value="laki-laki"' + (existing && existing.gender_diizinkan === "laki-laki" ? " selected" : "") + '>Khusus Laki-laki</option>' +
               '<option value="perempuan"' + (existing && existing.gender_diizinkan === "perempuan" ? " selected" : "") + '>Khusus Perempuan</option>' +
-            '</select></div>' +
-            '<div class="field"><label>Maks Peserta per Sekolah</label><input type="number" id="lm-maks-utusan" min="1" value="' + (existing && existing.maks_utusan_per_lembaga != null ? existing.maks_utusan_per_lembaga : (existing && existing.tipe === "tim" ? 1 : 2)) + '" />' +
-              '<div class="hint">Batas jumlah pendaftar dari sekolah yang sama untuk lomba ini (hitung per baris pendaftaran, bukan per anggota tim).</div></div>' +
+            '</select>' +
           '</div>' +
           '<div class="field"><label>Deskripsi</label><textarea id="lm-deskripsi">' + (existing ? existing.deskripsi : "") + '</textarea></div>' +
           '<label class="checkbox-field"><input type="checkbox" id="lm-aktif" ' + (!existing || existing.aktif ? "checked" : "") + ' /> <span>Aktif (tampil di situs)</span></label>' +
@@ -523,6 +530,42 @@ async function loadTabLomba() {
       '</div>';
 
     wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    function bacaUsiaDariInput() {
+      document.querySelectorAll(".usia-jenjang-min").forEach(function (inp) {
+        const j = inp.getAttribute("data-jenjang");
+        usiaState[j] = Object.assign({}, usiaState[j], { min: parseInt(inp.value, 10) || 0 });
+      });
+      document.querySelectorAll(".usia-jenjang-max").forEach(function (inp) {
+        const j = inp.getAttribute("data-jenjang");
+        usiaState[j] = Object.assign({}, usiaState[j], { max: parseInt(inp.value, 10) || 0 });
+      });
+    }
+
+    function renderUsiaInputs() {
+      const jenjangTerpilih = Array.from(document.querySelectorAll(".lm-jenjang:checked")).map(function (c) { return c.value; });
+      const usiaWrap = document.getElementById("lm-usia-per-jenjang-wrap");
+      usiaWrap.innerHTML = jenjangTerpilih.length === 0
+        ? '<p class="hint">Centang jenjang dulu untuk atur syarat usianya.</p>'
+        : jenjangTerpilih.map(function (j) {
+            const data = usiaState[j] || { min: 7, max: 12 };
+            return (
+              '<div class="kartu-pos-group">' +
+                '<span class="kartu-pos-group__label">' + j + '</span>' +
+                '<label>Usia Min <input type="number" class="usia-jenjang-min" data-jenjang="' + j + '" value="' + data.min + '" /></label>' +
+                '<label>Usia Maks <input type="number" class="usia-jenjang-max" data-jenjang="' + j + '" value="' + data.max + '" /></label>' +
+              '</div>'
+            );
+          }).join("");
+    }
+    renderUsiaInputs();
+
+    document.querySelectorAll(".lm-jenjang").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        bacaUsiaDariInput();
+        renderUsiaInputs();
+      });
+    });
 
     document.getElementById("lm-tipe").addEventListener("change", function () {
       document.getElementById("lm-anggota-wrap").style.display = this.value === "tim" ? "grid" : "none";
@@ -546,13 +589,20 @@ async function loadTabLomba() {
         return;
       }
 
+      bacaUsiaDariInput();
+      const usiaPerJenjangFinal = {};
+      jenjangTerpilih.forEach(function (j) { usiaPerJenjangFinal[j] = usiaState[j] || { min: 7, max: 12 }; });
+      const semuaMin = jenjangTerpilih.map(function (j) { return usiaPerJenjangFinal[j].min; });
+      const semuaMax = jenjangTerpilih.map(function (j) { return usiaPerJenjangFinal[j].max; });
+
       const payload = {
         id: id,
         ikon: document.getElementById("lm-ikon").value.trim() || "🏆",
         nama: namaVal,
         jenjang: jenjangTerpilih,
-        usia_min: parseInt(document.getElementById("lm-usia-min").value, 10),
-        usia_max: parseInt(document.getElementById("lm-usia-max").value, 10),
+        usia_per_jenjang: usiaPerJenjangFinal,
+        usia_min: Math.min.apply(null, semuaMin),
+        usia_max: Math.max.apply(null, semuaMax),
         tipe: tipe,
         min_anggota: tipe === "tim" ? parseInt(document.getElementById("lm-min-anggota").value, 10) : null,
         max_anggota: tipe === "tim" ? parseInt(document.getElementById("lm-max-anggota").value, 10) : null,
@@ -561,7 +611,6 @@ async function loadTabLomba() {
         tanggal_pelaksanaan: document.getElementById("lm-tanggal-pelaksanaan").value || null,
         toleransi_tahun: parseInt(document.getElementById("lm-toleransi").value, 10) || 0,
         gender_diizinkan: document.getElementById("lm-gender").value,
-        maks_utusan_per_lembaga: parseInt(document.getElementById("lm-maks-utusan").value, 10) || 1,
         deskripsi: document.getElementById("lm-deskripsi").value.trim(),
         aktif: document.getElementById("lm-aktif").checked
       };
