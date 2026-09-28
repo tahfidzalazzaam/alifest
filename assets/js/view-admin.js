@@ -349,7 +349,7 @@ async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
 
-  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon,jenjang,kuota,usia_per_jenjang,tanggal_pelaksanaan").order("urutan");
+  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon,jenjang,kuota,usia_per_jenjang,tanggal_pelaksanaan,gender_diizinkan").order("urutan");
   const rowsRes = await supabaseClient.from("pendaftaran").select("*").order("created_at", { ascending: false });
 
   if (rowsRes.error) {
@@ -415,13 +415,27 @@ async function loadTabPendaftar() {
       let totalLabel = String(d.total);
       let genderLabel;
 
+      // Lomba yang sudah dikunci ke satu jenis kelamin (gender_diizinkan
+      // bukan "semua") tidak akan pernah punya peserta gender lain, jadi
+      // split L/P di sini cuma bikin bingung (seolah ada slot gender lain
+      // yang bisa terisi padahal tidak akan pernah ada peserta gender itu) --
+      // tampilkan angka tunggal saja, dan kapasitas totalnya juga TIDAK
+      // dikali 2 (cuma satu sel gender yang berlaku untuk lomba ini).
+      const genderTerkunci = r.gender_diizinkan !== "semua";
+
       if (efektif !== null) {
-        const kapasitasTotal = efektif * jenjangList.length * 2;
+        const kapasitasTotal = efektif * jenjangList.length * (genderTerkunci ? 1 : 2);
         totalLabel = d.total + ' / ' + kapasitasTotal;
         genderLabel = jenjangList.map(function (j) {
           const jd = d.perJenjang[j] || { l: 0, p: 0 };
+          if (genderTerkunci) {
+            const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
+            return '<span class="rekap-chip">' + j + ': ' + terisi + '/' + efektif + '</span>';
+          }
           return '<span class="rekap-chip">' + j + ': L ' + jd.l + '/' + efektif + ' · P ' + jd.p + '/' + efektif + '</span>';
         }).join("");
+      } else if (genderTerkunci) {
+        genderLabel = '<span class="rekap-chip">' + (r.gender_diizinkan === "laki-laki" ? d.l : d.p) + ' peserta</span>';
       } else {
         genderLabel = '<span class="rekap-chip">L: ' + d.l + ' · P: ' + d.p + '</span>';
       }
@@ -608,12 +622,19 @@ async function loadTabLomba() {
 
   // Kuota yang diisi admin dibagi rata per jenjang, lalu per gender --
   // ditampilkan gamblang per baris jenjang (bukan satu angka hasil bagi yang
-  // ambigu), plus angka asli yang diisi panitia sebagai catatan kecil.
+  // ambigu), plus angka asli yang diisi panitia sebagai catatan kecil. Kalau
+  // lomba itu sudah dikunci ke satu jenis kelamin (gender_diizinkan bukan
+  // "semua"), split putra/putri tidak ditampilkan -- gendernya sudah jelas
+  // dari kolom Gender di tabel yang sama, jadi split di sini cuma bikin
+  // seolah ada kuota gender lain padahal tidak ada peserta gender itu yang
+  // bisa daftar ke lomba ini.
   function renderKuotaLomba(l) {
     if (l.kuota == null) return "Tanpa batas";
     const efektif = Math.floor(l.kuota / (l.jenjang.length || 1));
+    const genderTerkunci = l.gender_diizinkan !== "semua";
     const baris = l.jenjang.map(function (j) {
-      return '<div>' + j + ': maks <strong>' + efektif + '</strong>/putra · <strong>' + efektif + '</strong>/putri</div>';
+      const nilai = genderTerkunci ? ('<strong>' + efektif + '</strong>') : ('<strong>' + efektif + '</strong>/putra · <strong>' + efektif + '</strong>/putri');
+      return '<div>' + j + ': maks ' + nilai + '</div>';
     }).join("");
     return baris + '<div class="hint" style="margin-top:2px;">(angka kuota diisi panitia: ' + l.kuota + ')</div>';
   }
