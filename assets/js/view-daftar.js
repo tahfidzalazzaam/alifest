@@ -70,7 +70,7 @@ const DAFTAR_TEMPLATE = `
           </div>
         </div>
 
-        <div class="field">
+        <div class="field" id="field-jenis-kelamin">
           <label>Jenis Kelamin</label>
           <div>
             <label style="font-weight:400;display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
@@ -249,6 +249,7 @@ function initDaftar() {
   const lomboaChoicesEl = document.getElementById("lomba-choices");
   const lombaErrorEl = document.getElementById("lomba-error");
   const fieldsetIndividu = document.getElementById("fieldset-individu");
+  const fieldJenisKelamin = document.getElementById("field-jenis-kelamin");
   const usiaNotice = document.getElementById("usia-notice");
   const bagianLanjutan = document.getElementById("bagian-lanjutan");
   const modeToggle = document.getElementById("mode-toggle");
@@ -521,6 +522,21 @@ function initDaftar() {
     }
   }
 
+  // Kalau lomba individu ini sudah dikunci ke satu jenis kelamin (bukan
+  // "semua"), pilihan Jenis Kelamin tidak perlu ditampilkan -- otomatis
+  // dipilihkan sistem, sama seperti perlakuan Jenjang/Jenis Kelamin Tim di
+  // formulir tim (lihat setupJenjangGenderTim).
+  function setupGenderIndividu() {
+    const perluPilihGender = selectedLomba.genderDiizinkan === "semua";
+    fieldJenisKelamin.style.display = perluPilihGender ? "block" : "none";
+    if (!perluPilihGender) {
+      const radio = document.querySelector('input[name="jenisKelamin"][value="' + selectedLomba.genderDiizinkan + '"]');
+      if (radio) radio.checked = true;
+    } else {
+      document.querySelectorAll('input[name="jenisKelamin"]').forEach(function (r) { r.checked = false; });
+    }
+  }
+
   /* ---------------- Siapkan input upload Kartu: satu file (individu) vs banyak file (tim) ---------------- */
   function setupUploadKartuLabel() {
     const input = document.getElementById("fileKartu");
@@ -566,6 +582,7 @@ function initDaftar() {
       evaluasiKelayakanTim();
     } else {
       fieldsetIndividu.style.display = "block";
+      setupGenderIndividu();
       evaluasiKelayakan();
     }
   }
