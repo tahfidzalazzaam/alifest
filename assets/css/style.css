@@ -1001,3 +1001,46 @@ tr.row-clickable:hover { background: var(--green-100); }
   html { scroll-behavior: auto; }
   * { transition: none !important; animation: none !important; }
 }
+
+/* ==========================================================================
+   Gerbang "Pendaftaran Belum Dibuka" (lihat assets/js/router.js) — overlay
+   penuh layar, muncul sekali per sesi browser saat
+   site_settings.pendaftaran_dibuka = false, dengan pesan lucu + tombol PIN
+   panitia untuk uji coba.
+   ========================================================================== */
+.gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 41, 28, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 2000;
+}
+.gate-overlay.is-visible { display: flex; }
+.gate-box {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  max-width: 440px;
+  width: 100%;
+  padding: 32px 28px;
+  text-align: center;
+}
+.gate-box__emoji { font-size: 3rem; margin-bottom: 10px; }
+.gate-box h2 { margin: 0 0 10px; font-size: 1.3rem; }
+.gate-box p { color: var(--ink-400); font-size: 0.94rem; margin: 0 0 20px; }
+.gate-box__actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.gate-box__actions .btn { width: 100%; }
+.gate-pin-wrap { margin-top: 18px; padding-top: 18px; border-top: 1.5px solid #f0eee4; text-align: left; }
+.gate-pin-wrap label { display: block; font-weight: 600; font-size: 0.86rem; margin-bottom: 6px; color: var(--green-900); }
+.gate-pin-row { display: flex; gap: 8px; }
+.gate-pin-row input { flex: 1; }
+.gate-pin-row .btn { white-space: nowrap; }
+.gate-pin-error { color: var(--danger); font-size: 0.82rem; margin-top: 8px; }
+
+@media (max-width: 480px) {
+  .gate-box { padding: 26px 20px; }
+  .gate-pin-row { flex-direction: column; }
+}
