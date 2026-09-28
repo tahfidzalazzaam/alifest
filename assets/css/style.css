@@ -511,9 +511,12 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--danger);
 }
 
-/* Anggota tim (futsal): Nama, Tempat Tanggal Lahir, Kelas, tombol hapus */
+/* Anggota tim (futsal): Nama, Tempat Lahir, Tanggal Lahir (+ usia), Kelas, tombol hapus */
 .anggota-list { display: grid; gap: 10px; margin-bottom: 10px; }
-.anggota-row { display: grid; grid-template-columns: 1.3fr 1.3fr 0.8fr auto; gap: 10px; align-items: center; }
+.anggota-row { display: grid; grid-template-columns: 1.1fr 0.9fr 1.1fr 0.7fr auto; gap: 10px; align-items: center; }
+.anggota-tgl-wrap { display: flex; align-items: center; gap: 6px; }
+.anggota-tgl-wrap .anggota-tgl { width: 100%; }
+.anggota-usia { font-size: 0.72rem; color: var(--ink-400); white-space: nowrap; }
 @media (max-width: 700px) { .anggota-row { grid-template-columns: 1fr; } }
 
 /* Chip kuota pada kartu pilihan lomba (Langkah 1, halaman Daftar) —
@@ -879,6 +882,13 @@ tr.row-clickable:hover { background: var(--green-100); }
 .modal-tim-berkas { font-size: 0.86rem; margin-bottom: 6px; }
 .modal-table { font-size: 0.82rem; }
 .modal-table th, .modal-table td { white-space: normal; }
+
+/* Status pendaftaran tim di popup detail (lihat migrasi 0018 -- cek usia
+   otomatis anggota tim), dan baris anggota yang usianya di luar syarat. */
+.modal-status { font-weight: 600; }
+.modal-status--warn { color: var(--danger); }
+.modal-status-hint { color: var(--danger); font-size: 0.82rem; margin: -4px 0 14px; }
+.row-usia-warn td { background: rgba(194, 58, 46, 0.08); color: var(--danger); }
 
 /* ==========================================================================
    TAMPILAN MOBILE (≤640px)
