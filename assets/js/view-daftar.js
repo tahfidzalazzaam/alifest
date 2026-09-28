@@ -339,9 +339,16 @@ function initDaftar() {
   /* ---------------- Kunci form kalau pendaftaran sedang ditutup panitia ---------------- */
   async function cekStatusPendaftaran() {
     const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
-    const dibuka = !data || data.pendaftaran_dibuka !== false;
-    if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(dibuka);
-    if (!dibuka) {
+    const dibukaAsli = !data || data.pendaftaran_dibuka !== false;
+    // Status navbar/hero selalu mengikuti status ASLI (bukan status uji
+    // coba), supaya panitia yang sedang uji coba tetap melihat gembok yang
+    // sama seperti yang dilihat pengunjung publik -- pengingat bahwa
+    // pendaftaran memang belum benar-benar dibuka.
+    if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(dibukaAsli);
+
+    const ujiCoba = typeof window.ujiCobaAktif === "function" && window.ujiCobaAktif();
+
+    if (!dibukaAsli && !ujiCoba) {
       const shell = document.querySelector(".form-shell");
       if (shell) {
         shell.innerHTML =
@@ -350,6 +357,23 @@ function initDaftar() {
             '<h2>Pendaftaran Sedang Ditutup</h2>' +
             '<p>Mohon maaf, pendaftaran ALIF 5.0 sedang tidak dibuka sementara oleh panitia. Silakan cek kembali nanti atau hubungi panitia untuk informasi lebih lanjut.</p>' +
           '</div>';
+      }
+      return;
+    }
+
+    // Lolos gerbang PIN (lihat router.js) tapi pendaftaran ASLI-nya masih
+    // ditutup ke publik -- form tetap ditampilkan seperti biasa untuk uji
+    // coba, tapi diberi pengingat jelas supaya panitia tidak lupa ini
+    // BENAR-BENAR masuk ke database (lihat migrasi 0020).
+    if (!dibukaAsli && ujiCoba) {
+      const shell = document.querySelector(".form-shell");
+      if (shell && !document.getElementById("banner-uji-coba")) {
+        const banner = document.createElement("div");
+        banner.id = "banner-uji-coba";
+        banner.className = "notice notice--warning";
+        banner.style.marginBottom = "16px";
+        banner.textContent = "🔑 Mode uji coba panitia aktif. Pendaftaran lewat sini SUNGGUHAN masuk ke database (bukan cuma pratinjau) — jangan lupa hapus lagi data uji cobanya di halaman Panitia setelah selesai. Pendaftaran publik tetap TERTUTUP sampai panitia membukanya lewat tombol \"Pendaftaran Dibuka\".";
+        shell.prepend(banner);
       }
     }
   }
@@ -1047,7 +1071,11 @@ function initDaftar() {
           p_url_bukti_follow_ig: u.urlIg,
           p_url_surat_delegasi: u.urlDelegasi,
           p_anggota_tim: anggotaTim,
-          p_url_berkas_tim: u.urlBerkasTim
+          p_url_berkas_tim: u.urlBerkasTim,
+          // Kosong/null kalau bukan mode uji coba -- server tetap aman kalau
+          // pendaftaran memang sedang dibuka (parameter ini diabaikan),
+          // lihat migrasi 0020.
+          p_kode_uji_coba: (typeof window.ujiCobaAktif === "function" && window.ujiCobaAktif()) ? window.KODE_UJI_COBA_PANITIA : null
         });
       })
       .then(function (res) {
