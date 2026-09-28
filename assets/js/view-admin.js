@@ -92,8 +92,12 @@ async function renderDashboard(root, session) {
       '<button type="button" class="admin-tab" data-tab="logo">Logo Situs</button>' +
       '<button type="button" class="admin-tab" data-tab="juknis">Petunjuk Teknis</button>' +
       '<button type="button" class="admin-tab" data-tab="kartu">Kartu Peserta</button>' +
+      '<button type="button" class="admin-tab" data-tab="notifwa">Notifikasi WA</button>' +
     '</div>' +
-    '<div id="admin-content"></div>';
+    '<div id="admin-content"></div>' +
+    '<div class="modal-overlay" id="modal-overlay" style="display:none;">' +
+      '<div class="modal-box" id="modal-box"></div>' +
+    '</div>';
 
   const btnToggle = document.getElementById("btn-toggle-pendaftaran");
   function perbaruiTombolToggle() {
@@ -135,10 +139,31 @@ async function renderDashboard(root, session) {
       if (nama === "logo") loadTabLogo();
       if (nama === "juknis") loadTabJuknis();
       if (nama === "kartu") loadTabKartu();
+      if (nama === "notifwa") loadTabNotifWa();
     });
   });
 
   loadTabPendaftar();
+}
+
+/* ==================== MODAL (dipakai untuk popup detail tim) ==================== */
+
+function bukaModal(judul, isiHTML) {
+  const overlay = document.getElementById("modal-overlay");
+  const box = document.getElementById("modal-box");
+  box.innerHTML =
+    '<div class="modal-box__header">' +
+      '<h3>' + judul + '</h3>' +
+      '<button type="button" class="modal-close" id="modal-close-btn" aria-label="Tutup">&times;</button>' +
+    '</div>' +
+    '<div class="modal-box__body">' + isiHTML + '</div>';
+  overlay.style.display = "flex";
+  document.getElementById("modal-close-btn").addEventListener("click", tutupModal);
+  overlay.onclick = function (e) { if (e.target === overlay) tutupModal(); };
+}
+
+function tutupModal() {
+  document.getElementById("modal-overlay").style.display = "none";
 }
 
 /* ==================== TAB 1: DATA PENDAFTAR ==================== */
@@ -185,11 +210,78 @@ async function mundurkanNomorJikaTerakhir(lombaId, nomorPendaftaran) {
   await supabaseClient.from("lomba_counter").update({ jumlah: angka - 1 }).eq("lomba_id", lombaId);
 }
 
+/* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
+async function bukaModalTim(row) {
+  const infoHTML =
+    '<div class="modal-tim-info">' +
+      '<div><strong>Nama Tim/Sekolah:</strong> ' + row.nama_tim + '</div>' +
+      '<div><strong>Nama Pendamping:</strong> ' + (row.pembina || "-") + '</div>' +
+      '<div><strong>No. WA Pendamping:</strong> ' + row.whatsapp + '</div>' +
+      '<div><strong>Nomor Pendaftaran:</strong> ' + row.nomor_pendaftaran + '</div>' +
+    '</div>' +
+    '<div class="modal-tim-berkas">' +
+      '<strong>Berkas:</strong> ' +
+      (row.url_surat_delegasi ? '<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">Surat Delegasi</a>' : '<span class="hint">Delegasi -</span>') +
+      ' · ' + (row.url_bukti_follow_ig ? '<a href="' + row.url_bukti_follow_ig + '" target="_blank" rel="noopener">Bukti IG</a>' : '<span class="hint">IG -</span>') +
+      ' · Kartu Anggota: ' + renderDaftarBerkasTim(row.url_berkas_tim) +
+    '</div>' +
+    '<h4 style="margin-top:16px;">Anggota Tim</h4>' +
+    '<div id="modal-tim-anggota"><p class="hint">Memuat data anggota tim...</p></div>';
+
+  bukaModal("Detail Tim — " + row.nama_tim, infoHTML);
+
+  const { data: anggota, error } = await supabaseClient
+    .from("anggota_tim").select("*").eq("nomor_pendaftaran", row.nomor_pendaftaran).order("created_at");
+
+  const wrap = document.getElementById("modal-tim-anggota");
+  if (!wrap) return; // modal sudah ditutup sebelum data selesai dimuat
+
+  wrap.innerHTML = error
+    ? ('<p>Gagal memuat anggota tim: ' + error.message + '</p>')
+    : (
+      '<table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat, Tanggal Lahir</th><th>Kelas</th></tr></thead><tbody>' +
+      (anggota && anggota.length ? anggota.map(function (a, i) {
+        return '<tr><td>' + (i + 1) + '</td><td>' + a.nama + '</td><td>' + (a.tempat_tanggal_lahir || "-") + '</td><td>' + a.kelas + '</td></tr>';
+      }).join("") : '<tr><td colspan="4">Belum ada data anggota.</td></tr>') +
+      '</tbody></table>'
+    );
+}
+
+function renderDaftarBerkasTim(urlBerkasTim) {
+  const daftar = Array.isArray(urlBerkasTim) ? urlBerkasTim : [];
+  if (daftar.length === 0) return '<span class="hint">-</span>';
+  return daftar.map(function (url, i) {
+    return '<a href="' + url + '" target="_blank" rel="noopener">#' + (i + 1) + '</a>';
+  }).join(" · ");
+}
+
+/* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function, dipanggil saat
+   status pendaftaran diubah jadi "Diterima" atau "Ditolak" -------- */
+async function kirimNotifikasiWA(id, selEl) {
+  const noteEl = document.querySelector('.wa-status-note[data-note-for="' + id + '"]');
+  if (noteEl) noteEl.textContent = " · mengirim WA...";
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("kirim-notifikasi-wa", { body: { id: id } });
+    if (error) throw error;
+    if (data && data.success === false) throw new Error(data.message || "Gagal mengirim notifikasi WA.");
+    if (noteEl) {
+      noteEl.textContent = " · ✅ WA terkirim";
+      setTimeout(function () { if (noteEl) noteEl.textContent = ""; }, 4000);
+    }
+  } catch (err) {
+    console.error("Gagal mengirim notifikasi WA:", err);
+    if (noteEl) {
+      noteEl.textContent = " · ⚠️ WA gagal terkirim";
+      noteEl.title = (err && err.message) || String(err);
+    }
+  }
+}
+
 async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
 
-  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon").order("urutan");
+  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon,jenjang,kuota").order("urutan");
   const rowsRes = await supabaseClient.from("pendaftaran").select("*").order("created_at", { ascending: false });
 
   if (rowsRes.error) {
@@ -211,19 +303,32 @@ async function loadTabPendaftar() {
       '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Lahir/Usia</th><th>Tipe</th><th>Sekolah</th><th>WA</th><th>Berkas</th><th>Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
-  /* -------- Rekap kartu (jumlah per lomba + jenis kelamin) -------- */
+  /* -------- Kuota efektif per sel (jenjang x gender), sama dengan rumus di server -------- */
+  function kuotaEfektifRule(r) {
+    if (r.kuota == null) return null;
+    const n = (r.jenjang && r.jenjang.length) || 1;
+    return Math.floor(r.kuota / n);
+  }
+
+  /* -------- Rekap kartu (jumlah per lomba + jenis kelamin) --------
+     Ditampilkan sebagai "terisi/kapasitas" per jenjang & gender (bukan
+     angka kuota yang sudah dibagi begitu saja) supaya tidak ambigu. */
   function renderRekap() {
     const rekapEl = document.getElementById("rekap-grid");
     if (!rekapEl) return;
 
     const perLomba = {};
-    rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0 }; });
+    rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0, perJenjang: {} }; });
     let totalL = 0, totalP = 0;
     rows.forEach(function (r) {
-      if (perLomba[r.lomba_id]) {
-        perLomba[r.lomba_id].total++;
-        if (r.jenis_kelamin === "laki-laki") perLomba[r.lomba_id].l++;
-        else if (r.jenis_kelamin === "perempuan") perLomba[r.lomba_id].p++;
+      const d = perLomba[r.lomba_id];
+      if (d) {
+        d.total++;
+        if (r.jenis_kelamin === "laki-laki") d.l++;
+        else if (r.jenis_kelamin === "perempuan") d.p++;
+        if (!d.perJenjang[r.jenjang]) d.perJenjang[r.jenjang] = { l: 0, p: 0 };
+        if (r.jenis_kelamin === "laki-laki") d.perJenjang[r.jenjang].l++;
+        else if (r.jenis_kelamin === "perempuan") d.perJenjang[r.jenjang].p++;
       }
       if (r.jenis_kelamin === "laki-laki") totalL++;
       else if (r.jenis_kelamin === "perempuan") totalP++;
@@ -232,15 +337,31 @@ async function loadTabPendaftar() {
     let html = '<div class="rekap-card' + (lombaFilter === "" ? " is-active" : "") + '" data-lomba="">' +
       '<div class="rekap-card__label">Semua Lomba</div>' +
       '<div class="rekap-card__total">' + rows.length + '</div>' +
-      '<div class="rekap-card__gender">L: ' + totalL + ' · P: ' + totalP + '</div>' +
+      '<div class="rekap-card__gender"><span class="rekap-chip">L: ' + totalL + ' · P: ' + totalP + '</span></div>' +
     '</div>';
 
     html += rules.map(function (r) {
-      const d = perLomba[r.id] || { total: 0, l: 0, p: 0 };
+      const d = perLomba[r.id] || { total: 0, l: 0, p: 0, perJenjang: {} };
+      const efektif = kuotaEfektifRule(r);
+      const jenjangList = r.jenjang || [];
+      let totalLabel = String(d.total);
+      let genderLabel;
+
+      if (efektif !== null) {
+        const kapasitasTotal = efektif * jenjangList.length * 2;
+        totalLabel = d.total + ' / ' + kapasitasTotal;
+        genderLabel = jenjangList.map(function (j) {
+          const jd = d.perJenjang[j] || { l: 0, p: 0 };
+          return '<span class="rekap-chip">' + j + ': L ' + jd.l + '/' + efektif + ' · P ' + jd.p + '/' + efektif + '</span>';
+        }).join("");
+      } else {
+        genderLabel = '<span class="rekap-chip">L: ' + d.l + ' · P: ' + d.p + '</span>';
+      }
+
       return '<div class="rekap-card' + (lombaFilter === r.id ? " is-active" : "") + '" data-lomba="' + r.id + '">' +
         '<div class="rekap-card__label">' + (r.ikon || "") + ' ' + r.nama + '</div>' +
-        '<div class="rekap-card__total">' + d.total + '</div>' +
-        '<div class="rekap-card__gender">L: ' + d.l + ' · P: ' + d.p + '</div>' +
+        '<div class="rekap-card__total">' + totalLabel + '</div>' +
+        '<div class="rekap-card__gender">' + genderLabel + '</div>' +
       '</div>';
     }).join("");
 
@@ -275,50 +396,79 @@ async function loadTabPendaftar() {
     }
 
     tbody.innerHTML = tampil.map(function (r) {
-      const tombolTim = r.tipe === "tim"
-        ? ' <button type="button" class="btn-link btn-lihat-tim" data-nomor="' + r.nomor_pendaftaran + '">(tim)</button>'
-        : "";
+      const isTim = r.tipe === "tim";
+      const tombolTim = isTim ? ' <span class="lp-badge lp-badge--tim">TIM · ketuk baris</span>' : "";
       const lpBadge = r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-";
       const tipeIkon = r.tipe_pendaftar === "lembaga" ? "🏫" : "🎓";
       const tipeJudul = r.tipe_pendaftar === "lembaga"
         ? ("Perwakilan Lembaga" + (r.penanggung_jawab_lembaga ? " · PJ: " + r.penanggung_jawab_lembaga : ""))
         : "Peserta Individu";
-      const lahirUsia = formatTanggalLahir(r.tanggal_lahir) + (r.usia != null ? " (" + r.usia + "th)" : "");
+      const lahirUsia = isTim ? "-" : (formatTanggalLahir(r.tanggal_lahir) + (r.usia != null ? " (" + r.usia + "th)" : ""));
+      const kelasLabel = isTim ? "-" : (r.jenjang + '/' + r.kelas);
+
+      const berkasCell = isTim
+        ? ('<button type="button" class="btn-link btn-lihat-tim" data-id="' + r.id + '">Lihat berkas</button>')
+        : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
+            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>'));
 
       return (
-        '<tr>' +
+        '<tr class="' + (isTim ? "row-clickable" : "") + '" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
           '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + lpBadge + '</span>' + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
-          '<td>' + r.jenjang + '/' + r.kelas + '</td>' +
+          '<td>' + kelasLabel + '</td>' +
           '<td>' + lahirUsia + '</td>' +
           '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
           '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
-          '<td><a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
-            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>') +
-            (r.url_surat_delegasi ? ' · <a href="' + r.url_surat_delegasi + '" target="_blank" rel="noopener">Delegasi</a>' : '') + '</td>' +
+          '<td>' + berkasCell + '</td>' +
           '<td><select class="status-select" data-id="' + r.id + '">' +
             ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
-          '</select></td>' +
+          '</select> <span class="wa-status-note" data-note-for="' + r.id + '"></span></td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
-        '</tr>' +
-        '<tr class="anggota-detail" data-detail-for="' + r.nomor_pendaftaran + '" style="display:none;"><td colspan="11"></td></tr>'
+        '</tr>'
       );
     }).join("");
+
+    // Baris tim (Futsal) bisa diketuk di mana saja untuk membuka popup detail
+    // anggota tim -- kecuali kalau yang diketuk adalah tombol/dropdown di
+    // dalam baris itu sendiri (status, hapus, lihat berkas), supaya tidak
+    // bentrok dengan aksi masing-masing.
+    tbody.querySelectorAll("tr.row-clickable").forEach(function (tr) {
+      tr.addEventListener("click", function (e) {
+        if (e.target.closest("select, button, a")) return;
+        const id = tr.getAttribute("data-id");
+        const row = rows.find(function (r) { return r.id === id; });
+        if (row) bukaModalTim(row);
+      });
+    });
+
+    tbody.querySelectorAll(".btn-lihat-tim").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const id = btn.getAttribute("data-id");
+        const row = rows.find(function (r) { return r.id === id; });
+        if (row) bukaModalTim(row);
+      });
+    });
 
     tbody.querySelectorAll(".status-select").forEach(function (sel) {
       sel.addEventListener("change", async function () {
         const id = sel.getAttribute("data-id");
-        const { error } = await supabaseClient.from("pendaftaran").update({ status: sel.value }).eq("id", id);
+        const statusBaru = sel.value;
+        const { error } = await supabaseClient.from("pendaftaran").update({ status: statusBaru }).eq("id", id);
         if (error) {
           alert("Gagal mengubah status: " + error.message);
           return;
         }
         const row = rows.find(function (r) { return r.id === id; });
-        if (row) row.status = sel.value;
+        if (row) row.status = statusBaru;
+        renderRekap();
+
+        if (statusBaru === "Diterima" || statusBaru === "Ditolak") {
+          kirimNotifikasiWA(id, sel);
+        }
       });
     });
 
@@ -361,24 +511,6 @@ async function loadTabPendaftar() {
       });
     });
 
-    tbody.querySelectorAll(".btn-lihat-tim").forEach(function (btn) {
-      btn.addEventListener("click", async function () {
-        const nomor = btn.getAttribute("data-nomor");
-        const detailRow = tbody.querySelector('.anggota-detail[data-detail-for="' + nomor + '"]');
-        if (detailRow.style.display === "none") {
-          const { data: anggota, error } = await supabaseClient.from("anggota_tim").select("*").eq("nomor_pendaftaran", nomor);
-          if (error) {
-            detailRow.querySelector("td").textContent = "Gagal memuat anggota tim.";
-          } else {
-            detailRow.querySelector("td").textContent = "Anggota tim: " +
-              (anggota || []).map(function (a) { return a.nama + " (" + a.kelas + ")"; }).join(", ");
-          }
-          detailRow.style.display = "table-row";
-        } else {
-          detailRow.style.display = "none";
-        }
-      });
-    });
   }
 
   renderRekap();
@@ -401,10 +533,22 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota/Jenjang/Gender</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota (jelas per jenjang &amp; gender)</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>';
+
+  // Kuota yang diisi admin dibagi rata per jenjang, lalu per gender --
+  // ditampilkan gamblang per baris jenjang (bukan satu angka hasil bagi yang
+  // ambigu), plus angka asli yang diisi panitia sebagai catatan kecil.
+  function renderKuotaLomba(l) {
+    if (l.kuota == null) return "Tanpa batas";
+    const efektif = Math.floor(l.kuota / (l.jenjang.length || 1));
+    const baris = l.jenjang.map(function (j) {
+      return '<div>' + j + ': maks <strong>' + efektif + '</strong>/putra · <strong>' + efektif + '</strong>/putri</div>';
+    }).join("");
+    return baris + '<div class="hint" style="margin-top:2px;">(angka kuota diisi panitia: ' + l.kuota + ')</div>';
+  }
 
   function renderTabel() {
     const tbody = document.querySelector("#tabel-lomba tbody");
@@ -420,7 +564,7 @@ async function loadTabLomba() {
           }).join(", ") + '</td>' +
           '<td>' + (l.tipe === "tim" ? "Tim" : "Individu") + '</td>' +
           '<td>' + (l.gender_diizinkan === "semua" ? "Semua" : l.gender_diizinkan) + '</td>' +
-          '<td>' + (l.kuota == null ? "Tanpa batas" : (l.kuota + " → " + Math.floor(l.kuota / (l.jenjang.length || 1)) + "/sel")) + '</td>' +
+          '<td>' + renderKuotaLomba(l) + '</td>' +
           '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
           '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
           '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
@@ -502,8 +646,8 @@ async function loadTabLomba() {
             '<div class="field"><label>Max Anggota</label><input type="number" id="lm-max-anggota" value="' + (existing && existing.max_anggota != null ? existing.max_anggota : 10) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
-            '<div class="field"><label>Kuota per Jenjang & Gender (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" />' +
-              '<div class="hint">Dibagi otomatis ke tiap jenjang & gender. Contoh: isi 40 untuk lomba 2 jenjang = maks 20/jenjang/gender.</div></div>' +
+            '<div class="field"><label>Angka Kuota Dasar (kosongkan = tanpa batas)</label><input type="number" id="lm-kuota" value="' + (existing && existing.kuota != null ? existing.kuota : "") + '" />' +
+              '<div class="hint">Dibagi otomatis rata ke tiap jenjang, dan angka hasil baginya berlaku PENUH untuk masing-masing gender (bukan dibagi lagi). Contoh: isi 40 untuk lomba dengan 2 jenjang → tiap jenjang dapat maks 20 putra + 20 putri (total kapasitas lomba = 80).</div></div>' +
             '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
           '</div>' +
           '<div class="field-row">' +
@@ -1156,6 +1300,70 @@ async function loadTabKartu() {
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
   document.getElementById("btn-cetak-pendamping").addEventListener("click", function () { cetakKartuPDF("pendamping"); });
+}
+
+/* ==================== TAB 6: NOTIFIKASI WA (FONNTE) ==================== */
+
+function escapeHTML(teks) {
+  const div = document.createElement("div");
+  div.textContent = teks == null ? "" : teks;
+  return div.innerHTML;
+}
+
+async function loadTabNotifWa() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat pengaturan notifikasi WA...</p>';
+
+  const { data } = await supabaseClient.from("site_settings").select("wa_notif_template").eq("id", 1).single();
+  const template = (data && data.wa_notif_template) || "";
+
+  content.innerHTML =
+    '<div class="form-shell" style="max-width:640px;">' +
+      '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
+      '<p>Pesan ini otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya diubah menjadi <strong>Diterima</strong> atau <strong>Ditolak</strong> di tab "Data Pendaftar". Anda bisa mengedit teksnya sendiri di sini kapan saja.</p>' +
+      '<div class="field">' +
+        '<label for="wa-template">Teks Pesan</label>' +
+        '<textarea id="wa-template" rows="9">' + escapeHTML(template) + '</textarea>' +
+        '<div class="hint">Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>.</div>' +
+      '</div>' +
+      '<div class="form-error" id="wa-template-error" style="display:none;"></div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-wa-template">Simpan Pesan</button>' +
+      '</div>' +
+      '<p class="hint" id="wa-template-status" style="margin-top:10px;"></p>' +
+    '</div>' +
+    '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
+      '<h3>⚙️ Setup Fonnte</h3>' +
+      '<p class="hint">Notifikasi dikirim lewat layanan Fonnte. Pastikan token Fonnte sudah diisi sebagai secret Edge Function <code>FONNTE_TOKEN</code> lewat dashboard Supabase (Project Settings → Edge Functions → Secrets), dan Edge Function <code>kirim-notifikasi-wa</code> sudah di-deploy. Lihat README.md bagian "Setup Notifikasi WhatsApp (Fonnte)" untuk langkah lengkapnya.</p>' +
+    '</div>';
+
+  document.getElementById("btn-simpan-wa-template").addEventListener("click", async function () {
+    const btn = this;
+    const errEl = document.getElementById("wa-template-error");
+    const statusEl = document.getElementById("wa-template-status");
+    errEl.style.display = "none";
+
+    const teks = document.getElementById("wa-template").value;
+    if (!teks.trim()) {
+      errEl.textContent = "Pesan tidak boleh kosong.";
+      errEl.style.display = "block";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
+    const { error } = await supabaseClient.from("site_settings").update({ wa_notif_template: teks }).eq("id", 1);
+    btn.disabled = false;
+    btn.textContent = "Simpan Pesan";
+
+    if (error) {
+      errEl.textContent = "Gagal menyimpan: " + error.message;
+      errEl.style.display = "block";
+      return;
+    }
+    statusEl.textContent = "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
 }
 
 window.ViewAdmin = { template: ADMIN_TEMPLATE, init: initAdmin };
