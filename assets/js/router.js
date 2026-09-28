@@ -133,3 +133,92 @@ window.terapkanStatusPendaftaran = function (dibuka) {
     navCta.innerHTML = dibuka ? "Daftar Lomba" : "🔒 Daftar Lomba";
   }
 };
+
+// ---------------------------------------------------------------------------
+// "Gerbang" pendaftaran ditutup -- muncul sekali per sesi browser, di
+// halaman mana pun, kalau site_settings.pendaftaran_dibuka = false. Panitia
+// tetap bisa masuk & uji coba (BENAR-BENAR submit ke database, bukan cuma
+// pratinjau) lewat kode PIN -- kode yang sama juga dicek ULANG di database
+// lewat parameter p_kode_uji_coba pada submit_pendaftaran (migrasi 0020),
+// supaya bukan cuma tipuan tampilan browser yang bisa dilewati begitu saja.
+//
+// Kode "80801998" sengaja ditulis apa adanya (hardcode) di sini DAN di
+// migrasi 0020 -- ini murni gerbang kemudahan untuk internal panitia, BUKAN
+// lapisan keamanan yang ketat (siapa pun yang buka source code situs bisa
+// membacanya). Kalau nanti kodenya mau diganti, cari & ganti string
+// "80801998" di KEDUA tempat itu.
+// ---------------------------------------------------------------------------
+const KODE_UJI_COBA_PANITIA = "80801998";
+
+const PESAN_LUCU_TUTUP = [
+  "Pendaftarannya lagi tidur siang dulu, nanti bangun sendiri kok. Sabar ya, jangan digedor-gedor. 😴",
+  "Loketnya lagi ngopi dulu ☕ — pendaftaran ALIF 5.0 belum dibuka. Coba mampir lagi nanti, ya!",
+  "Waduh, kamu kepagian! Pendaftarannya masih mimpi indah. Coba lagi lain waktu ya~ 😪",
+  "Pintunya masih dikunci panitia, kuncinya juga lagi dicari-cari. 🔑😅 Sabar dulu, ya!",
+  "Pendaftarannya lagi di-charge dulu biar ngebut begitu dibuka nanti. 🔋 Ditunggu kabarnya!",
+  "Tenang, bukan situsnya rusak kok — cuma pendaftarannya belum dibangunkan panitia. 🛌"
+];
+
+// Dipakai view-daftar.js untuk tahu apakah mode uji coba sedang aktif di
+// sesi browser ini (supaya form pendaftaran tetap ditampilkan & submitnya
+// menyertakan kode PIN), dan oleh gerbang ini sendiri supaya tidak muncul
+// lagi berulang-ulang selama sesi masih sama.
+window.ujiCobaAktif = function () {
+  try { return sessionStorage.getItem("alif_uji_coba_pin") === KODE_UJI_COBA_PANITIA; }
+  catch (e) { return false; } // mis. browser mode private yang memblokir sessionStorage
+};
+window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
+
+async function cekGerbangTutup() {
+  if (window.ujiCobaAktif()) return; // panitia sudah masuk mode uji coba sesi ini, tidak usah tampil lagi
+
+  const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
+  const dibuka = !data || data.pendaftaran_dibuka !== false;
+  if (dibuka) return;
+
+  const overlay = document.getElementById("gate-overlay");
+  if (!overlay) return;
+  const pesanEl = document.getElementById("gate-pesan");
+  if (pesanEl) pesanEl.textContent = PESAN_LUCU_TUTUP[Math.floor(Math.random() * PESAN_LUCU_TUTUP.length)];
+  overlay.classList.add("is-visible");
+}
+
+function pasangGerbangTutup() {
+  const overlay = document.getElementById("gate-overlay");
+  if (!overlay) return;
+
+  const btnTutup = document.getElementById("gate-btn-tutup");
+  const btnPanitia = document.getElementById("gate-btn-panitia");
+  const pinWrap = document.getElementById("gate-pin-wrap");
+  const pinInput = document.getElementById("gate-pin-input");
+  const pinError = document.getElementById("gate-pin-error");
+
+  btnTutup.addEventListener("click", function () {
+    overlay.classList.remove("is-visible");
+  });
+
+  btnPanitia.addEventListener("click", function () {
+    pinWrap.style.display = "block";
+    pinInput.focus();
+  });
+
+  function cobaMasukUjiCoba() {
+    const val = pinInput.value.trim();
+    if (val === KODE_UJI_COBA_PANITIA) {
+      pinError.style.display = "none";
+      try { sessionStorage.setItem("alif_uji_coba_pin", val); } catch (e) { /* tetap lanjut walau gagal disimpan -- cuma tidak awet lintas halaman */ }
+      overlay.classList.remove("is-visible");
+      router(); // render ulang halaman aktif, supaya form pendaftaran (kalau lagi di halaman Daftar) langsung muncul normal
+    } else {
+      pinError.style.display = "block";
+    }
+  }
+
+  document.getElementById("gate-pin-submit").addEventListener("click", cobaMasukUjiCoba);
+  pinInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") cobaMasukUjiCoba();
+  });
+}
+
+window.addEventListener("DOMContentLoaded", pasangGerbangTutup);
+window.addEventListener("DOMContentLoaded", cekGerbangTutup);
