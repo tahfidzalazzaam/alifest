@@ -699,15 +699,31 @@ function initDaftar() {
     radio.addEventListener("change", evaluasiKelayakanTim);
   });
 
-  /* ---------------- Anggota tim (dinamis): Nama, Tempat Tanggal Lahir, Kelas ---------------- */
+  /* ---------------- Anggota tim (dinamis): Nama, Tempat Lahir, Tanggal Lahir, Kelas ----------------
+     Tanggal lahir dipakai input tanggal ASLI (bukan teks bebas lagi) supaya
+     usia tiap anggota bisa dihitung & langsung ditampilkan di sebelah
+     inputnya begitu diisi -- murni informasi buat panitia, tidak menolak
+     pendaftaran berdasarkan usia ini (lihat catatan di migrasi 0016/0017). */
   function buatBarisAnggota(index) {
     const row = document.createElement("div");
     row.className = "anggota-row";
     row.innerHTML =
       '<input type="text" placeholder="Nama anggota ' + index + '" class="anggota-nama" required />' +
-      '<input type="text" placeholder="Tempat, tanggal lahir" class="anggota-ttl" required />' +
+      '<input type="text" placeholder="Tempat lahir" class="anggota-tempat" required />' +
+      '<span class="anggota-tgl-wrap">' +
+        '<input type="date" class="anggota-tgl" required />' +
+        '<small class="anggota-usia"></small>' +
+      '</span>' +
       '<input type="text" placeholder="Kelas" class="anggota-kelas" required />' +
       '<button type="button" class="btn-remove">Hapus</button>';
+
+    const inputTgl = row.querySelector(".anggota-tgl");
+    const usiaEl = row.querySelector(".anggota-usia");
+    inputTgl.addEventListener("change", function () {
+      const usia = hitungUsiaPada(inputTgl.value, null);
+      usiaEl.textContent = (usia !== null && !isNaN(usia)) ? (usia + " th") : "";
+    });
+
     row.querySelector(".btn-remove").addEventListener("click", function () {
       if (!selectedLomba) return;
       if (anggotaListEl.children.length <= selectedLomba.minAnggota) return;
@@ -899,10 +915,11 @@ function initDaftar() {
       const rows = anggotaListEl.querySelectorAll(".anggota-row");
       rows.forEach(function (row) {
         const nama = row.querySelector(".anggota-nama");
-        const ttl = row.querySelector(".anggota-ttl");
+        const tempat = row.querySelector(".anggota-tempat");
+        const tgl = row.querySelector(".anggota-tgl");
         const kelas = row.querySelector(".anggota-kelas");
-        const ok = nama.value.trim() !== "" && ttl.value.trim() !== "" && kelas.value.trim() !== "";
-        [nama, ttl, kelas].forEach(function (el) { el.style.borderColor = ok ? "" : "var(--danger)"; });
+        const ok = nama.value.trim() !== "" && tempat.value.trim() !== "" && tgl.value !== "" && kelas.value.trim() !== "";
+        [nama, tempat, tgl, kelas].forEach(function (el) { el.style.borderColor = ok ? "" : "var(--danger)"; });
         if (!ok) valid = false;
       });
     }
@@ -985,7 +1002,8 @@ function initDaftar() {
           ? Array.from(anggotaListEl.querySelectorAll(".anggota-row")).map(function (row) {
               return {
                 nama: row.querySelector(".anggota-nama").value.trim(),
-                tempat_tanggal_lahir: row.querySelector(".anggota-ttl").value.trim(),
+                tempat_lahir: row.querySelector(".anggota-tempat").value.trim(),
+                tanggal_lahir: row.querySelector(".anggota-tgl").value,
                 kelas: row.querySelector(".anggota-kelas").value.trim()
               };
             })
