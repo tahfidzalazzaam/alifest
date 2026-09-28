@@ -184,6 +184,44 @@ function formatTanggalLahir(tgl) {
   return hari + " " + bulan + " " + tahun;
 }
 
+// Usia pada tanggal acuan tertentu (default: hari ini kalau acuanStr kosong)
+// -- dipakai untuk menampilkan usia anggota tim di popup detail tim (dengan
+// acuan hari ini, kolom "Usia"), dan sejak migrasi 0018 juga dipakai untuk
+// menyorot anggota yang usianya di luar syarat jenjang PADA TANGGAL
+// PELAKSANAAN lomba (dengan acuan tanggal_pelaksanaan) -- meniru cara server
+// menentukan status "Perlu Verifikasi Usia" (ini cuma versi tampilan di sisi
+// admin, bukan sumber kebenaran statusnya, yang tetap dari kolom `status` di
+// database). Parsing manual sama seperti formatTanggalLahir, supaya tidak
+// meleset sehari akibat konversi zona waktu.
+function hitungUsiaDariTanggal(tgl, acuanStr) {
+  if (!tgl) return null;
+  const bagian = String(tgl).split("-");
+  if (bagian.length !== 3) return null;
+  const lahirTahun = parseInt(bagian[0], 10);
+  const lahirBulan = parseInt(bagian[1], 10);
+  const lahirHari = parseInt(bagian[2], 10);
+
+  let acuanTahun, acuanBulan, acuanHari;
+  if (acuanStr) {
+    const bagianAcuan = String(acuanStr).split("-");
+    if (bagianAcuan.length !== 3) return null;
+    acuanTahun = parseInt(bagianAcuan[0], 10);
+    acuanBulan = parseInt(bagianAcuan[1], 10);
+    acuanHari = parseInt(bagianAcuan[2], 10);
+  } else {
+    const now = new Date();
+    acuanTahun = now.getFullYear();
+    acuanBulan = now.getMonth() + 1;
+    acuanHari = now.getDate();
+  }
+
+  let usia = acuanTahun - lahirTahun;
+  const belumUlangTahun =
+    acuanBulan < lahirBulan || (acuanBulan === lahirBulan && acuanHari < lahirHari);
+  if (belumUlangTahun) usia--;
+  return usia;
+}
+
 // Ambil path relatif (di dalam bucket) dari URL publik Supabase Storage,
 // supaya bisa dipakai untuk storage.remove().
 function ekstrakPathBerkas(url) {
@@ -211,14 +249,24 @@ async function mundurkanNomorJikaTerakhir(lombaId, nomorPendaftaran) {
 }
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
-async function bukaModalTim(row) {
+// "rule" (opsional) = baris lomba_rules yang cocok dengan row.lomba_id --
+// dipakai untuk menyorot anggota yang usianya di luar syarat jenjang tim itu
+// (lihat migrasi 0018), murni bantuan visual di popup ini. Kalau tidak
+// disediakan (mis. dipanggil dari tempat lain), popup tetap tampil normal
+// tanpa penyorotan.
+async function bukaModalTim(row, rule) {
+  const statusClass = row.status === "Perlu Verifikasi Usia" ? " modal-status--warn" : "";
   const infoHTML =
     '<div class="modal-tim-info">' +
       '<div><strong>Nama Tim/Sekolah:</strong> ' + row.nama_tim + '</div>' +
       '<div><strong>Nama Pendamping:</strong> ' + (row.pembina || "-") + '</div>' +
       '<div><strong>No. WA Pendamping:</strong> ' + row.whatsapp + '</div>' +
       '<div><strong>Nomor Pendaftaran:</strong> ' + row.nomor_pendaftaran + '</div>' +
+      '<div><strong>Status:</strong> <span class="modal-status' + statusClass + '">' + row.status + '</span></div>' +
     '</div>' +
+    (row.status === "Perlu Verifikasi Usia"
+      ? '<p class="hint modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
+      : "") +
     '<div class="modal-tim-berkas">' +
       '<strong>Berkas:</strong> ' +
       (row.url_surat_delegasi ? '<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">Surat Delegasi</a>' : '<span class="hint">Delegasi -</span>') +
@@ -236,13 +284,33 @@ async function bukaModalTim(row) {
   const wrap = document.getElementById("modal-tim-anggota");
   if (!wrap) return; // modal sudah ditutup sebelum data selesai dimuat
 
+  // Syarat usia jenjang tim ini (kalau rule-nya tersedia & sudah diatur
+  // panitia) -- dipakai murni untuk menyorot baris anggota yang usianya di
+  // luar syarat, meniru pengecekan otomatis di migrasi 0018. Acuan tanggalnya
+  // tanggal_pelaksanaan lomba (sama seperti server), bukan hari ini.
+  const syaratUsiaTim = rule && rule.usia_per_jenjang ? rule.usia_per_jenjang[row.jenjang] : null;
+  const acuanUsiaTim = rule ? rule.tanggal_pelaksanaan : null;
+
   wrap.innerHTML = error
     ? ('<p>Gagal memuat anggota tim: ' + error.message + '</p>')
     : (
-      '<table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat, Tanggal Lahir</th><th>Kelas</th></tr></thead><tbody>' +
+      '<table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat, Tanggal Lahir</th><th>Usia</th><th>Kelas</th></tr></thead><tbody>' +
       (anggota && anggota.length ? anggota.map(function (a, i) {
-        return '<tr><td>' + (i + 1) + '</td><td>' + a.nama + '</td><td>' + (a.tempat_tanggal_lahir || "-") + '</td><td>' + a.kelas + '</td></tr>';
-      }).join("") : '<tr><td colspan="4">Belum ada data anggota.</td></tr>') +
+        // Data lama (sebelum migrasi 0017) cuma punya tempat_tanggal_lahir
+        // sebagai teks bebas, jadi usianya tidak bisa dihitung -- tampil "-".
+        const ttl = a.tanggal_lahir
+          ? ((a.tempat_lahir ? a.tempat_lahir + ", " : "") + formatTanggalLahir(a.tanggal_lahir))
+          : (a.tempat_tanggal_lahir || "-");
+        const usia = a.tanggal_lahir ? hitungUsiaDariTanggal(a.tanggal_lahir) : null;
+
+        // Usia pada tanggal pelaksanaan (bukan usia hari ini di atas) --
+        // dipakai cuma untuk menentukan apakah baris ini perlu disorot.
+        const usiaPadaAcuan = a.tanggal_lahir ? hitungUsiaDariTanggal(a.tanggal_lahir, acuanUsiaTim) : null;
+        const diLuarSyarat = syaratUsiaTim && usiaPadaAcuan != null &&
+          (usiaPadaAcuan < syaratUsiaTim.min || usiaPadaAcuan > syaratUsiaTim.max);
+
+        return '<tr class="' + (diLuarSyarat ? "row-usia-warn" : "") + '"><td>' + (i + 1) + '</td><td>' + a.nama + '</td><td>' + ttl + '</td><td>' + (usia != null ? usia + ' th' : '-') + (diLuarSyarat ? ' ⚠️' : '') + '</td><td>' + a.kelas + '</td></tr>';
+      }).join("") : '<tr><td colspan="5">Belum ada data anggota.</td></tr>') +
       '</tbody></table>'
     );
 }
@@ -281,7 +349,7 @@ async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
 
-  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon,jenjang,kuota").order("urutan");
+  const rulesRes = await supabaseClient.from("lomba_rules").select("id,nama,ikon,jenjang,kuota,usia_per_jenjang,tanggal_pelaksanaan").order("urutan");
   const rowsRes = await supabaseClient.from("pendaftaran").select("*").order("created_at", { ascending: false });
 
   if (rowsRes.error) {
@@ -441,7 +509,7 @@ async function loadTabPendaftar() {
         if (e.target.closest("select, button, a")) return;
         const id = tr.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
-        if (row) bukaModalTim(row);
+        if (row) bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
       });
     });
 
@@ -449,7 +517,7 @@ async function loadTabPendaftar() {
       btn.addEventListener("click", function () {
         const id = btn.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
-        if (row) bukaModalTim(row);
+        if (row) bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
       });
     });
 
