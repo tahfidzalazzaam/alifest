@@ -511,10 +511,19 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--danger);
 }
 
-/* Anggota tim (futsal) */
+/* Anggota tim (futsal): Nama, Tempat Tanggal Lahir, Kelas, tombol hapus */
 .anggota-list { display: grid; gap: 10px; margin-bottom: 10px; }
-.anggota-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; }
-@media (max-width: 560px) { .anggota-row { grid-template-columns: 1fr; } }
+.anggota-row { display: grid; grid-template-columns: 1.3fr 1.3fr 0.8fr auto; gap: 10px; align-items: center; }
+@media (max-width: 700px) { .anggota-row { grid-template-columns: 1fr; } }
+
+/* Chip kuota pada kartu pilihan lomba (Langkah 1, halaman Daftar) —
+   ditampilkan gamblang per jenjang & gender, bukan satu angka ambigu. */
+.kuota-chip {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.76rem;
+  color: var(--green-700);
+}
 .btn-remove {
   background: none;
   border: 1.5px solid #e3e0d3;
@@ -794,6 +803,83 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .btn-link:hover { text-decoration: underline; }
 
+/* Chip rekap kuota (kartu rekap di tab Data Pendaftar, & baris "L: x/y") —
+   ditampilkan sebagai "terisi/kapasitas" per jenjang & gender, jelas dan
+   tidak ambigu seperti angka kuota tunggal yang sudah dibagi diam-diam. */
+.rekap-card__gender { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.rekap-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: var(--ink-600);
+  background: var(--yellow-100);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Baris tabel pendaftar tim (Futsal) — bisa diketuk untuk membuka popup
+   detail anggota tim */
+tr.row-clickable { cursor: pointer; transition: background 0.12s ease; }
+tr.row-clickable:hover { background: var(--green-100); }
+.lp-badge--tim {
+  background: var(--yellow-500);
+  color: var(--green-900);
+}
+.wa-status-note {
+  font-size: 0.68rem;
+  color: var(--ink-400);
+  white-space: nowrap;
+}
+
+/* Popup/modal (dipakai untuk detail tim di halaman Panitia) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 41, 28, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+.modal-box {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  max-width: 620px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.modal-box__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1.5px solid #f0eee4;
+  position: sticky;
+  top: 0;
+  background: var(--white);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.modal-box__header h3 { margin: 0; font-size: 1.1rem; }
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink-400);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.modal-close:hover { color: var(--danger); }
+.modal-box__body { padding: 18px 22px 24px; }
+.modal-tim-info { display: grid; gap: 6px; margin-bottom: 14px; font-size: 0.9rem; }
+.modal-tim-info strong { color: var(--green-900); }
+.modal-tim-berkas { font-size: 0.86rem; margin-bottom: 6px; }
+.modal-table { font-size: 0.82rem; }
+.modal-table th, .modal-table td { white-space: normal; }
+
 /* ==========================================================================
    TAMPILAN MOBILE (≤640px)
    ==========================================================================
@@ -892,6 +978,13 @@ textarea { resize: vertical; min-height: 80px; }
   .rekap-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
   .rekap-card { padding: 10px 12px; }
   .rekap-card__total { font-size: 1.2rem; }
+  .rekap-chip { font-size: 0.66rem; padding: 2px 6px; }
+
+  /* Popup detail tim: dempet ke tepi layar supaya isinya lega di HP */
+  .modal-overlay { padding: 10px; }
+  .modal-box { max-height: 92vh; border-radius: var(--radius-md); }
+  .modal-box__header { padding: 14px 16px; }
+  .modal-box__body { padding: 14px 16px 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
