@@ -94,11 +94,17 @@ async function initBeranda() {
     const jumlahJenjang = (lomba.jenjang && lomba.jenjang.length) || 1;
     const efektifKuota = lomba.kuota ? Math.floor(lomba.kuota / jumlahJenjang) : null;
     // Ditampilkan gamblang per jenjang (bukan satu angka hasil bagi yang
-    // ambigu) -- tiap jenjang punya kuota sendiri untuk putra & untuk putri.
+    // ambigu) -- tiap jenjang punya kuota sendiri untuk putra & untuk putri,
+    // KECUALI lomba itu sudah dikunci ke satu jenis kelamin (gender_diizinkan
+    // bukan "semua") -- gendernya sudah jelas dari baris "Gender" di bawah,
+    // jadi split putra/putri di sini cuma bikin bingung (seolah ada kuota
+    // gender lain padahal tidak ada peserta gender itu yang bisa daftar).
+    const genderTerkunci = lomba.gender_diizinkan !== "semua";
     const kuotaRows = efektifKuota === null
       ? '<div class="stub-row"><span>Kuota</span><strong>Tidak dibatasi</strong></div>'
       : lomba.jenjang.map(function (j) {
-          return '<div class="stub-row"><span>Kuota ' + j + '</span><strong>' + efektifKuota + '/putra · ' + efektifKuota + '/putri</strong></div>';
+          const nilai = genderTerkunci ? String(efektifKuota) : (efektifKuota + '/putra · ' + efektifKuota + '/putri');
+          return '<div class="stub-row"><span>Kuota ' + j + '</span><strong>' + nilai + '</strong></div>';
         }).join("");
 
     const usiaRows = lomba.jenjang.map(function (j) {
