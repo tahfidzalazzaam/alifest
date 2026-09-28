@@ -37,6 +37,31 @@
   <p>ALIF 5.0 — Al Azzaam Islamic Fair · Diselenggarakan oleh PPTQ Al Azzaam</p>
 </footer>
 
+<!-- "Gerbang" peringatan saat pendaftaran ditutup (site_settings.pendaftaran_dibuka
+     = false) -- muncul sekali per sesi browser, di halaman mana pun, dipasang &
+     dikendalikan dari assets/js/router.js (lihat "Gerbang pendaftaran ditutup"
+     di file itu). Ada tombol kecil untuk panitia masuk mode uji coba lewat PIN,
+     supaya tetap bisa menjajal alur pendaftaran sebelum dibuka ke publik. -->
+<div class="gate-overlay" id="gate-overlay" aria-hidden="true">
+  <div class="gate-box">
+    <div class="gate-box__emoji">😴</div>
+    <h2>Pendaftaran Belum Dibuka</h2>
+    <p id="gate-pesan">Pendaftaran ALIF 5.0 sedang ditutup sementara oleh panitia.</p>
+    <div class="gate-box__actions">
+      <button type="button" class="btn btn--primary" id="gate-btn-tutup">Oke, saya tunggu</button>
+      <button type="button" class="btn-link" id="gate-btn-panitia">🔑 Saya panitia, mau uji coba</button>
+    </div>
+    <div class="gate-pin-wrap" id="gate-pin-wrap" style="display:none;">
+      <label for="gate-pin-input">Kode PIN Panitia</label>
+      <div class="gate-pin-row">
+        <input type="password" inputmode="numeric" id="gate-pin-input" placeholder="Masukkan PIN" autocomplete="off" />
+        <button type="button" class="btn btn--primary" id="gate-pin-submit">Masuk</button>
+      </div>
+      <div class="gate-pin-error" id="gate-pin-error" style="display:none;">PIN salah, coba lagi ya.</div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="assets/js/config.js"></script>
 <script src="assets/js/supabase-client.js"></script>
