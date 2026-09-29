@@ -205,13 +205,13 @@ const DAFTAR_TEMPLATE = `
 
           <div class="field">
             <label>Screenshot Bukti Follow Instagram</label>
-            <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following").</p>
+            <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following"). Minimal 2 berkas (satu per akun), boleh lebih.</p>
             <div class="upload-field" id="upload-ig">
-              <label class="upload-trigger" for="fileIg">Pilih berkas (JPG/PNG, maks 4MB)</label>
-              <input type="file" id="fileIg" name="fileIg" accept=".jpg,.jpeg,.png,.pdf" />
+              <label class="upload-trigger" for="fileIg">Pilih berkas (minimal 2, JPG/PNG/PDF, maks 4MB/file)</label>
+              <input type="file" id="fileIg" name="fileIg" accept=".jpg,.jpeg,.png,.pdf" multiple />
               <div class="filename" id="filename-ig">Belum ada berkas dipilih.</div>
             </div>
-            <div class="form-error">Screenshot bukti follow Instagram wajib diunggah.</div>
+            <div class="form-error">Screenshot bukti follow Instagram wajib diunggah, minimal 2 berkas.</div>
           </div>
         </fieldset>
 
@@ -869,8 +869,47 @@ function initDaftar() {
     });
   }
 
+  // Bukti follow IG: sama seperti Kartu Pelajar tim -- selalu bisa pilih
+  // banyak file sekaligus, tapi di sini WAJIB minimal 2 file (lihat migrasi
+  // 0021: submit_pendaftaran menolak kalau array-nya kurang dari 2 elemen).
+  function setupUploadIg() {
+    const input = document.getElementById("fileIg");
+    const box = document.getElementById("upload-ig");
+    const filenameEl = document.getElementById("filename-ig");
+
+    input.addEventListener("change", function () {
+      const files = Array.from(input.files || []);
+      if (files.length === 0) {
+        box.classList.remove("has-file");
+        filenameEl.textContent = "Belum ada berkas dipilih.";
+        return;
+      }
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
+        const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
+        if (!sizeOk || !typeOk) {
+          filenameEl.textContent = !sizeOk
+            ? ('Berkas "' + file.name + '" melebihi ' + MAX_FILE_SIZE_MB + 'MB. Pilih ulang berkas.')
+            : ('Format "' + file.name + '" tidak didukung. Gunakan JPG, PNG, atau PDF.');
+          box.classList.remove("has-file");
+          input.value = "";
+          return;
+        }
+      }
+      const daftarNama = files.length + " berkas dipilih: " + files.map(function (f) { return f.name; }).join(", ");
+      if (files.length < 2) {
+        filenameEl.textContent = daftarNama + " — minimal 2 berkas, pilih tambahan lagi.";
+        box.classList.remove("has-file");
+        return;
+      }
+      filenameEl.textContent = daftarNama;
+      box.classList.add("has-file");
+    });
+  }
+
   setupUploadKartu();
-  setupUpload("fileIg", "upload-ig", "filename-ig");
+  setupUploadIg();
   setupUpload("fileDelegasi", "upload-delegasi", "filename-delegasi");
 
   /* ---------------- Upload ke Supabase Storage ---------------- */
@@ -973,7 +1012,7 @@ function initDaftar() {
 
     const fileIg = document.getElementById("fileIg");
     const fileIgField = fileIg.closest(".field");
-    const igOk = fileIg.files.length > 0 && fileIg.closest(".upload-field").classList.contains("has-file");
+    const igOk = fileIg.files.length >= 2 && fileIg.closest(".upload-field").classList.contains("has-file");
     setFieldError(fileIgField, !igOk);
     if (!igOk) valid = false;
 
@@ -1011,7 +1050,7 @@ function initDaftar() {
     const isTim = selectedLomba.tipe === "tim";
     const namaTimVal = isTim ? document.getElementById("namaTim").value.trim() : "";
     const labelDasar = isTim ? namaFileAman(namaTimVal) : "";
-    const fileIg = document.getElementById("fileIg").files[0];
+    const fileIgList = Array.from(document.getElementById("fileIg").files || []);
 
     let uploadTugas;
     if (isTim) {
@@ -1021,19 +1060,19 @@ function initDaftar() {
         fileKartuList.map(function (f, i) { return uploadKeStorage(f, labelDasar + "-kartu-" + (i + 1)); })
       ).then(function (urlsKartu) {
         return Promise.all([
-          uploadKeStorage(fileIg, labelDasar + "-bukti-ig"),
+          Promise.all(fileIgList.map(function (f, i) { return uploadKeStorage(f, labelDasar + "-bukti-ig-" + (i + 1)); })),
           uploadKeStorage(fileDelegasi, labelDasar + "-delegasi")
         ]).then(function (hasilLain) {
-          return { urlKartuTunggal: null, urlBerkasTim: urlsKartu, urlIg: hasilLain[0], urlDelegasi: hasilLain[1] };
+          return { urlKartuTunggal: null, urlBerkasTim: urlsKartu, urlIgArray: hasilLain[0], urlDelegasi: hasilLain[1] };
         });
       });
     } else {
       const fileKartuTunggal = document.getElementById("fileKartu").files[0];
       uploadTugas = Promise.all([
         uploadKeStorage(fileKartuTunggal, "kartu-pelajar"),
-        uploadKeStorage(fileIg, "bukti-follow-ig")
+        Promise.all(fileIgList.map(function (f, i) { return uploadKeStorage(f, "bukti-follow-ig-" + (i + 1)); }))
       ]).then(function (hasil) {
-        return { urlKartuTunggal: hasil[0], urlBerkasTim: [], urlIg: hasil[1], urlDelegasi: null };
+        return { urlKartuTunggal: hasil[0], urlBerkasTim: [], urlIgArray: hasil[1], urlDelegasi: null };
       });
     }
 
@@ -1068,7 +1107,7 @@ function initDaftar() {
           p_nama_tim: isTim ? namaTimVal : null,
           p_pembina: isTim ? document.getElementById("pembina").value.trim() : null,
           p_url_kartu_pelajar: u.urlKartuTunggal,
-          p_url_bukti_follow_ig: u.urlIg,
+          p_url_bukti_follow_ig: u.urlIgArray,
           p_url_surat_delegasi: u.urlDelegasi,
           p_anggota_tim: anggotaTim,
           p_url_berkas_tim: u.urlBerkasTim,
