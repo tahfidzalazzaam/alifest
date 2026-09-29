@@ -75,8 +75,9 @@ function renderLogin(root) {
 /* ==================== DASHBOARD SHELL ==================== */
 
 async function renderDashboard(root, session) {
-  const { data: settings } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
+  const { data: settings } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka, tanggal_tutup_pendaftaran").eq("id", 1).single();
   let dibuka = !settings || settings.pendaftaran_dibuka !== false;
+  let tanggalTutup = (settings && settings.tanggal_tutup_pendaftaran) || null; // ISO string atau null
 
   root.innerHTML =
     '<div class="admin-header">' +
@@ -85,6 +86,18 @@ async function renderDashboard(root, session) {
         '<button type="button" id="btn-toggle-pendaftaran"></button>' +
         '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
       '</div>' +
+    '</div>' +
+    '<div class="admin-tutup-otomatis" id="admin-tutup-otomatis">' +
+      '<div class="admin-tutup-otomatis__field">' +
+        '<label for="input-tanggal-tutup">⏰ Tutup Otomatis Pendaftaran (opsional)</label>' +
+        '<div class="admin-tutup-otomatis__row">' +
+          '<input type="datetime-local" id="input-tanggal-tutup" />' +
+          '<button type="button" class="btn btn--primary" id="btn-simpan-tanggal-tutup">Simpan</button>' +
+          '<button type="button" class="btn-link" id="btn-hapus-tanggal-tutup">Hapus tanggal</button>' +
+        '</div>' +
+        '<div class="hint">Begitu waktu ini terlewati, pendaftaran otomatis TERTUTUP untuk publik (sama seperti tombol "Pendaftaran Ditutup" di atas) — tidak perlu panitia klik apa pun. Ini TERPISAH dari Tanggal Pelaksanaan tiap lomba (yang dipakai untuk menghitung usia peserta di tab "Kelola Lomba"). Kosongkan untuk mematikan penutupan otomatis (tutup/buka sepenuhnya manual lewat tombol di atas).</div>' +
+      '</div>' +
+      '<p class="hint" id="status-tanggal-tutup" style="margin-top:6px;"></p>' +
     '</div>' +
     '<div class="admin-tabs">' +
       '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
@@ -100,12 +113,95 @@ async function renderDashboard(root, session) {
     '</div>';
 
   const btnToggle = document.getElementById("btn-toggle-pendaftaran");
+  const statusTanggalTutupEl = document.getElementById("status-tanggal-tutup");
+
+  // Tutup otomatis SELALU dicek ulang di database (submit_pendaftaran) --
+  // ini di admin cuma untuk menampilkan status & mengatur tanggalnya. Kalau
+  // waktu sekarang sudah lewat tanggalTutup, pendaftaran tertutup untuk
+  // publik WALAUPUN toggle "Pendaftaran Dibuka" di atas masih menyala --
+  // supaya panitia tidak bingung, statusnya ditampilkan jelas di sini.
+  function tutupOtomatisAktif() {
+    return !!(tanggalTutup && new Date() > new Date(tanggalTutup));
+  }
+
   function perbaruiTombolToggle() {
-    btnToggle.className = "btn " + (dibuka ? "btn--primary" : "btn--ghost");
+    const otomatisAktif = tutupOtomatisAktif();
+    btnToggle.className = "btn " + (dibuka && !otomatisAktif ? "btn--primary" : "btn--ghost");
     btnToggle.textContent = dibuka ? "🟢 Pendaftaran Dibuka" : "🔒 Pendaftaran Ditutup";
     btnToggle.title = dibuka ? "Ketuk untuk menutup pendaftaran" : "Ketuk untuk membuka pendaftaran";
+
+    if (otomatisAktif) {
+      statusTanggalTutupEl.innerHTML = '<strong style="color:var(--danger);">⏰ Sudah lewat tanggal tutup otomatis (' +
+        formatTanggalJamTutup(tanggalTutup) + ')</strong> — pendaftaran tertutup untuk publik walau tombol di atas menunjukkan "Dibuka". Ganti/kosongkan tanggalnya kalau mau membuka lagi.';
+    } else if (tanggalTutup) {
+      statusTanggalTutupEl.innerHTML = 'Pendaftaran akan otomatis tertutup pada <strong>' + formatTanggalJamTutup(tanggalTutup) + '</strong>.';
+    } else {
+      statusTanggalTutupEl.textContent = 'Belum diatur — buka/tutup pendaftaran sepenuhnya manual lewat tombol di atas.';
+    }
   }
+
+  function formatTanggalJamTutup(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
+  }
+
+  // Input datetime-local tidak menyimpan info zona waktu -- nilainya
+  // diperlakukan sebagai jam LOKAL browser, jadi dikonversi ke/dari objek
+  // Date supaya tetap konsisten disimpan sebagai timestamptz di database.
+  function isoKeDatetimeLocal(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  const inputTanggalTutup = document.getElementById("input-tanggal-tutup");
+  inputTanggalTutup.value = isoKeDatetimeLocal(tanggalTutup);
   perbaruiTombolToggle();
+
+  // Countdown status di kotak ini sendiri diperbarui tiap menit, supaya kalau
+  // panitia membiarkan tab ini terbuka pas waktu tutup lewat, statusnya ikut
+  // berubah tanpa perlu memuat ulang halaman.
+  setInterval(perbaruiTombolToggle, 60000);
+
+  document.getElementById("btn-simpan-tanggal-tutup").addEventListener("click", async function () {
+    const val = inputTanggalTutup.value;
+    const btn = this;
+    const isoBaru = val ? new Date(val).toISOString() : null;
+
+    if (val && isNaN(new Date(val).getTime())) {
+      alert("Tanggal/jam tidak valid.");
+      return;
+    }
+
+    btn.disabled = true;
+    const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: isoBaru }).eq("id", 1);
+    btn.disabled = false;
+
+    if (error) {
+      alert("Gagal menyimpan tanggal tutup: " + error.message);
+      return;
+    }
+    tanggalTutup = isoBaru;
+    perbaruiTombolToggle();
+  });
+
+  document.getElementById("btn-hapus-tanggal-tutup").addEventListener("click", async function () {
+    if (!tanggalTutup && !inputTanggalTutup.value) return;
+    if (!confirm("Hapus tanggal tutup otomatis? Buka/tutup pendaftaran akan sepenuhnya manual lewat tombol di atas.")) return;
+
+    const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: null }).eq("id", 1);
+    if (error) {
+      alert("Gagal menghapus tanggal tutup: " + error.message);
+      return;
+    }
+    tanggalTutup = null;
+    inputTanggalTutup.value = "";
+    perbaruiTombolToggle();
+  });
 
   btnToggle.addEventListener("click", async function () {
     const aksi = dibuka ? "menutup" : "membuka";
@@ -231,21 +327,20 @@ function ekstrakPathBerkas(url) {
   return decodeURIComponent(url.substring(idx + penanda.length));
 }
 
-// Nomor pendaftaran (mis. "MHQ-005") hanya dimundurkan kalau yang dihapus
-// adalah nomor TERAKHIR untuk lomba itu — supaya tidak pernah membuat dua
-// pendaftaran punya nomor yang sama. Kalau yang dihapus bukan nomor
-// terakhir, urutan dibiarkan bolong (aman, tidak ada risiko tabrakan nomor).
-// Efeknya: hapus semua data uji coba satu per satu (urutan bebas) akan
-// otomatis mengembalikan hitungan ke 0.
-async function mundurkanNomorJikaTerakhir(lombaId, nomorPendaftaran) {
+// Nomor pendaftaran (mis. "MHQ-005") yang dihapus panitia dimasukkan ke pool
+// "nomor_bebas" (lihat migrasi 0021) supaya nomor itu BISA DIPAKAI ULANG oleh
+// pendaftar baru berikutnya untuk lomba yang sama, bukan dibiarkan bolong
+// selamanya -- berlaku untuk nomor mana pun yang dihapus (bukan cuma kalau
+// kebetulan nomor terakhir). Fungsi ambil_nomor_berikutnya() di database yang
+// akan mengambil nomor terkecil dari pool ini duluan sebelum lanjut increment
+// lomba_counter seperti biasa.
+async function bebaskanNomorPendaftaran(lombaId, nomorPendaftaran) {
   const bagian = nomorPendaftaran.split("-");
   const angka = parseInt(bagian[bagian.length - 1], 10);
   if (isNaN(angka)) return;
 
-  const { data: counterRow } = await supabaseClient.from("lomba_counter").select("jumlah").eq("lomba_id", lombaId).single();
-  if (!counterRow || counterRow.jumlah !== angka) return;
-
-  await supabaseClient.from("lomba_counter").update({ jumlah: angka - 1 }).eq("lomba_id", lombaId);
+  const { error } = await supabaseClient.from("nomor_bebas").upsert({ lomba_id: lombaId, nomor: angka });
+  if (error) console.error("Gagal membebaskan nomor pendaftaran untuk dipakai ulang:", error);
 }
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
@@ -270,7 +365,7 @@ async function bukaModalTim(row, rule) {
     '<div class="modal-tim-berkas">' +
       '<strong>Berkas:</strong> ' +
       (row.url_surat_delegasi ? '<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">Surat Delegasi</a>' : '<span class="hint">Delegasi -</span>') +
-      ' · ' + (row.url_bukti_follow_ig ? '<a href="' + row.url_bukti_follow_ig + '" target="_blank" rel="noopener">Bukti IG</a>' : '<span class="hint">IG -</span>') +
+      ' · Bukti IG: ' + renderDaftarBerkasTim(row.url_bukti_follow_ig) +
       ' · Kartu Anggota: ' + renderDaftarBerkasTim(row.url_berkas_tim) +
     '</div>' +
     '<h4 style="margin-top:16px;">Anggota Tim</h4>' +
@@ -423,16 +518,25 @@ async function loadTabPendaftar() {
       // dikali 2 (cuma satu sel gender yang berlaku untuk lomba ini).
       const genderTerkunci = r.gender_diizinkan !== "semua";
 
+      // Kartu rekap ditandai besar-besar "KUOTA PENUH" kalau SEMUA sel
+      // (jenjang x gender yang berlaku untuk lomba ini) sudah mencapai
+      // kuota efektifnya -- sama seperti aturan "lomba penuh" di halaman
+      // Daftar Lomba publik (assets/js/view-daftar.js, fungsi kuotaPenuh()).
+      let kartuPenuh = false;
+
       if (efektif !== null) {
         const kapasitasTotal = efektif * jenjangList.length * (genderTerkunci ? 1 : 2);
         totalLabel = d.total + ' / ' + kapasitasTotal;
+        kartuPenuh = d.total >= kapasitasTotal;
         genderLabel = jenjangList.map(function (j) {
           const jd = d.perJenjang[j] || { l: 0, p: 0 };
           if (genderTerkunci) {
             const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
-            return '<span class="rekap-chip">' + j + ': ' + terisi + '/' + efektif + '</span>';
+            const selPenuh = terisi >= efektif ? " rekap-chip--penuh" : "";
+            return '<span class="rekap-chip' + selPenuh + '">' + j + ': ' + terisi + '/' + efektif + '</span>';
           }
-          return '<span class="rekap-chip">' + j + ': L ' + jd.l + '/' + efektif + ' · P ' + jd.p + '/' + efektif + '</span>';
+          const selPenuh = (jd.l >= efektif && jd.p >= efektif) ? " rekap-chip--penuh" : "";
+          return '<span class="rekap-chip' + selPenuh + '">' + j + ': L ' + jd.l + '/' + efektif + ' · P ' + jd.p + '/' + efektif + '</span>';
         }).join("");
       } else if (genderTerkunci) {
         genderLabel = '<span class="rekap-chip">' + (r.gender_diizinkan === "laki-laki" ? d.l : d.p) + ' peserta</span>';
@@ -440,7 +544,8 @@ async function loadTabPendaftar() {
         genderLabel = '<span class="rekap-chip">L: ' + d.l + ' · P: ' + d.p + '</span>';
       }
 
-      return '<div class="rekap-card' + (lombaFilter === r.id ? " is-active" : "") + '" data-lomba="' + r.id + '">' +
+      return '<div class="rekap-card' + (lombaFilter === r.id ? " is-active" : "") + (kartuPenuh ? " rekap-card--penuh" : "") + '" data-lomba="' + r.id + '">' +
+        (kartuPenuh ? '<div class="rekap-card__badge-penuh">KUOTA PENUH</div>' : "") +
         '<div class="rekap-card__label">' + (r.ikon || "") + ' ' + r.nama + '</div>' +
         '<div class="rekap-card__total">' + totalLabel + '</div>' +
         '<div class="rekap-card__gender">' + genderLabel + '</div>' +
@@ -490,8 +595,7 @@ async function loadTabPendaftar() {
 
       const berkasCell = isTim
         ? ('<button type="button" class="btn-link btn-lihat-tim" data-id="' + r.id + '">Lihat berkas</button>')
-        : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · ' +
-            (r.url_bukti_follow_ig ? '<a href="' + r.url_bukti_follow_ig + '" target="_blank" rel="noopener">IG</a>' : '<span class="hint">IG -</span>'));
+        : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · IG: ' + renderDaftarBerkasTim(r.url_bukti_follow_ig));
 
       return (
         '<tr class="' + (isTim ? "row-clickable" : "") + '" data-id="' + r.id + '">' +
@@ -548,7 +652,14 @@ async function loadTabPendaftar() {
         if (row) row.status = statusBaru;
         renderRekap();
 
-        if (statusBaru === "Diterima" || statusBaru === "Ditolak") {
+        // "Perlu Verifikasi Usia" juga mengirim notifikasi WA (sama seperti
+        // Diterima/Ditolak) begitu panitia MEMILIH status ini di dropdown --
+        // untuk lomba tim (Futsal), pesannya otomatis menyebut nama anggota
+        // yang usianya di luar syarat lewat placeholder {anggota_usia}
+        // (dihitung di Edge Function kirim-notifikasi-wa, lihat file itu).
+        // Ini cuma perubahan kode (frontend + Edge Function), tidak perlu
+        // migrasi SQL baru.
+        if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia") {
           kirimNotifikasiWA(id, sel);
         }
       });
@@ -565,7 +676,8 @@ async function loadTabPendaftar() {
         btn.textContent = "Menghapus...";
 
         if (row) {
-          const pathBerkas = [row.url_kartu_pelajar, row.url_bukti_follow_ig, row.url_surat_delegasi]
+          const urlIgList = Array.isArray(row.url_bukti_follow_ig) ? row.url_bukti_follow_ig : (row.url_bukti_follow_ig ? [row.url_bukti_follow_ig] : []);
+          const pathBerkas = [row.url_kartu_pelajar, row.url_surat_delegasi].concat(urlIgList)
             .filter(Boolean)
             .map(ekstrakPathBerkas)
             .filter(Boolean);
@@ -585,7 +697,7 @@ async function loadTabPendaftar() {
           return;
         }
 
-        if (row) await mundurkanNomorJikaTerakhir(row.lomba_id, row.nomor_pendaftaran);
+        if (row) await bebaskanNomorPendaftaran(row.lomba_id, row.nomor_pendaftaran);
 
         rows = rows.filter(function (r) { return r.id !== id; });
         renderBaris();
@@ -1400,10 +1512,13 @@ function escapeHTML(teks) {
 }
 
 // Placeholder yang bisa dipakai di pesan default maupun pesan per lomba.
-// {grup} baru sejak migrasi 0019 -- diganti dengan link_grup_wa lomba itu
-// (kosong kalau belum diisi panitia untuk lomba tersebut).
+// {grup} sejak migrasi 0019 -- diganti dengan link_grup_wa lomba itu (kosong
+// kalau belum diisi panitia untuk lomba tersebut). {anggota_usia} -- khusus
+// lomba tim (Futsal), diganti dengan nama-nama anggota
+// yang usianya di luar syarat jenjang (dipisah koma); kosong untuk pendaftar
+// individu atau kalau semua anggota tim usianya sesuai syarat.
 const WA_PLACEHOLDER_HINT =
-  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA lomba ini, dari kotak "Link Grup WA" di bawah).';
+  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA lomba ini, dari kotak "Link Grup WA" di bawah), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu).';
 
 async function loadTabNotifWa() {
   const content = document.getElementById("admin-content");
@@ -1420,7 +1535,7 @@ async function loadTabNotifWa() {
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
       '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
-      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya diubah menjadi <strong>Diterima</strong> atau <strong>Ditolak</strong> di tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Tiap lomba bisa punya pesan &amp; link grup WA sendiri (atur di bagian "Pesan per Lomba" di bawah); kalau sebuah lomba belum diisi pesan khususnya, dipakai Pesan Default di bawah ini.</p>' +
+      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, atau <strong>Perlu Verifikasi Usia</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>. Tiap lomba bisa punya pesan &amp; link grup WA sendiri (atur di bagian "Pesan per Lomba" di bawah); kalau sebuah lomba belum diisi pesan khususnya, dipakai Pesan Default di bawah ini.</p>' +
       '<div class="field">' +
         '<label for="wa-template">Pesan Default (dipakai lomba yang belum punya pesan khusus)</label>' +
         '<textarea id="wa-template" rows="9">' + escapeHTML(templateDefault) + '</textarea>' +
