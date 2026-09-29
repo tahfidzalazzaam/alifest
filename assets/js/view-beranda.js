@@ -10,6 +10,7 @@ const BERANDA_TEMPLATE = `
     <a href="#lomba" class="btn btn--ghost">Lihat Cabang Lomba</a>
     <span id="juknis-btn-wrap"></span>
   </div>
+  <div class="countdown-tutup" id="countdown-tutup" style="display:none;"></div>
   <div class="hero__stats">
     <div><strong>5</strong><span>Cabang lomba</span></div>
     <div><strong>SD–SMP</strong><span>Jenjang peserta</span></div>
@@ -77,13 +78,42 @@ async function initBeranda() {
   const grid = document.getElementById("lomba-grid");
   if (!grid) return;
 
-  const { data: rules, error: errRules } = await supabaseClient
-    .from("lomba_rules").select("*").eq("aktif", true).order("urutan");
+  const [{ data: rules, error: errRules }, { data: rekapGender }] = await Promise.all([
+    supabaseClient.from("lomba_rules").select("*").eq("aktif", true).order("urutan"),
+    supabaseClient.rpc("rekap_gender_lomba")
+  ]);
 
   if (errRules) {
     grid.innerHTML = '<p>Gagal memuat data lomba. Coba muat ulang halaman.</p>';
     console.error(errRules);
     return;
+  }
+
+  // { lombaId: { jenjang: { "laki-laki": n, "perempuan": n } } } -- dipakai
+  // untuk menandai kartu lomba yang kuotanya sudah penuh (lihat "tanda besar
+  // kuota penuh" di bawah). Sumber angkanya sama seperti yang dipakai halaman
+  // Daftar Lomba (fungsi publik rekap_gender_lomba(), tidak membuka data
+  // pribadi pendaftar).
+  const rekapMap = {};
+  (rekapGender || []).forEach(function (row) {
+    if (!rekapMap[row.lomba_id]) rekapMap[row.lomba_id] = {};
+    if (!rekapMap[row.lomba_id][row.jenjang]) rekapMap[row.lomba_id][row.jenjang] = {};
+    rekapMap[row.lomba_id][row.jenjang][row.jenis_kelamin] = row.jumlah;
+  });
+
+  // Lomba dianggap PENUH kalau semua kombinasi jenjang x gender yang berlaku
+  // untuk lomba itu sudah mencapai kuota efektifnya -- sama seperti aturan di
+  // halaman Daftar Lomba (assets/js/view-daftar.js, fungsi kuotaPenuh()).
+  function lombaPenuh(lomba, efektifKuota) {
+    if (efektifKuota === null) return false;
+    const jenjangMap = rekapMap[lomba.id] || {};
+    return (lomba.jenjang || []).every(function (j) {
+      const g = jenjangMap[j] || {};
+      if (lomba.gender_diizinkan !== "semua") {
+        return (g[lomba.gender_diizinkan] || 0) >= efektifKuota;
+      }
+      return (g["laki-laki"] || 0) >= efektifKuota && (g["perempuan"] || 0) >= efektifKuota;
+    });
   }
 
   grid.innerHTML = rules.map(function (lomba) {
@@ -113,8 +143,11 @@ async function initBeranda() {
       return '<div class="stub-row"><span>Usia ' + j + '</span><strong>' + teks + '</strong></div>';
     }).join("");
 
+    const penuh = lombaPenuh(lomba, efektifKuota);
+
     return (
-      '<article class="lomba-card">' +
+      '<article class="lomba-card' + (penuh ? " lomba-card--penuh" : "") + '">' +
+        (penuh ? '<div class="lomba-card__ribbon-penuh">Kuota Penuh</div>' : "") +
         '<div class="lomba-card__main">' +
           '<div class="lomba-card__icon">' + lomba.ikon + '</div>' +
           '<h3>' + lomba.nama + '</h3>' +
@@ -134,19 +167,27 @@ async function initBeranda() {
 
 async function muatTombolJuknis() {
   const wrap = document.getElementById("juknis-btn-wrap");
-  const { data } = await supabaseClient.from("site_settings").select("juknis_url,pendaftaran_dibuka").eq("id", 1).single();
+  const { data } = await supabaseClient.from("site_settings").select("juknis_url,pendaftaran_dibuka,tanggal_tutup_pendaftaran").eq("id", 1).single();
 
   if (wrap && data && data.juknis_url) {
     wrap.innerHTML = '<a href="' + data.juknis_url + '" target="_blank" rel="noopener" class="btn btn--ghost">📄 Unduh Juknis</a>';
   }
 
-  const dibuka = !data || data.pendaftaran_dibuka !== false;
+  const status = window.hitungStatusPendaftaranAsli(data);
   const heroCta = document.getElementById("hero-cta-daftar");
   if (heroCta) {
-    heroCta.classList.toggle("is-locked", !dibuka);
-    heroCta.innerHTML = dibuka ? "Daftar Sekarang" : "🔒 Daftar Sekarang";
+    heroCta.classList.toggle("is-locked", !status.dibuka);
+    heroCta.innerHTML = status.dibuka ? "Daftar Sekarang" : "🔒 Daftar Sekarang";
   }
-  if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(dibuka);
+  if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(status.dibuka);
+
+  // Countdown cuma ditampilkan selama pendaftaran BENAR-BENAR masih dibuka
+  // (bukan sudah ditutup manual ataupun otomatis lewat tanggal) dan panitia
+  // sudah mengisi tanggal tutup otomatisnya (migrasi 0022).
+  const countdownEl = document.getElementById("countdown-tutup");
+  if (typeof window.pasangCountdownTutup === "function") {
+    window.pasangCountdownTutup(countdownEl, status.dibuka ? status.tanggalTutup : null);
+  }
 }
 
 window.ViewBeranda = { template: BERANDA_TEMPLATE, init: initBeranda };
