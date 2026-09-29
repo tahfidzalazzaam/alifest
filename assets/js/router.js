@@ -169,7 +169,17 @@ window.ujiCobaAktif = function () {
 };
 window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 
+// Halaman Panitia (path "/admin" ATAU hash "#/admin") sengaja TIDAK pernah
+// menampilkan gerbang ini -- panitia sendiri yang mengatur buka/tutup
+// pendaftaran, jadi tidak perlu ditanyai/diganggu pesan lucu + PIN uji coba
+// tiap kali mereka membuka halaman admin.
+function sedangDiHalamanAdmin() {
+  const path = window.location.pathname.replace(/\/+$/, "");
+  return path === "/admin" || window.location.hash === "#/admin";
+}
+
 async function cekGerbangTutup() {
+  if (sedangDiHalamanAdmin()) return; // halaman panitia tidak ikut ditutup
   if (window.ujiCobaAktif()) return; // panitia sudah masuk mode uji coba sesi ini, tidak usah tampil lagi
 
   const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
