@@ -92,10 +92,76 @@ window.gotoRoute = function (hash) {
 // ikon gembok.
 // ---------------------------------------------------------------------------
 async function muatLogoNavbar() {
-  const { data } = await supabaseClient.from("site_settings").select("logo_url,pendaftaran_dibuka").eq("id", 1).single();
+  const { data } = await supabaseClient.from("site_settings").select("logo_url,pendaftaran_dibuka,tanggal_tutup_pendaftaran").eq("id", 1).single();
   if (data && data.logo_url) window.terapkanLogo(data.logo_url);
-  window.terapkanStatusPendaftaran(!data || data.pendaftaran_dibuka !== false);
+  window.terapkanStatusPendaftaran(window.hitungStatusPendaftaranAsli(data).dibuka);
 }
+
+// ---------------------------------------------------------------------------
+// Status "buka/tutup" pendaftaran yang SEBENARNYA -- menggabungkan toggle
+// manual panitia (site_settings.pendaftaran_dibuka, migrasi 0013) DENGAN
+// tanggal tutup otomatis (site_settings.tanggal_tutup_pendaftaran, migrasi
+// 0022): pendaftaran dianggap TERTUTUP kalau salah satu dari keduanya bilang
+// tertutup. Dipakai di sini (navbar, gerbang) dan oleh view-beranda.js /
+// view-daftar.js supaya logikanya SATU tempat saja, tidak dobel-dobel dan
+// berisiko beda hasil antar halaman. `data` adalah baris site_settings (atau
+// null/undefined kalau gagal dimuat -- dianggap dibuka, gagal-aman ke arah
+// yang tidak mengunci situs kalau query bermasalah).
+window.hitungStatusPendaftaranAsli = function (data) {
+  const manualDibuka = !data || data.pendaftaran_dibuka !== false;
+  const tanggalTutup = (data && data.tanggal_tutup_pendaftaran) || null;
+  const otomatisLewat = !!(tanggalTutup && new Date() > new Date(tanggalTutup));
+  return {
+    dibuka: manualDibuka && !otomatisLewat,
+    tanggalTutup: tanggalTutup,
+    otomatisLewat: otomatisLewat
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Countdown mundur sampai tanggal_tutup_pendaftaran -- dipakai Beranda &
+// halaman Daftar (elemen mana pun, asal punya id yang dioper). Diperbarui
+// tiap detik lewat setInterval; otomatis disembunyikan begitu waktunya lewat
+// (status buka/tutup sebenarnya tetap ditentukan server, ini murni tampilan).
+window.pasangCountdownTutup = function (el, tanggalTutupIso) {
+  if (!el) return function () {};
+  if (!tanggalTutupIso) {
+    el.style.display = "none";
+    return function () {};
+  }
+
+  let timer = null;
+
+  function tick() {
+    const target = new Date(tanggalTutupIso).getTime();
+    const diff = target - Date.now();
+
+    if (isNaN(target) || diff <= 0) {
+      el.style.display = "none";
+      if (timer) clearInterval(timer);
+      return;
+    }
+
+    const detik = Math.floor(diff / 1000);
+    const hari = Math.floor(detik / 86400);
+    const jam = Math.floor((detik % 86400) / 3600);
+    const menit = Math.floor((detik % 3600) / 60);
+    const sisaDetik = detik % 60;
+
+    const bagian = [];
+    if (hari > 0) bagian.push(hari + (hari === 1 ? " hari" : " hari"));
+    bagian.push(String(jam).padStart(2, "0") + " jam");
+    bagian.push(String(menit).padStart(2, "0") + " menit");
+    bagian.push(String(sisaDetik).padStart(2, "0") + " detik");
+
+    el.style.display = "block";
+    el.textContent = "⏳ Pendaftaran ditutup dalam " + bagian.join(" : ");
+  }
+
+  tick();
+  timer = setInterval(tick, 1000);
+  return function () { if (timer) clearInterval(timer); };
+};
 
 // Favicon default (ikon bulan) — direkam sekali di awal supaya bisa
 // dikembalikan lagi kalau logo dihapus lewat halaman Panitia.
@@ -182,9 +248,8 @@ async function cekGerbangTutup() {
   if (sedangDiHalamanAdmin()) return; // halaman panitia tidak ikut ditutup
   if (window.ujiCobaAktif()) return; // panitia sudah masuk mode uji coba sesi ini, tidak usah tampil lagi
 
-  const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka").eq("id", 1).single();
-  const dibuka = !data || data.pendaftaran_dibuka !== false;
-  if (dibuka) return;
+  const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka,tanggal_tutup_pendaftaran").eq("id", 1).single();
+  if (window.hitungStatusPendaftaranAsli(data).dibuka) return;
 
   const overlay = document.getElementById("gate-overlay");
   if (!overlay) return;
