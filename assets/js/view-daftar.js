@@ -3,17 +3,19 @@
 // Urutan sengaja: pilih lomba DULU (Langkah 1), baru data selanjutnya.
 // Untuk lomba INDIVIDU (Adzan, Panahan, MHQ, Kaligrafi): Langkah 2 = Data
 // Diri Peserta (termasuk tanggal lahir), lalu sistem mengecek usia terhadap
-// tanggal pelaksanaan lomba (diatur panitia):
-//   - sesuai syarat           -> lanjut normal
-//   - meleset tapi masih dalam toleransi -> tetap boleh lanjut, dengan
-//     peringatan bahwa pendaftaran akan diverifikasi manual
-//   - meleset lebih dari toleransi -> langsung ditolak di sini
+// tanggal pelaksanaan lomba (diatur panitia). Sejak migrasi 0023, TANPA
+// toleransi sama sekali:
+//   - sesuai syarat  -> lanjut normal
+//   - meleset dari syarat (walau cuma 1 hari) -> langsung ditolak di sini
 // Pengecekan ini diulang lagi secara otentik di database (fungsi
 // submit_pendaftaran) supaya tidak bisa dilewati dari browser.
 //
 // Untuk lomba TIM (Futsal): alurnya beda, TIDAK ada "Data Diri Peserta"
-// perorangan ataupun pengecekan usia otomatis (kelayakan usia tiap anggota
-// jadi tanggung jawab sekolah lewat Surat Delegasi). Alurnya:
+// perorangan, tapi sejak migrasi 0023 usia TIAP ANGGOTA tim JUGA dicek
+// ketat (sama seperti individu, tanpa toleransi) terhadap syarat usia
+// jenjang yang dipilih -- kalau ada satu saja anggota yang meleset,
+// pengiriman form diblokir sampai diperbaiki (lihat evaluasiKelayakanTim()
+// & perbaruiUsiaAnggota() di bawah). Alurnya:
 //   Langkah 2: Nama Tim (Nama Sekolah), Nama Pendamping, No. WA Pendamping
 //   Langkah 3: Nama, Tempat Tanggal Lahir, Kelas -- untuk tiap anggota tim
 //   Langkah 4: Upload Berkas (kartu pelajar/surat aktif BOLEH BANYAK FILE
@@ -387,7 +389,6 @@ function initDaftar() {
         maxAnggota: r.max_anggota,
         kuota: r.kuota,
         tanggalPelaksanaan: r.tanggal_pelaksanaan,
-        toleransiTahun: r.toleransi_tahun || 0,
         genderDiizinkan: r.gender_diizinkan || "semua"
       };
     });
@@ -660,22 +661,19 @@ function initDaftar() {
       return;
     }
 
+    // Sejak pembaruan ini, TIDAK ADA toleransi sama sekali -- usia yang
+    // meleset dari syarat jenjang walau cuma 1 hari (yang berarti sudah
+    // beda tahun usianya di sini, karena usia dihitung genap per tahun)
+    // langsung ditolak, tidak ada lagi status "lanjut dengan peringatan".
+    // Server (submit_pendaftaran, migrasi 0023) mengulang pengecekan yang
+    // sama persis, jadi ini bukan cuma validasi tampilan.
     const usia = hitungUsiaPada(tgl, selectedLomba.tanggalPelaksanaan);
-    const toleransi = selectedLomba.toleransiTahun || 0;
     const usiaMin = syaratUsia.min;
     const usiaMax = syaratUsia.max;
-    const batasBawah = usiaMin - toleransi;
-    const batasAtas = usiaMax + toleransi;
     const keteranganAcuan = selectedLomba.tanggalPelaksanaan ? " pada tanggal pelaksanaan lomba" : "";
 
     if (usia >= usiaMin && usia <= usiaMax) {
       usiaNotice.style.display = "none";
-      terapkanLanjutan(true);
-    } else if (usia >= batasBawah && usia <= batasAtas) {
-      tampilkanNotice("warning",
-        "Usia peserta (" + usia + " tahun" + keteranganAcuan + ") sedikit di luar ketentuan untuk jenjang " + jenjang + " (" +
-        usiaMin + "–" + usiaMax + " tahun). Pendaftaran tetap bisa dilanjutkan, " +
-        "tapi akan diverifikasi manual oleh panitia sebelum diterima.");
       terapkanLanjutan(true);
     } else {
       tampilkanNotice("error",
@@ -685,7 +683,14 @@ function initDaftar() {
     }
   }
 
-  /* ---------------- Kelayakan: lomba TIM (cek jenjang, gender, kuota saja -- tanpa usia) ---------------- */
+  /* ---------------- Kelayakan: lomba TIM (cek jenjang, gender, kuota, DAN usia semua anggota) ----------------
+     Sejak pembaruan ini, usia SETIAP anggota tim juga dicek ketat terhadap
+     syarat jenjang yang dipilih -- SAMA seperti lomba individu, TANPA
+     toleransi (meleset walau 1 hari langsung dianggap tidak memenuhi syarat).
+     Bedanya dengan individu: field Data Anggota & Upload Berkas TETAP
+     ditampilkan kalau ada anggota yang usianya bermasalah (supaya bisa
+     diperbaiki langsung), yang diblokir cuma pengiriman formnya
+     (bolehLanjut) -- lihat perbaruiUsiaAnggota() di bawah. */
   function evaluasiKelayakanTim() {
     if (!selectedLomba) {
       timNotice.style.display = "none";
@@ -709,8 +714,56 @@ function initDaftar() {
       return;
     }
 
-    timNotice.style.display = "none";
+    // Tampilkan dulu bagian anggota & upload -- SEBELUM cek usia -- supaya
+    // kalaupun ada anggota yang usianya bermasalah, field-nya tetap terlihat
+    // (tidak ikut disembunyikan) dan bisa langsung diperbaiki oleh pendaftar.
     terapkanLanjutan(true);
+
+    const syaratUsia = selectedLomba.usiaPerJenjang[jenjang];
+    const anggotaBermasalah = perbaruiUsiaAnggota(syaratUsia);
+
+    if (syaratUsia && anggotaBermasalah.length > 0) {
+      tampilkanNoticeTim("error",
+        "Usia anggota berikut di luar syarat jenjang " + jenjang + " (" + syaratUsia.min + "–" + syaratUsia.max + " tahun" +
+        (selectedLomba.tanggalPelaksanaan ? ", dihitung pada tanggal pelaksanaan lomba" : "") + "): " +
+        anggotaBermasalah.join(", ") + ". Mohon perbaiki tanggal lahirnya sebelum mengirim, atau pilih jenjang lain.");
+      bolehLanjut = false; // field tetap tampil (lihat komentar di atas), cuma pengiriman yang diblokir
+    } else {
+      timNotice.style.display = "none";
+    }
+  }
+
+  // Menghitung & menandai usia tiap baris anggota terhadap syaratUsia
+  // (jenjang tim yang sedang dipilih), mengembalikan daftar nama anggota
+  // yang usianya di luar syarat. Baris yang tanggal lahirnya belum diisi
+  // dilewati (belum bisa dinilai). Dipanggil dari evaluasiKelayakanTim()
+  // setiap kali jenjang/tanggal lahir anggota berubah, atau baris
+  // ditambah/dihapus.
+  function perbaruiUsiaAnggota(syaratUsia) {
+    const bermasalah = [];
+    Array.from(anggotaListEl.children).forEach(function (row, idx) {
+      const tglVal = row.querySelector(".anggota-tgl").value;
+      const usiaEl = row.querySelector(".anggota-usia");
+      if (!tglVal) {
+        usiaEl.textContent = "";
+        usiaEl.classList.remove("anggota-usia--error");
+        return;
+      }
+      const usia = hitungUsiaPada(tglVal, selectedLomba.tanggalPelaksanaan);
+      if (usia === null || isNaN(usia)) {
+        usiaEl.textContent = "";
+        usiaEl.classList.remove("anggota-usia--error");
+        return;
+      }
+      const diLuarSyarat = !!(syaratUsia && (usia < syaratUsia.min || usia > syaratUsia.max));
+      usiaEl.textContent = usia + " th" + (diLuarSyarat ? " ⚠️" : "");
+      usiaEl.classList.toggle("anggota-usia--error", diLuarSyarat);
+      if (diLuarSyarat) {
+        const namaVal = row.querySelector(".anggota-nama").value.trim() || ("Anggota " + (idx + 1));
+        bermasalah.push(namaVal);
+      }
+    });
+    return bermasalah;
   }
 
   jenjangSelect.addEventListener("change", evaluasiKelayakan);
@@ -724,10 +777,10 @@ function initDaftar() {
   });
 
   /* ---------------- Anggota tim (dinamis): Nama, Tempat Lahir, Tanggal Lahir, Kelas ----------------
-     Tanggal lahir dipakai input tanggal ASLI (bukan teks bebas lagi) supaya
-     usia tiap anggota bisa dihitung & langsung ditampilkan di sebelah
-     inputnya begitu diisi -- murni informasi buat panitia, tidak menolak
-     pendaftaran berdasarkan usia ini (lihat catatan di migrasi 0016/0017). */
+     Tanggal lahir dipakai input tanggal ASLI, dan sejak pembaruan ini usia
+     yang dihitung dari situ SUNGGUHAN dicek terhadap syarat jenjang yang
+     dipilih (bukan cuma informasi buat panitia lagi seperti sebelumnya) --
+     lihat evaluasiKelayakanTim() & perbaruiUsiaAnggota() di atas. */
   function buatBarisAnggota(index) {
     const row = document.createElement("div");
     row.className = "anggota-row";
@@ -742,11 +795,7 @@ function initDaftar() {
       '<button type="button" class="btn-remove">Hapus</button>';
 
     const inputTgl = row.querySelector(".anggota-tgl");
-    const usiaEl = row.querySelector(".anggota-usia");
-    inputTgl.addEventListener("change", function () {
-      const usia = hitungUsiaPada(inputTgl.value, null);
-      usiaEl.textContent = (usia !== null && !isNaN(usia)) ? (usia + " th") : "";
-    });
+    inputTgl.addEventListener("change", evaluasiKelayakanTim);
 
     row.querySelector(".btn-remove").addEventListener("click", function () {
       if (!selectedLomba) return;
@@ -754,6 +803,7 @@ function initDaftar() {
       row.remove();
       anggotaCount--;
       updateAnggotaHint();
+      evaluasiKelayakanTim();
     });
     return row;
   }
@@ -774,6 +824,7 @@ function initDaftar() {
     anggotaListEl.appendChild(buatBarisAnggota(anggotaCount + 1));
     anggotaCount++;
     updateAnggotaHint();
+    evaluasiKelayakanTim();
   });
 
   function updateAnggotaHint() {
