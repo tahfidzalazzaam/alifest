@@ -10,7 +10,6 @@ const BERANDA_TEMPLATE = `
     <a href="#lomba" class="btn btn--ghost">Lihat Cabang Lomba</a>
     <span id="juknis-btn-wrap"></span>
   </div>
-  <div class="countdown-tutup" id="countdown-tutup" style="display:none;"></div>
   <div class="hero__stats">
     <div><strong>5</strong><span>Cabang lomba</span></div>
     <div><strong>SD–SMP</strong><span>Jenjang peserta</span></div>
@@ -19,6 +18,7 @@ const BERANDA_TEMPLATE = `
 </section>
 
 <section class="section container" id="lomba">
+  <div class="countdown-tutup" id="countdown-tutup" style="display:none;"></div>
   <div class="section__head">
     <h2>Cabang lomba</h2>
     <p>Setiap cabang punya syarat jenjang dan usia sendiri (beda-beda tiap jenjang) — sistem akan memfilter otomatis saat kamu mengisi form pendaftaran.</p>
@@ -181,12 +181,15 @@ async function muatTombolJuknis() {
   }
   if (typeof window.terapkanStatusPendaftaran === "function") window.terapkanStatusPendaftaran(status.dibuka);
 
-  // Countdown cuma ditampilkan selama pendaftaran BENAR-BENAR masih dibuka
-  // (bukan sudah ditutup manual ataupun otomatis lewat tanggal) dan panitia
-  // sudah mengisi tanggal tutup otomatisnya (migrasi 0022).
+  // Countdown ditampilkan begitu panitia mengisi tanggal tutup otomatisnya
+  // (migrasi 0022) -- TIDAK peduli status pendaftaran sekarang dibuka atau
+  // ditutup (manual maupun sudah lewat otomatis), supaya pengunjung tetap
+  // bisa lihat kapan (atau sudah sejak kapan) pendaftaran ditutup. Fungsi
+  // pasangCountdownTutup() sendiri yang otomatis menyembunyikannya kalau
+  // tanggalnya kosong atau waktunya sudah lewat.
   const countdownEl = document.getElementById("countdown-tutup");
   if (typeof window.pasangCountdownTutup === "function") {
-    window.pasangCountdownTutup(countdownEl, status.dibuka ? status.tanggalTutup : null);
+    window.pasangCountdownTutup(countdownEl, status.tanggalTutup);
   }
 }
 
