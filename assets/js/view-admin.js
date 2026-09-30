@@ -1597,69 +1597,49 @@ function escapeHTML(teks) {
   return div.innerHTML;
 }
 
-// Placeholder yang bisa dipakai di pesan default maupun pesan per lomba.
-// {grup} sejak migrasi 0019 -- diganti dengan link_grup_wa lomba itu (kosong
-// kalau belum diisi panitia untuk lomba tersebut). {anggota_usia} -- khusus
-// lomba tim (Futsal), diganti dengan nama-nama anggota
-// yang usianya di luar syarat jenjang (dipisah koma); kosong untuk pendaftar
-// individu atau kalau semua anggota tim usianya sesuai syarat.
+// Placeholder yang bisa dipakai di Pesan Default. Sejak migrasi 0028, pesan
+// & link grup WA SUDAH TIDAK dibedakan per lomba lagi -- SATU pesan dan SATU
+// link grup berlaku untuk SEMUA lomba & semua status (fitur "Pesan per
+// Lomba" dari migrasi 0019 dihapus, karena semua pendaftar memang diarahkan
+// ke grup WA yang sama). {grup} diganti link grup WA dari kotak "Link Grup
+// WA" di bawah, TAPI HANYA kalau status pendaftaran itu "Diterima" (untuk
+// status lain selalu kosong, dicek otomatis di Edge Function, lihat migrasi
+// sebelumnya). {anggota_usia} -- khusus lomba tim (Futsal), diganti dengan
+// nama-nama anggota yang usianya di luar syarat jenjang (dipisah koma);
+// kosong untuk pendaftar individu atau kalau semua anggota tim usianya
+// sesuai syarat.
 const WA_PLACEHOLDER_HINT =
-  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA lomba ini, dari kotak "Link Grup WA" di bawah), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu).';
+  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu).';
 
 async function loadTabNotifWa() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat pengaturan notifikasi WA...</p>';
 
-  const [{ data: settingsData }, { data: lombaData, error: lombaError }] = await Promise.all([
-    supabaseClient.from("site_settings").select("wa_notif_template").eq("id", 1).single(),
-    supabaseClient.from("lomba_rules").select("id,nama,ikon,wa_notif_template,link_grup_wa").order("urutan")
-  ]);
+  const { data: settingsData } = await supabaseClient
+    .from("site_settings").select("wa_notif_template, link_grup_wa").eq("id", 1).single();
 
   const templateDefault = (settingsData && settingsData.wa_notif_template) || "";
-  const daftarLomba = lombaData || [];
+  const linkGrupDefault = (settingsData && settingsData.link_grup_wa) || "";
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
       '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
-      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, atau <strong>Perlu Verifikasi Usia</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>. Tiap lomba bisa punya pesan &amp; link grup WA sendiri (atur di bagian "Pesan per Lomba" di bawah); kalau sebuah lomba belum diisi pesan khususnya, dipakai Pesan Default di bawah ini.</p>' +
+      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, atau <strong>Perlu Verifikasi Usia</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim, dengan pesan &amp; link grup WA yang SAMA (satu grup WA untuk semua pendaftar, tidak dibedakan per lomba). Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>.</p>' +
       '<div class="field">' +
-        '<label for="wa-template">Pesan Default (dipakai lomba yang belum punya pesan khusus)</label>' +
+        '<label for="wa-template">Pesan Notifikasi</label>' +
         '<textarea id="wa-template" rows="9">' + escapeHTML(templateDefault) + '</textarea>' +
-        '<div class="hint">' + WA_PLACEHOLDER_HINT + ' Untuk pesan default ini, <code>{grup}</code> biasanya kosong karena tidak terikat ke satu lomba tertentu — isi <code>{grup}</code> lewat pesan khusus per lomba di bawah.</div>' +
+        '<div class="hint">' + WA_PLACEHOLDER_HINT + '</div>' +
+      '</div>' +
+      '<div class="field">' +
+        '<label for="wa-link-grup">Link Grup WA</label>' +
+        '<input type="text" id="wa-link-grup" value="' + escapeHTML(linkGrupDefault) + '" placeholder="https://chat.whatsapp.com/..." />' +
+        '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, tapi HANYA untuk pendaftar yang statusnya diubah jadi "Diterima" — pendaftar yang Ditolak (atau status lain) tidak pernah menerima link ini.</div>' +
       '</div>' +
       '<div class="form-error" id="wa-template-error" style="display:none;"></div>' +
       '<div class="submit-row" style="display:flex;gap:10px;">' +
-        '<button type="button" class="btn btn--primary" id="btn-simpan-wa-template">Simpan Pesan Default</button>' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-wa-template">Simpan</button>' +
       '</div>' +
       '<p class="hint" id="wa-template-status" style="margin-top:10px;"></p>' +
-    '</div>' +
-    '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
-      '<h3>📋 Pesan per Lomba</h3>' +
-      '<p class="hint">Isi Link Grup WA dan/atau pesan khusus untuk lomba tertentu di sini — misalnya supaya pesan notifikasinya mengajak pendaftar bergabung ke grup WA lomba itu lewat placeholder <code>{grup}</code>. Kosongkan kotak "Pesan Khusus" kalau lomba itu cukup pakai Pesan Default di atas.</p>' +
-      (lombaError
-        ? '<p>Gagal memuat data lomba: ' + lombaError.message + '</p>'
-        : (daftarLomba.length === 0
-            ? '<p class="hint">Belum ada lomba. Tambahkan lomba dulu di tab "Kelola Lomba".</p>'
-            : daftarLomba.map(function (l) {
-                return (
-                  '<div class="form-shell wa-lomba-card" data-id="' + l.id + '" style="margin-top:14px;">' +
-                    '<h4 style="margin:0 0 10px;">' + l.ikon + ' ' + l.nama + '</h4>' +
-                    '<div class="field">' +
-                      '<label>Link Grup WA</label>' +
-                      '<input type="text" class="wa-lomba-grup" value="' + escapeHTML(l.link_grup_wa || "") + '" placeholder="https://chat.whatsapp.com/..." />' +
-                    '</div>' +
-                    '<div class="field">' +
-                      '<label>Pesan Khusus Lomba Ini (kosongkan untuk pakai Pesan Default)</label>' +
-                      '<textarea class="wa-lomba-template" rows="7" placeholder="' + escapeHTML(templateDefault) + '">' + escapeHTML(l.wa_notif_template || "") + '</textarea>' +
-                    '</div>' +
-                    '<div class="form-error wa-lomba-error" style="display:none;"></div>' +
-                    '<div class="submit-row" style="display:flex;gap:10px;">' +
-                      '<button type="button" class="btn btn--primary btn-simpan-wa-lomba">Simpan</button>' +
-                    '</div>' +
-                    '<p class="hint wa-lomba-status" style="margin-top:8px;"></p>' +
-                  '</div>'
-                );
-              }).join(""))) +
     '</div>' +
     '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
       '<h3>⚙️ Setup Fonnte</h3>' +
@@ -1673,6 +1653,7 @@ async function loadTabNotifWa() {
     errEl.style.display = "none";
 
     const teks = document.getElementById("wa-template").value;
+    const linkGrup = document.getElementById("wa-link-grup").value.trim();
     if (!teks.trim()) {
       errEl.textContent = "Pesan tidak boleh kosong.";
       errEl.style.display = "block";
@@ -1681,9 +1662,12 @@ async function loadTabNotifWa() {
 
     btn.disabled = true;
     btn.textContent = "Menyimpan...";
-    const { error } = await supabaseClient.from("site_settings").update({ wa_notif_template: teks }).eq("id", 1);
+    const { error } = await supabaseClient
+      .from("site_settings")
+      .update({ wa_notif_template: teks, link_grup_wa: linkGrup || null })
+      .eq("id", 1);
     btn.disabled = false;
-    btn.textContent = "Simpan Pesan Default";
+    btn.textContent = "Simpan";
 
     if (error) {
       errEl.textContent = "Gagal menyimpan: " + error.message;
@@ -1692,37 +1676,6 @@ async function loadTabNotifWa() {
     }
     statusEl.textContent = "Tersimpan.";
     setTimeout(function () { statusEl.textContent = ""; }, 3000);
-  });
-
-  document.querySelectorAll(".wa-lomba-card").forEach(function (card) {
-    const lombaId = card.getAttribute("data-id");
-    const btn = card.querySelector(".btn-simpan-wa-lomba");
-    const errEl = card.querySelector(".wa-lomba-error");
-    const statusEl = card.querySelector(".wa-lomba-status");
-
-    btn.addEventListener("click", async function () {
-      errEl.style.display = "none";
-
-      const grup = card.querySelector(".wa-lomba-grup").value.trim();
-      const teks = card.querySelector(".wa-lomba-template").value.trim();
-
-      btn.disabled = true;
-      btn.textContent = "Menyimpan...";
-      const { error } = await supabaseClient
-        .from("lomba_rules")
-        .update({ link_grup_wa: grup || null, wa_notif_template: teks || null })
-        .eq("id", lombaId);
-      btn.disabled = false;
-      btn.textContent = "Simpan";
-
-      if (error) {
-        errEl.textContent = "Gagal menyimpan: " + error.message;
-        errEl.style.display = "block";
-        return;
-      }
-      statusEl.textContent = "Tersimpan.";
-      setTimeout(function () { statusEl.textContent = ""; }, 3000);
-    });
   });
 }
 
