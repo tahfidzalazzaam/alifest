@@ -249,12 +249,16 @@ img { max-width: 100%; display: block; }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* Countdown mundur sampai tanggal tutup pendaftaran (migrasi 0022) --
-   ditampilkan di Beranda (hero) & halaman Daftar (form-header). Sengaja
-   dibuat cukup mencolok (border tebal, angka besar) tapi tidak seagresif
-   badge "Kuota Penuh", karena ini sekadar info waktu, bukan peringatan. */
+   di Beranda ditampilkan di atas judul "Cabang lomba" (section #lomba),
+   TERUS tampil selama tanggal tutupnya sudah diisi & belum lewat, tidak
+   peduli status pendaftaran sekarang dibuka/ditutup -- lihat komentar di
+   muatTombolJuknis() (view-beranda.js). Juga dipakai halaman Daftar
+   (form-header). Sengaja dibuat cukup mencolok (border tebal, angka besar)
+   tapi tidak seagresif badge "Kuota Penuh", karena ini sekadar info waktu,
+   bukan peringatan. */
 .countdown-tutup {
   width: fit-content;
-  margin: 18px auto 0;
+  margin: 14px auto 28px;
   background: var(--green-900);
   color: #fff;
   font-weight: 700;
