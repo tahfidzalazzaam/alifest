@@ -55,11 +55,18 @@ const DAFTAR_TEMPLATE = `
         <span class="form-step">Langkah 2</span>
         <legend>Data Diri Peserta</legend>
 
-        <div class="field">
-          <label for="namaLengkap">Nama Lengkap Peserta (sesuai akte)</label>
-          <p class="hint" style="margin-top:-4px;">Isi nama peserta LOMBA itu sendiri, bukan nama orang tua/wali/pendamping. Tulis sesuai akte kelahiran (ejaan & urutan nama harus persis sama, karena dipakai untuk sertifikat).</p>
-          <input type="text" id="namaLengkap" name="namaLengkap" />
-          <div class="form-error">Nama lengkap peserta wajib diisi.</div>
+        <div class="field-row">
+          <div class="field">
+            <label for="namaLengkap">Nama Lengkap Peserta (sesuai akte)</label>
+            <p class="hint" style="margin-top:-4px;">Isi nama peserta LOMBA itu sendiri, bukan nama orang tua/wali/pendamping. Tulis sesuai akte kelahiran (ejaan & urutan nama harus persis sama, karena dipakai untuk sertifikat).</p>
+            <input type="text" id="namaLengkap" name="namaLengkap" />
+            <div class="form-error">Nama lengkap peserta wajib diisi.</div>
+          </div>
+          <div class="field">
+            <label for="namaPendamping">Nama Pendamping <span style="font-weight:400;">(opsional)</span></label>
+            <p class="hint" style="margin-top:-4px;">Nama orang tua/wali/guru yang mendampingi peserta ini (jika ada). Tidak ditampilkan di tabel Data Pendaftar, hanya terlihat lewat detail pendaftar.</p>
+            <input type="text" id="namaPendamping" name="namaPendamping" placeholder="Boleh dikosongkan" />
+          </div>
         </div>
 
         <div class="field-row">
@@ -1217,7 +1224,11 @@ function initDaftar() {
           // Kosong/null kalau bukan mode uji coba -- server tetap aman kalau
           // pendaftaran memang sedang dibuka (parameter ini diabaikan),
           // lihat migrasi 0020.
-          p_kode_uji_coba: (typeof window.ujiCobaAktif === "function" && window.ujiCobaAktif()) ? window.KODE_UJI_COBA_PANITIA : null
+          p_kode_uji_coba: (typeof window.ujiCobaAktif === "function" && window.ujiCobaAktif()) ? window.KODE_UJI_COBA_PANITIA : null,
+          // Field baru (migrasi 0027): nama pendamping, HANYA untuk lomba
+          // INDIVIDU (terpisah dari p_pembina yang khusus lomba tim). Opsional,
+          // dikirim null kalau kosong atau kalau ini pendaftaran tim.
+          p_nama_pendamping: isTim ? null : document.getElementById("namaPendamping").value.trim()
         });
       })
       .then(function (res) {
