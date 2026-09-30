@@ -158,8 +158,14 @@ window.pasangCountdownTutup = function (el, tanggalTutupIso) {
       String(sisaDetik).padStart(2, "0") + " detik"
     ];
 
-    el.style.display = "block";
-    el.textContent = "⏳ Pendaftaran ditutup dalam " + bagian.join(" : ");
+    // Dua baris: label kecil di atas, angka waktunya sendiri di baris bawah
+    // dengan ukuran font lebih besar (lihat .countdown-tutup__label dan
+    // .countdown-tutup__waktu di style.css) -- innerHTML dipakai (bukan
+    // textContent) supaya dua <span> ini bisa dibuat elemen block terpisah.
+    el.style.display = "flex"; // cocok dengan .countdown-tutup { display:flex; flex-direction:column; } di style.css
+    el.innerHTML =
+      '<span class="countdown-tutup__label">⏳ Pendaftaran ditutup dalam</span>' +
+      '<span class="countdown-tutup__waktu">' + bagian.join(" : ") + '</span>';
   }
 
   tick();
