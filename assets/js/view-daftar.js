@@ -56,9 +56,10 @@ const DAFTAR_TEMPLATE = `
         <legend>Data Diri Peserta</legend>
 
         <div class="field">
-          <label for="namaLengkap">Nama Lengkap</label>
+          <label for="namaLengkap">Nama Lengkap Peserta (sesuai akte)</label>
+          <p class="hint" style="margin-top:-4px;">Isi nama peserta LOMBA itu sendiri, bukan nama orang tua/wali/pendamping. Tulis sesuai akte kelahiran (ejaan & urutan nama harus persis sama, karena dipakai untuk sertifikat).</p>
           <input type="text" id="namaLengkap" name="namaLengkap" />
-          <div class="form-error">Nama lengkap wajib diisi.</div>
+          <div class="form-error">Nama lengkap peserta wajib diisi.</div>
         </div>
 
         <div class="field-row">
@@ -124,8 +125,9 @@ const DAFTAR_TEMPLATE = `
 
         <div class="field-row">
           <div class="field">
-            <label for="pembina">Nama Pendamping</label>
-            <input type="text" id="pembina" name="pembina" placeholder="Guru/pendamping tim" />
+            <label for="pembina">Nama Pendamping (guru/pembina, BUKAN peserta)</label>
+            <p class="hint" style="margin-top:-4px;">Nama guru/pendamping yang bertanggung jawab atas tim ini, BUKAN nama siswa/peserta yang bertanding — nama tiap peserta diisi terpisah di Langkah 3 (Data Anggota Tim).</p>
+            <input type="text" id="pembina" name="pembina" placeholder="mis. Ust. Ahmad (guru pendamping)" />
             <div class="form-error">Nama pendamping wajib diisi.</div>
           </div>
           <div class="field">
@@ -169,7 +171,8 @@ const DAFTAR_TEMPLATE = `
         <!-- ============ LOMBA TIM — Langkah 3: Data Anggota Tim ============ -->
         <fieldset id="fieldset-tim-anggota" style="display:none;">
           <span class="form-step">Langkah 3</span>
-          <legend>Data Anggota Tim</legend>
+          <legend>Data Anggota Tim (Peserta)</legend>
+          <p class="hint" style="margin-top:-6px;">Isi data peserta yang bertanding (bukan pendamping). Nama tiap anggota ditulis sesuai akte kelahiran (dipakai untuk sertifikat).</p>
 
           <div class="field">
             <div class="anggota-list" id="anggota-list"></div>
@@ -858,7 +861,7 @@ function initDaftar() {
     const row = document.createElement("div");
     row.className = "anggota-row";
     row.innerHTML =
-      '<input type="text" placeholder="Nama anggota ' + index + '" class="anggota-nama" required />' +
+      '<input type="text" placeholder="Nama lengkap peserta ' + index + ' (sesuai akte)" class="anggota-nama" required />' +
       '<input type="text" placeholder="Tempat lahir" class="anggota-tempat" required />' +
       '<span class="anggota-tgl-wrap">' +
         '<input type="date" class="anggota-tgl" required />' +
