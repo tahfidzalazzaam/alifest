@@ -148,11 +148,15 @@ window.pasangCountdownTutup = function (el, tanggalTutupIso) {
     const menit = Math.floor((detik % 3600) / 60);
     const sisaDetik = detik % 60;
 
-    const bagian = [];
-    if (hari > 0) bagian.push(hari + (hari === 1 ? " hari" : " hari"));
-    bagian.push(String(jam).padStart(2, "0") + " jam");
-    bagian.push(String(menit).padStart(2, "0") + " menit");
-    bagian.push(String(sisaDetik).padStart(2, "0") + " detik");
+    // Selalu tampilkan keempat satuan (hari -> detik), termasuk "00 hari"
+    // kalau tinggal kurang dari sehari -- supaya formatnya konsisten dan
+    // jelas ini hitung mundur dari hari sampai detik, bukan cuma jam ke bawah.
+    const bagian = [
+      String(hari).padStart(2, "0") + " hari",
+      String(jam).padStart(2, "0") + " jam",
+      String(menit).padStart(2, "0") + " menit",
+      String(sisaDetik).padStart(2, "0") + " detik"
+    ];
 
     el.style.display = "block";
     el.textContent = "⏳ Pendaftaran ditutup dalam " + bagian.join(" : ");
