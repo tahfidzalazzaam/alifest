@@ -672,7 +672,7 @@ async function loadTabLomba() {
 
   content.innerHTML =
     '<div class="table-wrap"><table class="admin-table" id="tabel-lomba"><thead><tr>' +
-      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota (jelas per jenjang &amp; gender)</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
+      '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota (jelas per jenjang &amp; gender)</th><th>Tgl. Pelaksanaan</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
     '<div id="form-lomba-wrap"></div>' +
@@ -727,7 +727,6 @@ async function loadTabLomba() {
           '<td>' + (l.gender_diizinkan === "semua" ? "Semua" : l.gender_diizinkan) + '</td>' +
           '<td>' + renderKuotaLomba(l) + '</td>' +
           '<td>' + (l.tanggal_pelaksanaan || "Belum diatur") + '</td>' +
-          '<td>' + (l.toleransi_tahun || 0) + ' th</td>' +
           '<td>' + (l.aktif ? "Ya" : "Tidak") + '</td>' +
           '<td>' +
             '<button type="button" class="btn-link btn-edit-lomba" data-id="' + l.id + '">Edit</button> · ' +
@@ -811,11 +810,9 @@ async function loadTabLomba() {
               '<div class="hint">Dibagi otomatis rata ke tiap jenjang, dan angka hasil baginya berlaku PENUH untuk masing-masing gender (bukan dibagi lagi). Contoh: isi 40 untuk lomba dengan 2 jenjang → tiap jenjang dapat maks 20 putra + 20 putri (total kapasitas lomba = 80).</div></div>' +
             '<div class="field"><label>Urutan tampil</label><input type="number" id="lm-urutan" value="' + (existing ? existing.urutan : 0) + '" /></div>' +
           '</div>' +
-          '<div class="field-row">' +
-            '<div class="field"><label>Tanggal Pelaksanaan</label><input type="date" id="lm-tanggal-pelaksanaan" value="' + (existing && existing.tanggal_pelaksanaan ? existing.tanggal_pelaksanaan : "") + '" />' +
-              '<div class="hint">Acuan hitung usia peserta. Kosongkan untuk pakai tanggal hari ini.</div></div>' +
-            '<div class="field"><label>Toleransi Usia (tahun)</label><input type="number" id="lm-toleransi" min="0" value="' + (existing && existing.toleransi_tahun != null ? existing.toleransi_tahun : 0) + '" />' +
-              '<div class="hint">Selisih usia yang masih ditoleransi (masuk "Perlu Verifikasi Usia"), bukan langsung ditolak. 0 = tanpa toleransi.</div></div>' +
+          '<div class="field">' +
+            '<label>Tanggal Pelaksanaan</label><input type="date" id="lm-tanggal-pelaksanaan" value="' + (existing && existing.tanggal_pelaksanaan ? existing.tanggal_pelaksanaan : "") + '" />' +
+            '<div class="hint">Acuan hitung usia peserta (individu maupun tiap anggota tim), sampai presisi hari — kosongkan untuk pakai tanggal hari ini. Batasan usia jenjang di bawah berlaku KETAT, tanpa toleransi: meleset walau 1 hari langsung ditolak.</div>' +
           '</div>' +
           '<div class="field">' +
             '<label>Gender Diizinkan</label><select id="lm-gender">' +
@@ -914,7 +911,6 @@ async function loadTabLomba() {
         kuota: kuotaVal === "" ? null : parseInt(kuotaVal, 10),
         urutan: parseInt(document.getElementById("lm-urutan").value, 10) || 0,
         tanggal_pelaksanaan: document.getElementById("lm-tanggal-pelaksanaan").value || null,
-        toleransi_tahun: parseInt(document.getElementById("lm-toleransi").value, 10) || 0,
         gender_diizinkan: document.getElementById("lm-gender").value,
         deskripsi: document.getElementById("lm-deskripsi").value.trim(),
         aktif: document.getElementById("lm-aktif").checked
