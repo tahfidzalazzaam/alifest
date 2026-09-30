@@ -3,19 +3,27 @@
 // Urutan sengaja: pilih lomba DULU (Langkah 1), baru data selanjutnya.
 // Untuk lomba INDIVIDU (Adzan, Panahan, MHQ, Kaligrafi): Langkah 2 = Data
 // Diri Peserta (termasuk tanggal lahir), lalu sistem mengecek usia terhadap
-// tanggal pelaksanaan lomba (diatur panitia). Sejak migrasi 0023, TANPA
-// toleransi sama sekali:
-//   - sesuai syarat  -> lanjut normal
-//   - meleset dari syarat (walau cuma 1 hari) -> langsung ditolak di sini
+// tanggal pelaksanaan lomba (diatur panitia).
+//
+// Sejak migrasi 0024, batas usia jenjang memakai aturan TIDAK SIMETRIS
+// (lihat cekBatasUsia() di bawah untuk detail & contoh perhitungannya):
+//   - Batas ATAS (maksimal) KETAT sampai ke hari: begitu peserta sudah
+//     lewat dari tanggal ulang tahun ke-(usia maksimal) walau cuma 1 hari,
+//     langsung dianggap TERLALU TUA dan ditolak. Tepat DI hari ulang
+//     tahun itu sendiri masih dianggap pas/boleh.
+//   - Batas BAWAH (minimal) LONGGAR: begitu peserta sudah lewat dari
+//     tanggal ulang tahun ke-(usia minimal - 1) -- artinya sudah masuk
+//     "tahun usia ke-(minimal)"-nya walau belum genap -- sudah dianggap
+//     CUKUP UMUR, tidak perlu menunggu sampai persis genap usia minimal.
 // Pengecekan ini diulang lagi secara otentik di database (fungsi
-// submit_pendaftaran) supaya tidak bisa dilewati dari browser.
+// submit_pendaftaran, migrasi 0024) supaya tidak bisa dilewati dari browser.
 //
 // Untuk lomba TIM (Futsal): alurnya beda, TIDAK ada "Data Diri Peserta"
-// perorangan, tapi sejak migrasi 0023 usia TIAP ANGGOTA tim JUGA dicek
-// ketat (sama seperti individu, tanpa toleransi) terhadap syarat usia
-// jenjang yang dipilih -- kalau ada satu saja anggota yang meleset,
-// pengiriman form diblokir sampai diperbaiki (lihat evaluasiKelayakanTim()
-// & perbaruiUsiaAnggota() di bawah). Alurnya:
+// perorangan, tapi usia TIAP ANGGOTA tim JUGA dicek dengan aturan yang
+// SAMA PERSIS (lihat cekBatasUsia()) terhadap syarat usia jenjang yang
+// dipilih -- kalau ada satu saja anggota yang meleset, pengiriman form
+// diblokir sampai diperbaiki (lihat evaluasiKelayakanTim() &
+// perbaruiUsiaAnggota() di bawah). Alurnya:
 //   Langkah 2: Nama Tim (Nama Sekolah), Nama Pendamping, No. WA Pendamping
 //   Langkah 3: Nama, Tempat Tanggal Lahir, Kelas -- untuk tiap anggota tim
 //   Langkah 4: Upload Berkas (kartu pelajar/surat aktif BOLEH BANYAK FILE
@@ -411,7 +419,10 @@ function initDaftar() {
     jenjangSelect.appendChild(opt);
   });
 
-  /* ---------------- Hitung usia pada tanggal acuan tertentu ---------------- */
+  /* ---------------- Hitung usia pada tanggal acuan tertentu ----------------
+     Usia GENAP (dibulatkan ke bawah) -- dipakai murni untuk DITAMPILKAN ke
+     pendaftar (mis. "usia peserta 12 tahun"), BUKAN untuk keputusan
+     lolos/tidaknya syarat jenjang -- itu tugas cekBatasUsia() di bawah. */
   function hitungUsiaPada(tanggalLahirStr, tanggalAcuanStr) {
     if (!tanggalLahirStr) return null;
     const lahir = new Date(tanggalLahirStr);
@@ -424,6 +435,59 @@ function initDaftar() {
       (acuan.getMonth() === lahir.getMonth() && acuan.getDate() < lahir.getDate());
     if (belumUlangTahun) usia--;
     return usia;
+  }
+
+  /* ---------------- Cek syarat usia jenjang (TIDAK simetris, sampai presisi hari) ----------------
+     Dipakai untuk keputusan lolos/tidaknya syarat usia jenjang (individu
+     maupun tiap anggota tim). Aturannya SENGAJA tidak simetris antara
+     batas bawah & batas atas (hasil klarifikasi langsung dengan panitia):
+       - Batas ATAS (usiaMax) KETAT: dihitung dari tanggal ulang tahun
+         ke-(usiaMax) peserta (lahir + usiaMax tahun). Begitu tanggal acuan
+         (tanggal pelaksanaan lomba) SUDAH LEWAT dari tanggal itu -- walau
+         cuma 1 hari -- peserta dianggap TERLALU TUA. Tepat DI hari ulang
+         tahun itu sendiri (0 hari lebih) masih dianggap pas & boleh.
+         Contoh: lahir 30 Okt 2013, pelaksanaan 31 Okt 2026, usiaMax 13 ->
+         ulang tahun ke-13 jatuh 30 Okt 2026, pelaksanaan sehari setelahnya
+         -> TERLALU TUA (ditolak). Kalau pelaksanaan-nya PAS 30 Okt 2026,
+         masih dianggap pas 13 tahun -> boleh.
+       - Batas BAWAH (usiaMin) LONGGAR: dihitung dari tanggal ulang tahun
+         ke-(usiaMin - 1) peserta (lahir + (usiaMin-1) tahun). Begitu
+         tanggal acuan SUDAH LEWAT dari tanggal itu -- artinya peserta
+         sudah masuk "tahun usia ke-usiaMin"-nya walau belum genap --
+         sudah dianggap CUKUP UMUR, tidak perlu menunggu sampai persis
+         genap usiaMin. Tepat DI hari ulang tahun ke-(usiaMin-1) itu
+         sendiri (baru genap usiaMin-1, belum lewat) masih dianggap
+         BELUM cukup umur.
+         Contoh: lahir 1 Nov 2016, pelaksanaan 31 Okt 2026, usiaMin 10 ->
+         umurnya baru 9 tahun 364 hari (sehari lagi genap 10), tapi karena
+         sudah lewat dari ulang tahun ke-9 (1 Nov 2025) -> dianggap CUKUP
+         UMUR -> boleh.
+     Mengembalikan null kalau tanggal lahir/acuan tidak valid, atau objek
+     { lolos, terlaluMuda, terlaluTua }. */
+  function cekBatasUsia(tanggalLahirStr, tanggalAcuanStr, usiaMin, usiaMax) {
+    if (!tanggalLahirStr) return null;
+    const lahir = new Date(tanggalLahirStr);
+    if (isNaN(lahir.getTime())) return null;
+    const acuan = tanggalAcuanStr ? new Date(tanggalAcuanStr) : new Date();
+    if (isNaN(acuan.getTime())) return null;
+
+    // PENTING: dikerjakan semua dalam UTC (getUTCFullYear/Date.UTC), BUKAN
+    // getFullYear()/new Date(y,m,d) versi lokal -- soalnya tanggal dari
+    // <input type="date"> ("YYYY-MM-DD") di-parse JS sebagai tengah malam
+    // UTC, sementara new Date(y,m,d) versi lokal membuat tengah malam di
+    // zona waktu PERAMBAN (mis. Asia/Jakarta, UTC+7). Mencampur keduanya
+    // menggeser ultahMax/ultahMinMinus1 mundur beberapa jam ke HARI
+    // SEBELUMNYA setelah dikonversi ke UTC, yang berakibat fatal untuk fitur
+    // ini: batas maksimal yang seharusnya PAS (0 hari lebih) malah dianggap
+    // sudah lewat 1 hari. Dengan UTC konsisten di kedua sisi, masalah itu
+    // tidak muncul, siapa pun zona waktu perangkat pendaftar/panitia.
+    const ultahMax = Date.UTC(lahir.getUTCFullYear() + usiaMax, lahir.getUTCMonth(), lahir.getUTCDate());
+    const terlaluTua = acuan.getTime() > ultahMax;
+
+    const ultahMinMinus1 = Date.UTC(lahir.getUTCFullYear() + (usiaMin - 1), lahir.getUTCMonth(), lahir.getUTCDate());
+    const terlaluMuda = acuan.getTime() <= ultahMinMinus1;
+
+    return { lolos: !terlaluTua && !terlaluMuda, terlaluMuda: terlaluMuda, terlaluTua: terlaluTua };
   }
 
   // Kuota diisi admin dibagi rata per jenjang lomba itu (2 jenjang -> setengah,
@@ -661,32 +725,40 @@ function initDaftar() {
       return;
     }
 
-    // Sejak pembaruan ini, TIDAK ADA toleransi sama sekali -- usia yang
-    // meleset dari syarat jenjang walau cuma 1 hari (yang berarti sudah
-    // beda tahun usianya di sini, karena usia dihitung genap per tahun)
-    // langsung ditolak, tidak ada lagi status "lanjut dengan peringatan".
-    // Server (submit_pendaftaran, migrasi 0023) mengulang pengecekan yang
-    // sama persis, jadi ini bukan cuma validasi tampilan.
-    const usia = hitungUsiaPada(tgl, selectedLomba.tanggalPelaksanaan);
+    // TIDAK ADA toleransi sama sekali -- lihat cekBatasUsia() untuk aturan
+    // lengkapnya (batas atas ketat sampai ke hari, batas bawah longgar
+    // begitu sudah lewat ulang tahun ke usiaMin-1). Server (submit_pendaftaran,
+    // migrasi 0024) mengulang pengecekan yang sama persis, jadi ini bukan
+    // cuma validasi tampilan.
     const usiaMin = syaratUsia.min;
     const usiaMax = syaratUsia.max;
+    const usiaGenap = hitungUsiaPada(tgl, selectedLomba.tanggalPelaksanaan);
+    const cek = cekBatasUsia(tgl, selectedLomba.tanggalPelaksanaan, usiaMin, usiaMax);
     const keteranganAcuan = selectedLomba.tanggalPelaksanaan ? " pada tanggal pelaksanaan lomba" : "";
 
-    if (usia >= usiaMin && usia <= usiaMax) {
+    if (cek && cek.lolos) {
       usiaNotice.style.display = "none";
       terapkanLanjutan(true);
-    } else {
+    } else if (cek && cek.terlaluTua) {
       tampilkanNotice("error",
-        "Mohon maaf, usia peserta (" + usia + " tahun" + keteranganAcuan + ") di luar syarat lomba ini untuk jenjang " + jenjang + " (" +
-        usiaMin + "–" + usiaMax + " tahun). Silakan pilih cabang lomba lain yang sesuai.");
+        "Mohon maaf, usia peserta (" + usiaGenap + " tahun" + keteranganAcuan + ") sudah melebihi batas maksimal jenjang " + jenjang + " (" +
+        usiaMin + "–" + usiaMax + " tahun) untuk lomba ini, walau cuma selisih beberapa hari dari batas usia maksimal. Silakan pilih cabang lomba lain yang sesuai.");
+      terapkanLanjutan(false);
+    } else if (cek && cek.terlaluMuda) {
+      tampilkanNotice("error",
+        "Mohon maaf, usia peserta (" + usiaGenap + " tahun" + keteranganAcuan + ") belum memenuhi batas minimal jenjang " + jenjang + " (" +
+        usiaMin + "–" + usiaMax + " tahun) untuk lomba ini. Silakan pilih cabang lomba lain yang sesuai.");
+      terapkanLanjutan(false);
+    } else {
+      tampilkanNotice("error", "Tanggal lahir tidak valid. Mohon periksa kembali.");
       terapkanLanjutan(false);
     }
   }
 
   /* ---------------- Kelayakan: lomba TIM (cek jenjang, gender, kuota, DAN usia semua anggota) ----------------
-     Sejak pembaruan ini, usia SETIAP anggota tim juga dicek ketat terhadap
-     syarat jenjang yang dipilih -- SAMA seperti lomba individu, TANPA
-     toleransi (meleset walau 1 hari langsung dianggap tidak memenuhi syarat).
+     Usia SETIAP anggota tim dicek dengan aturan yang SAMA PERSIS dengan
+     lomba individu -- lihat cekBatasUsia() (batas atas ketat sampai ke
+     hari, batas bawah longgar begitu sudah lewat ulang tahun ke usiaMin-1).
      Bedanya dengan individu: field Data Anggota & Upload Berkas TETAP
      ditampilkan kalau ada anggota yang usianya bermasalah (supaya bisa
      diperbaiki langsung), yang diblokir cuma pengiriman formnya
@@ -755,7 +827,8 @@ function initDaftar() {
         usiaEl.classList.remove("anggota-usia--error");
         return;
       }
-      const diLuarSyarat = !!(syaratUsia && (usia < syaratUsia.min || usia > syaratUsia.max));
+      const cek = syaratUsia ? cekBatasUsia(tglVal, selectedLomba.tanggalPelaksanaan, syaratUsia.min, syaratUsia.max) : null;
+      const diLuarSyarat = !!(cek && !cek.lolos);
       usiaEl.textContent = usia + " th" + (diLuarSyarat ? " ⚠️" : "");
       usiaEl.classList.toggle("anggota-usia--error", diLuarSyarat);
       if (diLuarSyarat) {
