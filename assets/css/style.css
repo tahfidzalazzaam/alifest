@@ -593,6 +593,7 @@ textarea { resize: vertical; min-height: 80px; }
 .anggota-tgl-wrap { display: flex; align-items: center; gap: 6px; }
 .anggota-tgl-wrap .anggota-tgl { width: 100%; }
 .anggota-usia { font-size: 0.72rem; color: var(--ink-400); white-space: nowrap; }
+.anggota-usia--error { color: var(--danger); font-weight: 700; }
 @media (max-width: 700px) { .anggota-row { grid-template-columns: 1fr; } }
 
 /* Chip kuota pada kartu pilihan lomba (Langkah 1, halaman Daftar) —
