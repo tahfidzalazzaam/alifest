@@ -634,7 +634,7 @@ function initDaftar() {
     if (selectedLomba && selectedLomba.tipe === "tim") {
       input.setAttribute("multiple", "multiple");
       label.textContent = "Pilih berkas (boleh lebih dari satu, JPG/PNG/PDF, maks 4MB/file)";
-      hint.textContent = "Unggah kartu pelajar/surat aktif sekolah SELURUH anggota tim sekaligus dalam satu kali pilih berkas (bisa pilih banyak file).";
+      hint.textContent = "Unggah kartu pelajar/surat aktif sekolah SELURUH anggota tim sekaligus dalam satu kali pilih berkas (bisa pilih banyak file) — idealnya sejumlah anggota tim, satu berkas per anggota. Nama file yang tersimpan akan otomatis mencoba menyertakan nama yang tertera di kartu/suratnya (kalau berhasil terbaca), supaya panitia lebih mudah mengenali berkas siapa itu.";
     } else {
       input.removeAttribute("multiple");
       label.textContent = "Pilih berkas (JPG/PNG/PDF, maks 4MB)";
@@ -1046,6 +1046,128 @@ function initDaftar() {
     return bersih || "tim";
   }
 
+  /* ---------------- OCR nama dari Kartu Pelajar/Surat (khusus tim/Futsal) ----------------
+     Kartu pelajar/surat SELURUH anggota tim diunggah sekaligus dalam satu kali
+     pilih berkas (lihat setupUploadKartuLabel()), jadi urutan filenya TIDAK
+     menjamin sama dengan urutan anggota di formulir. Supaya panitia gampang
+     tahu berkas itu milik siapa cuma dari nama filenya, tiap berkas dicoba
+     dibaca teksnya di BROWSER memakai Tesseract.js (dimuat belakangan/lazy
+     lewat CDN, cuma untuk pendaftaran tim yang memang butuh -- pendaftar
+     individu tidak pernah memuat pustaka ini sama sekali), lalu dicari baris
+     yang paling mirip nama orang dan disisipkan ke nama file.
+
+     INI MURNI PENAMBAH KENYAMANAN (nama file lebih jelas), BUKAN validasi
+     data -- hasil bacaan OCR TIDAK PERNAH dipakai mengisi field form mana pun
+     secara otomatis, cuma jadi bagian dari nama file di Storage. Kalau OCR
+     gagal/tidak yakin/lambat/librarynya gagal dimuat (mis. jaringan lambat),
+     nama file jatuh balik ke penomoran biasa (-kartu-N) seperti sebelumnya --
+     pendaftaran tetap bisa terkirim seperti biasa, tidak pernah diblokir
+     gara-gara OCR gagal. */
+  let tesseractPromise = null;
+  function muatTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (tesseractPromise) return tesseractPromise;
+    tesseractPromise = new Promise(function (resolve, reject) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+      script.onload = function () {
+        if (window.Tesseract) resolve(window.Tesseract);
+        else reject(new Error("Pustaka OCR gagal dimuat."));
+      };
+      script.onerror = function () { reject(new Error("Gagal memuat pustaka OCR dari CDN.")); };
+      document.head.appendChild(script);
+    });
+    return tesseractPromise;
+  }
+
+  // Kata-kata umum yang biasa tercetak di kartu pelajar/surat keterangan aktif
+  // sekolah Indonesia, dipakai menyaring baris hasil OCR supaya tidak salah
+  // ambil judul/label/alamat sebagai nama orang.
+  const OCR_KATA_BUKAN_NAMA = [
+    "kartu", "pelajar", "siswa", "siswi", "sekolah", "surat", "keterangan",
+    "aktif", "nisn", "nis", "nomor", "induk", "kelas", "tahun", "ajaran",
+    "alamat", "tempat", "tanggal", "lahir", "jenis", "kelamin", "agama",
+    "kepala", "kepsek", "madrasah", "pondok", "pesantren", "ppdb", "npsn",
+    "provinsi", "kabupaten", "kecamatan", "kelurahan", "desa", "jalan",
+    "republik", "indonesia", "kementerian", "pendidikan", "nasional",
+    "identitas", "berlaku", "masa", "photo", "foto", "ttd", "tanda", "tangan"
+  ];
+
+  // Dari teks mentah hasil OCR (banyak baris), coba tebak baris mana yang
+  // paling mungkin nama orang. Prioritas #1: baris berlabel eksplisit
+  // "Nama : ..." / "Nama Siswa : ..." dst. Kalau tidak ketemu, jatuh balik ke
+  // heuristik sederhana (baris huruf semua kapital, 2-5 kata, tanpa angka,
+  // tanpa kata kunci umum di atas).
+  function ocrTebakBarisNama(teksMentah) {
+    const baris = String(teksMentah || "")
+      .split("\n")
+      .map(function (b) { return b.replace(/\s+/g, " ").trim(); })
+      .filter(function (b) { return b.length >= 3; });
+
+    let terbaik = null;
+    let skorTerbaik = 0;
+
+    baris.forEach(function (b) {
+      const bawah = b.toLowerCase();
+
+      const cocokLabel = bawah.match(/^nama[a-z\s]*:\s*(.+)$/);
+      if (cocokLabel && cocokLabel[1] && cocokLabel[1].trim().length >= 3) {
+        if (skorTerbaik < 100) { terbaik = cocokLabel[1].trim(); skorTerbaik = 100; }
+        return;
+      }
+
+      const jumlahDigit = (b.match(/[0-9]/g) || []).length;
+      const mengandungKataUmum = OCR_KATA_BUKAN_NAMA.some(function (kw) { return bawah.indexOf(kw) !== -1; });
+      const hurufSajaOk = /^[A-Za-z.,'\-\s]+$/.test(b);
+      if (!hurufSajaOk || mengandungKataUmum || jumlahDigit > 0) return;
+
+      const kataKata = b.split(/\s+/).filter(Boolean);
+      const semuaBesar = b === b.toUpperCase() && /[A-Z]/.test(b);
+      let skor = (kataKata.length >= 2 && kataKata.length <= 5) ? 10 : 2;
+      if (semuaBesar) skor += 5;
+      if (b.length >= 6 && b.length <= 40) skor += 3;
+
+      if (skor > skorTerbaik) { terbaik = b; skorTerbaik = skor; }
+    });
+
+    return skorTerbaik >= 8 ? terbaik : null;
+  }
+
+  // Supaya OCR yang lambat/nyangkut (mis. file besar, jaringan lambat) tidak
+  // menahan proses kirim form selamanya -- lewat batas waktu, dianggap gagal
+  // (diam-diam, `resolve(null)`) dan nama file jatuh balik ke penomoran biasa.
+  function batasWaktu(promise, ms) {
+    return new Promise(function (resolve) {
+      let selesai = false;
+      const timer = setTimeout(function () {
+        if (!selesai) { selesai = true; resolve(null); }
+      }, ms);
+      promise.then(function (hasil) {
+        if (!selesai) { selesai = true; clearTimeout(timer); resolve(hasil); }
+      }).catch(function () {
+        if (!selesai) { selesai = true; clearTimeout(timer); resolve(null); }
+      });
+    });
+  }
+
+  // Cuma dicoba untuk berkas gambar (JPG/PNG) -- file PDF dilewati (Tesseract
+  // butuh gambar, bukan PDF) dan langsung jatuh balik ke penomoran biasa.
+  async function deteksiNamaDariKartu(file) {
+    if (!file || !/^image\//.test(file.type)) return null;
+    try {
+      const Tesseract = await muatTesseract();
+      const hasil = await batasWaktu(Tesseract.recognize(file, "ind"), 20000);
+      if (!hasil || !hasil.data || !hasil.data.text) return null;
+      const namaBaris = ocrTebakBarisNama(hasil.data.text);
+      if (!namaBaris) return null;
+      const bersih = namaFileAman(namaBaris);
+      return bersih && bersih !== "tim" ? bersih : null;
+    } catch (e) {
+      console.warn("OCR nama di kartu gagal dibaca (dilewati, nama file jatuh balik ke penomoran biasa):", e);
+      return null;
+    }
+  }
+
   async function uploadKeStorage(file, label) {
     const path = "sementara/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensi(file);
     const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
@@ -1166,9 +1288,35 @@ function initDaftar() {
     if (isTim) {
       const fileDelegasi = document.getElementById("fileDelegasi").files[0];
       const fileKartuList = Array.from(document.getElementById("fileKartu").files || []);
-      uploadTugas = Promise.all(
-        fileKartuList.map(function (f, i) { return uploadKeStorage(f, labelDasar + "-kartu-" + (i + 1)); })
-      ).then(function (urlsKartu) {
+
+      // Coba baca nama di tiap kartu dulu (lihat deteksiNamaDariKartu()) --
+      // ini yang biasanya makan waktu beberapa detik, jadi tombol kirim diberi
+      // teks berbeda supaya pendaftar tahu prosesnya belum macet. Dibaca SATU
+      // PER SATU (bukan sekaligus lewat Promise.all) -- OCR itu berat di CPU,
+      // dan tim bisa punya banyak anggota, jadi menjalankan semuanya
+      // bersamaan berisiko bikin HP/laptop pendaftar yang spek-nya pas-pasan
+      // jadi lemot/macet. Nomor urut di tombol kirim juga membantu pendaftar
+      // tahu prosesnya masih berjalan, bukan macet.
+      btnSubmit.textContent = "Membaca nama di kartu (1/" + fileKartuList.length + ")...";
+      uploadTugas = fileKartuList
+        .reduce(function (rantai, f, i) {
+          return rantai.then(function (hasilSejauhIni) {
+            btnSubmit.textContent = "Membaca nama di kartu (" + (i + 1) + "/" + fileKartuList.length + ")...";
+            return deteksiNamaDariKartu(f).then(function (nama) {
+              return hasilSejauhIni.concat([nama]);
+            });
+          });
+        }, Promise.resolve([]))
+        .then(function (namaTerdeteksiList) {
+          btnSubmit.textContent = "Mengirim...";
+          return Promise.all(
+            fileKartuList.map(function (f, i) {
+              const namaTerdeteksi = namaTerdeteksiList[i];
+              const label = labelDasar + "-kartu-" + (i + 1) + (namaTerdeteksi ? "-" + namaTerdeteksi : "");
+              return uploadKeStorage(f, label);
+            })
+          );
+        }).then(function (urlsKartu) {
         return Promise.all([
           Promise.all(fileIgList.map(function (f, i) { return uploadKeStorage(f, labelDasar + "-bukti-ig-" + (i + 1)); })),
           uploadKeStorage(fileDelegasi, labelDasar + "-delegasi")
