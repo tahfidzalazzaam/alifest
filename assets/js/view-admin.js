@@ -363,6 +363,41 @@ function renderDaftarBerkasTim(urlBerkasTim) {
   }).join(" · ");
 }
 
+/* -------- Popup detail peserta INDIVIDU: dibuka dengan mengetuk baris -------- */
+// Sejak migrasi 0027, baris peserta individu juga bisa diketuk (sebelumnya
+// cuma baris tim/Futsal yang bisa) supaya panitia bisa lihat data lengkapnya,
+// termasuk field "Nama Pendamping" yang SENGAJA TIDAK ditampilkan sebagai
+// kolom di tabel Data Pendaftar (biar tabelnya tetap ramping). Tidak perlu
+// query tambahan ke database -- semua field sudah ada di `row` (hasil
+// select("*") pada `pendaftaran`), jadi fungsi ini sinkron (tidak seperti
+// bukaModalTim yang harus memuat anggota_tim secara async).
+function bukaModalIndividu(row) {
+  const statusClass = row.status === "Perlu Verifikasi Usia" ? " modal-status--warn" : "";
+  const infoHTML =
+    '<div class="modal-tim-info">' +
+      '<div><strong>Nama Lengkap Peserta:</strong> ' + row.nama_lengkap + '</div>' +
+      '<div><strong>Nama Pendamping:</strong> ' + (row.nama_pendamping || "-") + '</div>' +
+      '<div><strong>Jenjang/Kelas:</strong> ' + row.jenjang + '/' + row.kelas + '</div>' +
+      '<div><strong>Jenis Kelamin:</strong> ' + (row.jenis_kelamin === "perempuan" ? "Perempuan" : row.jenis_kelamin === "laki-laki" ? "Laki-laki" : "-") + '</div>' +
+      '<div><strong>Tanggal Lahir:</strong> ' + formatTanggalLahir(row.tanggal_lahir) + (row.usia != null ? " (" + row.usia + " th)" : "") + '</div>' +
+      '<div><strong>Asal Sekolah:</strong> ' + row.asal_sekolah + '</div>' +
+      '<div><strong>No. WhatsApp:</strong> ' + row.whatsapp + '</div>' +
+      '<div><strong>Email:</strong> ' + (row.email || "-") + '</div>' +
+      '<div><strong>Nomor Pendaftaran:</strong> ' + row.nomor_pendaftaran + '</div>' +
+      '<div><strong>Status:</strong> <span class="modal-status' + statusClass + '">' + row.status + '</span></div>' +
+    '</div>' +
+    (row.status === "Perlu Verifikasi Usia"
+      ? '<p class="hint modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
+      : "") +
+    '<div class="modal-tim-berkas">' +
+      '<strong>Berkas:</strong> ' +
+      (row.url_kartu_pelajar ? '<a href="' + row.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu Pelajar</a>' : '<span class="hint">Kartu -</span>') +
+      ' · Bukti IG: ' + renderDaftarBerkasTim(row.url_bukti_follow_ig) +
+    '</div>';
+
+  bukaModal("Detail Peserta — " + row.nama_lengkap, infoHTML);
+}
+
 /* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function, dipanggil saat
    status pendaftaran diubah jadi "Diterima" atau "Ditolak" -------- */
 async function kirimNotifikasiWA(id, selEl) {
@@ -529,7 +564,9 @@ async function loadTabPendaftar() {
 
     tbody.innerHTML = tampil.map(function (r) {
       const isTim = r.tipe === "tim";
-      const tombolTim = isTim ? ' <span class="lp-badge lp-badge--tim">TIM · ketuk baris</span>' : "";
+      const tombolTim = isTim
+        ? ' <span class="lp-badge lp-badge--tim">TIM · ketuk baris</span>'
+        : ' <span class="lp-badge">ketuk untuk detail</span>';
       const lpBadge = r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-";
       const tipeIkon = r.tipe_pendaftar === "lembaga" ? "🏫" : "🎓";
       const tipeJudul = r.tipe_pendaftar === "lembaga"
@@ -543,7 +580,7 @@ async function loadTabPendaftar() {
         : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · IG: ' + renderDaftarBerkasTim(r.url_bukti_follow_ig));
 
       return (
-        '<tr class="' + (isTim ? "row-clickable" : "") + '" data-id="' + r.id + '">' +
+        '<tr class="row-clickable" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
           '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + lpBadge + '</span>' + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
@@ -563,16 +600,24 @@ async function loadTabPendaftar() {
       );
     }).join("");
 
-    // Baris tim (Futsal) bisa diketuk di mana saja untuk membuka popup detail
-    // anggota tim -- kecuali kalau yang diketuk adalah tombol/dropdown di
-    // dalam baris itu sendiri (status, hapus, lihat berkas), supaya tidak
-    // bentrok dengan aksi masing-masing.
+    // Semua baris (tim/Futsal maupun individu) bisa diketuk di mana saja untuk
+    // membuka popup detail -- kecuali kalau yang diketuk adalah tombol/dropdown
+    // di dalam baris itu sendiri (status, hapus, lihat berkas), supaya tidak
+    // bentrok dengan aksi masing-masing. Baris tim membuka bukaModalTim
+    // (dengan daftar anggota tim), baris individu membuka bukaModalIndividu
+    // (migrasi 0027) yang menampilkan field "Nama Pendamping" yang sengaja
+    // tidak dijadikan kolom tabel.
     tbody.querySelectorAll("tr.row-clickable").forEach(function (tr) {
       tr.addEventListener("click", function (e) {
         if (e.target.closest("select, button, a")) return;
         const id = tr.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
-        if (row) bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
+        if (!row) return;
+        if (row.tipe === "tim") {
+          bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
+        } else {
+          bukaModalIndividu(row);
+        }
       });
     });
 
