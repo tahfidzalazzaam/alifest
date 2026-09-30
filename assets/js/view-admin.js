@@ -74,10 +74,50 @@ function renderLogin(root) {
 
 /* ==================== DASHBOARD SHELL ==================== */
 
+// Status tanggal tutup otomatis & saklar manual pendaftaran -- disimpan di
+// level modul (bukan di dalam renderDashboard) supaya bisa dibaca/diubah
+// juga dari tab "Kelola Lomba" (lihat kotak ringkas di loadTabLomba, migrasi
+// 0022), yang letaknya sengaja dipindah ke sana (bukan lagi tampil di semua
+// tab seperti sebelumnya) tapi tombol besar "Dibuka/Ditutup" di admin-header
+// tetap perlu tahu status tanggal tutup ini untuk menentukan gaya/tulisannya.
+let statusDibukaManual = true; // site_settings.pendaftaran_dibuka
+let tanggalTutupOtomatis = null; // site_settings.tanggal_tutup_pendaftaran (ISO) atau null
+
+function tutupOtomatisAktif() {
+  return !!(tanggalTutupOtomatis && new Date() > new Date(tanggalTutupOtomatis));
+}
+
+function formatTanggalJamTutup(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "-";
+  return d.toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
+}
+
+// Input datetime-local tidak menyimpan info zona waktu -- nilainya
+// diperlakukan sebagai jam LOKAL browser, jadi dikonversi ke/dari objek Date
+// supaya tetap konsisten disimpan sebagai timestamptz di database.
+function isoKeDatetimeLocal(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = function (n) { return String(n).padStart(2, "0"); };
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+    "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+function perbaruiTombolToggle() {
+  const btnToggle = document.getElementById("btn-toggle-pendaftaran");
+  if (!btnToggle) return; // elemen ini cuma ada selama halaman Panitia terbuka
+  const otomatisAktif = tutupOtomatisAktif();
+  btnToggle.className = "btn " + (statusDibukaManual && !otomatisAktif ? "btn--primary" : "btn--ghost");
+  btnToggle.textContent = statusDibukaManual ? "🟢 Pendaftaran Dibuka" : "🔒 Pendaftaran Ditutup";
+  btnToggle.title = statusDibukaManual ? "Ketuk untuk menutup pendaftaran" : "Ketuk untuk membuka pendaftaran";
+}
+
 async function renderDashboard(root, session) {
   const { data: settings } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka, tanggal_tutup_pendaftaran").eq("id", 1).single();
-  let dibuka = !settings || settings.pendaftaran_dibuka !== false;
-  let tanggalTutup = (settings && settings.tanggal_tutup_pendaftaran) || null; // ISO string atau null
+  statusDibukaManual = !settings || settings.pendaftaran_dibuka !== false;
+  tanggalTutupOtomatis = (settings && settings.tanggal_tutup_pendaftaran) || null; // ISO string atau null
 
   root.innerHTML =
     '<div class="admin-header">' +
@@ -86,18 +126,6 @@ async function renderDashboard(root, session) {
         '<button type="button" id="btn-toggle-pendaftaran"></button>' +
         '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
       '</div>' +
-    '</div>' +
-    '<div class="admin-tutup-otomatis" id="admin-tutup-otomatis">' +
-      '<div class="admin-tutup-otomatis__field">' +
-        '<label for="input-tanggal-tutup">⏰ Tutup Otomatis Pendaftaran (opsional)</label>' +
-        '<div class="admin-tutup-otomatis__row">' +
-          '<input type="datetime-local" id="input-tanggal-tutup" />' +
-          '<button type="button" class="btn btn--primary" id="btn-simpan-tanggal-tutup">Simpan</button>' +
-          '<button type="button" class="btn-link" id="btn-hapus-tanggal-tutup">Hapus tanggal</button>' +
-        '</div>' +
-        '<div class="hint">Begitu waktu ini terlewati, pendaftaran otomatis TERTUTUP untuk publik (sama seperti tombol "Pendaftaran Ditutup" di atas) — tidak perlu panitia klik apa pun. Ini TERPISAH dari Tanggal Pelaksanaan tiap lomba (yang dipakai untuk menghitung usia peserta di tab "Kelola Lomba"). Kosongkan untuk mematikan penutupan otomatis (tutup/buka sepenuhnya manual lewat tombol di atas).</div>' +
-      '</div>' +
-      '<p class="hint" id="status-tanggal-tutup" style="margin-top:6px;"></p>' +
     '</div>' +
     '<div class="admin-tabs">' +
       '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
@@ -113,109 +141,26 @@ async function renderDashboard(root, session) {
     '</div>';
 
   const btnToggle = document.getElementById("btn-toggle-pendaftaran");
-  const statusTanggalTutupEl = document.getElementById("status-tanggal-tutup");
-
-  // Tutup otomatis SELALU dicek ulang di database (submit_pendaftaran) --
-  // ini di admin cuma untuk menampilkan status & mengatur tanggalnya. Kalau
-  // waktu sekarang sudah lewat tanggalTutup, pendaftaran tertutup untuk
-  // publik WALAUPUN toggle "Pendaftaran Dibuka" di atas masih menyala --
-  // supaya panitia tidak bingung, statusnya ditampilkan jelas di sini.
-  function tutupOtomatisAktif() {
-    return !!(tanggalTutup && new Date() > new Date(tanggalTutup));
-  }
-
-  function perbaruiTombolToggle() {
-    const otomatisAktif = tutupOtomatisAktif();
-    btnToggle.className = "btn " + (dibuka && !otomatisAktif ? "btn--primary" : "btn--ghost");
-    btnToggle.textContent = dibuka ? "🟢 Pendaftaran Dibuka" : "🔒 Pendaftaran Ditutup";
-    btnToggle.title = dibuka ? "Ketuk untuk menutup pendaftaran" : "Ketuk untuk membuka pendaftaran";
-
-    if (otomatisAktif) {
-      statusTanggalTutupEl.innerHTML = '<strong style="color:var(--danger);">⏰ Sudah lewat tanggal tutup otomatis (' +
-        formatTanggalJamTutup(tanggalTutup) + ')</strong> — pendaftaran tertutup untuk publik walau tombol di atas menunjukkan "Dibuka". Ganti/kosongkan tanggalnya kalau mau membuka lagi.';
-    } else if (tanggalTutup) {
-      statusTanggalTutupEl.innerHTML = 'Pendaftaran akan otomatis tertutup pada <strong>' + formatTanggalJamTutup(tanggalTutup) + '</strong>.';
-    } else {
-      statusTanggalTutupEl.textContent = 'Belum diatur — buka/tutup pendaftaran sepenuhnya manual lewat tombol di atas.';
-    }
-  }
-
-  function formatTanggalJamTutup(iso) {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "-";
-    return d.toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
-  }
-
-  // Input datetime-local tidak menyimpan info zona waktu -- nilainya
-  // diperlakukan sebagai jam LOKAL browser, jadi dikonversi ke/dari objek
-  // Date supaya tetap konsisten disimpan sebagai timestamptz di database.
-  function isoKeDatetimeLocal(iso) {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    const pad = function (n) { return String(n).padStart(2, "0"); };
-    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
-      "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
-  }
-
-  const inputTanggalTutup = document.getElementById("input-tanggal-tutup");
-  inputTanggalTutup.value = isoKeDatetimeLocal(tanggalTutup);
   perbaruiTombolToggle();
 
-  // Countdown status di kotak ini sendiri diperbarui tiap menit, supaya kalau
-  // panitia membiarkan tab ini terbuka pas waktu tutup lewat, statusnya ikut
-  // berubah tanpa perlu memuat ulang halaman.
+  // Statusnya diperbarui tiap menit, supaya kalau panitia membiarkan
+  // halaman ini terbuka pas waktu tutup otomatis lewat, tombol besar ini
+  // ikut berubah tanpa perlu memuat ulang halaman.
   setInterval(perbaruiTombolToggle, 60000);
 
-  document.getElementById("btn-simpan-tanggal-tutup").addEventListener("click", async function () {
-    const val = inputTanggalTutup.value;
-    const btn = this;
-    const isoBaru = val ? new Date(val).toISOString() : null;
-
-    if (val && isNaN(new Date(val).getTime())) {
-      alert("Tanggal/jam tidak valid.");
-      return;
-    }
-
-    btn.disabled = true;
-    const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: isoBaru }).eq("id", 1);
-    btn.disabled = false;
-
-    if (error) {
-      alert("Gagal menyimpan tanggal tutup: " + error.message);
-      return;
-    }
-    tanggalTutup = isoBaru;
-    perbaruiTombolToggle();
-  });
-
-  document.getElementById("btn-hapus-tanggal-tutup").addEventListener("click", async function () {
-    if (!tanggalTutup && !inputTanggalTutup.value) return;
-    if (!confirm("Hapus tanggal tutup otomatis? Buka/tutup pendaftaran akan sepenuhnya manual lewat tombol di atas.")) return;
-
-    const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: null }).eq("id", 1);
-    if (error) {
-      alert("Gagal menghapus tanggal tutup: " + error.message);
-      return;
-    }
-    tanggalTutup = null;
-    inputTanggalTutup.value = "";
-    perbaruiTombolToggle();
-  });
-
   btnToggle.addEventListener("click", async function () {
-    const aksi = dibuka ? "menutup" : "membuka";
+    const aksi = statusDibukaManual ? "menutup" : "membuka";
     if (!confirm('Yakin ingin ' + aksi + ' pendaftaran? Perubahan langsung berlaku di situs publik.')) return;
 
     btnToggle.disabled = true;
-    const { error } = await supabaseClient.from("site_settings").update({ pendaftaran_dibuka: !dibuka }).eq("id", 1);
+    const { error } = await supabaseClient.from("site_settings").update({ pendaftaran_dibuka: !statusDibukaManual }).eq("id", 1);
     btnToggle.disabled = false;
 
     if (error) {
       alert("Gagal mengubah status: " + error.message);
       return;
     }
-    dibuka = !dibuka;
+    statusDibukaManual = !statusDibukaManual;
     perbaruiTombolToggle();
   });
 
@@ -730,7 +675,22 @@ async function loadTabLomba() {
       '<th></th><th>Nama</th><th>Jenjang</th><th>Usia</th><th>Tipe</th><th>Gender</th><th>Kuota (jelas per jenjang &amp; gender)</th><th>Tgl. Pelaksanaan</th><th>Toleransi</th><th>Aktif</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>' +
     '<button type="button" class="btn btn--primary" id="btn-tambah-lomba" style="margin-top:16px;">+ Tambah Lomba</button>' +
-    '<div id="form-lomba-wrap"></div>';
+    '<div id="form-lomba-wrap"></div>' +
+    // Pengatur "Tutup Otomatis Pendaftaran" (migrasi 0022) -- sengaja
+    // dipindah ke sini, paling bawah tab "Kelola Lomba", dan dibuat kecil/
+    // ringkas (bukan lagi kotak besar yang tampil di SEMUA tab seperti
+    // sebelumnya). Satu tanggal ini berlaku untuk SEMUA lomba sekaligus,
+    // TERPISAH dari Tanggal Pelaksanaan tiap lomba di tabel di atas (yang
+    // dipakai buat hitung usia peserta) -- makanya diletakkan di tab ini
+    // juga (sama-sama soal tanggal terkait lomba), tapi tetap dua hal yang
+    // beda: tanggal ini murni soal kapan pintu pendaftaran online ditutup.
+    '<div class="tutup-otomatis-ringkas" id="tutup-otomatis-ringkas">' +
+      '<span class="tutup-otomatis-ringkas__label">⏰ Tutup otomatis pendaftaran:</span>' +
+      '<input type="datetime-local" id="input-tanggal-tutup" />' +
+      '<button type="button" class="btn-link" id="btn-simpan-tanggal-tutup">Simpan</button>' +
+      '<button type="button" class="btn-link" id="btn-hapus-tanggal-tutup">Hapus</button>' +
+      '<span class="hint" id="status-tanggal-tutup"></span>' +
+    '</div>';
 
   // Kuota yang diisi admin dibagi rata per jenjang, lalu per gender --
   // ditampilkan gamblang per baris jenjang (bukan satu angka hasil bagi yang
@@ -977,6 +937,64 @@ async function loadTabLomba() {
 
   document.getElementById("btn-tambah-lomba").addEventListener("click", function () { tampilkanForm(null); });
   renderTabel();
+
+  // Kotak ringkas "Tutup Otomatis Pendaftaran" (migrasi 0022) -- baca nilai
+  // dari status modul (tanggalTutupOtomatis, disinkronkan renderDashboard()
+  // tiap halaman Panitia dibuka), simpan/hapus langsung ke site_settings,
+  // lalu perbarui juga tombol besar "Dibuka/Ditutup" di admin-header lewat
+  // perbaruiTombolToggle() supaya keduanya tetap sinkron tanpa perlu memuat
+  // ulang seluruh halaman.
+  (function setupTutupOtomatisRingkas() {
+    const input = document.getElementById("input-tanggal-tutup");
+    const statusEl = document.getElementById("status-tanggal-tutup");
+    input.value = isoKeDatetimeLocal(tanggalTutupOtomatis);
+
+    function refreshStatus() {
+      if (tutupOtomatisAktif()) {
+        statusEl.innerHTML = '<strong style="color:var(--danger);">Sudah lewat (' + formatTanggalJamTutup(tanggalTutupOtomatis) + ') — pendaftaran tertutup otomatis.</strong>';
+      } else if (tanggalTutupOtomatis) {
+        statusEl.textContent = "Tertutup otomatis pada " + formatTanggalJamTutup(tanggalTutupOtomatis) + ".";
+      } else {
+        statusEl.textContent = "Belum diatur (manual saja lewat tombol di atas).";
+      }
+    }
+    refreshStatus();
+
+    document.getElementById("btn-simpan-tanggal-tutup").addEventListener("click", async function () {
+      const val = input.value;
+      if (val && isNaN(new Date(val).getTime())) {
+        alert("Tanggal/jam tidak valid.");
+        return;
+      }
+      const isoBaru = val ? new Date(val).toISOString() : null;
+      const btn = this;
+      btn.disabled = true;
+      const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: isoBaru }).eq("id", 1);
+      btn.disabled = false;
+      if (error) {
+        alert("Gagal menyimpan tanggal tutup: " + error.message);
+        return;
+      }
+      tanggalTutupOtomatis = isoBaru;
+      refreshStatus();
+      perbaruiTombolToggle();
+    });
+
+    document.getElementById("btn-hapus-tanggal-tutup").addEventListener("click", async function () {
+      if (!tanggalTutupOtomatis && !input.value) return;
+      if (!confirm("Hapus tanggal tutup otomatis? Buka/tutup pendaftaran akan sepenuhnya manual lewat tombol di atas.")) return;
+
+      const { error } = await supabaseClient.from("site_settings").update({ tanggal_tutup_pendaftaran: null }).eq("id", 1);
+      if (error) {
+        alert("Gagal menghapus tanggal tutup: " + error.message);
+        return;
+      }
+      tanggalTutupOtomatis = null;
+      input.value = "";
+      refreshStatus();
+      perbaruiTombolToggle();
+    });
+  })();
 }
 
 /* ==================== TAB 3: LOGO SITUS ==================== */
@@ -1166,26 +1184,42 @@ async function loadTabJuknis() {
 
 /* ==================== TAB 5: KARTU PESERTA & PENDAMPING ==================== */
 
+// Sejak pembaruan ini, field "Jenjang" dan "Lomba" pada Kartu Peserta
+// digabung jadi SATU field (key "lomba_jenjang") -- tidak lagi dua tulisan
+// terpisah di kartu, supaya tata letaknya lebih ringkas. Kartu Pendamping
+// tidak berubah (memang sudah cuma satu field "Lomba/Sekolah").
 const FIELD_PESERTA = [
   { key: "nama", label: "Nama" },
-  { key: "jenjang", label: "Jenjang" },
-  { key: "lomba", label: "Lomba" }
+  { key: "lomba_jenjang", label: "Lomba & Jenjang" }
 ];
 const FIELD_PENDAMPING = [
   { key: "nama", label: "Nama" },
   { key: "lomba", label: "Lomba/Sekolah" }
 ];
+
+// Ukuran cetak KARTU PESERTA & KARTU PENDAMPING dibuat TETAP (bukan lagi
+// ikut ukuran piksel PNG template yang diupload panitia) -- 8,5 x 12 cm,
+// ukuran "cocard"/ID card berlanyard yang standar/umum dipakai jasa cetak di
+// Indonesia. Berapa pun ukuran file PNG yang diupload, hasil pratinjau &
+// PDF-nya SELALU pas di ukuran fisik ini (gambar template ditarik/disusutkan
+// otomatis supaya penuh) -- lihat gambarKartu() & cetakKartuPDF(). Sebaiknya
+// desain template dibuat dengan rasio 8,5:12 supaya tidak gepeng/melar.
+const KARTU_LEBAR_CM = 8.5;
+const KARTU_TINGGI_CM = 12;
+const KARTU_DPI = 300; // dipakai buat kanvas pratinjau di layar; PDF-nya sendiri pakai satuan cm langsung (lihat cetakKartuPDF) supaya ukuran fisiknya presisi
+const KARTU_LEBAR_PX = Math.round((KARTU_LEBAR_CM / 2.54) * KARTU_DPI);
+const KARTU_TINGGI_PX = Math.round((KARTU_TINGGI_CM / 2.54) * KARTU_DPI);
+
 const DEFAULT_LAYOUT_KARTU = {
   peserta: {
-    nama: { x: 40, y: 40, font: 28 },
-    jenjang: { x: 40, y: 90, font: 20 },
-    lomba: { x: 40, y: 125, font: 20 },
-    qr: { x: 40, y: 170, size: 120 }
+    nama: { x: 60, y: 680, font: 56 },
+    lomba_jenjang: { x: 60, y: 760, font: 34 },
+    qr: { x: 352, y: 850, size: 300 }
   },
   pendamping: {
-    nama: { x: 40, y: 40, font: 28 },
-    lomba: { x: 40, y: 90, font: 20 },
-    qr: { x: 40, y: 140, size: 120 }
+    nama: { x: 60, y: 680, font: 56 },
+    lomba: { x: 60, y: 760, font: 34 },
+    qr: { x: 352, y: 850, size: 300 }
   }
 };
 
@@ -1232,10 +1266,14 @@ function gambarQR(ctx, teks, x, y, size) {
 }
 
 function gambarKartu(canvas, templateImg, layout, data, fields) {
-  canvas.width = templateImg.naturalWidth;
-  canvas.height = templateImg.naturalHeight;
+  // Kanvas SELALU berukuran tetap (ukuran cocard standar, lihat
+  // KARTU_LEBAR_PX/KARTU_TINGGI_PX di atas) -- template PNG yang diupload
+  // panitia ditarik/disusutkan supaya pas mengisi penuh, berapa pun ukuran
+  // piksel aslinya.
+  canvas.width = KARTU_LEBAR_PX;
+  canvas.height = KARTU_TINGGI_PX;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(templateImg, 0, 0);
+  ctx.drawImage(templateImg, 0, 0, KARTU_LEBAR_PX, KARTU_TINGGI_PX);
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "top";
   fields.forEach(function (f) {
@@ -1413,8 +1451,12 @@ async function cetakKartuPDF(jenis) {
 
   let daftarData;
   if (jenis === "peserta") {
+    // "Lomba" dan "Jenjang" digabung jadi satu tulisan (field lomba_jenjang)
+    // -- lihat FIELD_PESERTA di atas. r.jenjang bisa kosong untuk sebagian
+    // baris tim (Futsal), jadi bagian itu cuma disisipkan kalau ada isinya.
     daftarData = rows.map(function (r) {
-      return { nama: r.nama_lengkap, jenjang: r.jenjang, lomba: r.lomba_nama, qrText: "ALIF5-" + r.nomor_pendaftaran };
+      const lombaJenjang = r.lomba_nama + (r.jenjang ? " · " + r.jenjang : "");
+      return { nama: r.nama_lengkap, lomba_jenjang: lombaJenjang, qrText: "ALIF5-" + r.nomor_pendaftaran };
     });
   } else {
     const sudahAda = {};
@@ -1446,13 +1488,16 @@ async function cetakKartuPDF(jenis) {
 
   const canvas = document.createElement("canvas");
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "px", format: [templateImg.naturalWidth, templateImg.naturalHeight] });
+  // Satuan "cm" dipakai langsung (bukan "px") supaya ukuran fisik kartu di
+  // PDF-nya SELALU presisi 8,5 x 12 cm (ukuran cocard standar) begitu
+  // dicetak, tidak tergantung resolusi/DPI gambar kanvas yang dihasilkan.
+  const doc = new jsPDF({ unit: "cm", format: [KARTU_LEBAR_CM, KARTU_TINGGI_CM] });
 
   daftarData.forEach(function (data, i) {
     gambarKartu(canvas, templateImg, layout, data, fields);
     const imgData = canvas.toDataURL("image/png");
-    if (i > 0) doc.addPage([templateImg.naturalWidth, templateImg.naturalHeight]);
-    doc.addImage(imgData, "PNG", 0, 0, templateImg.naturalWidth, templateImg.naturalHeight);
+    if (i > 0) doc.addPage([KARTU_LEBAR_CM, KARTU_TINGGI_CM]);
+    doc.addImage(imgData, "PNG", 0, 0, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
   });
 
   doc.save("kartu-" + jenis + "-alif5.pdf");
@@ -1482,7 +1527,7 @@ async function loadTabKartu() {
   content.innerHTML =
     '<div class="form-shell" style="margin-bottom:20px;">' +
       '<h3>🪪 Kartu Peserta &amp; Pendamping</h3>' +
-      '<p>Upload desain kartu (PNG), atur posisi nama/jenjang/lomba/QR lewat angka di bawah (pratinjau berubah langsung), lalu cetak kartu semua peserta sekaligus sebagai satu file PDF siap cetak. QR di tiap kartu berisi kode unik yang nanti dipakai untuk absen kedatangan & pemberian snack.</p>' +
+      '<p>Upload desain kartu (PNG), atur posisi nama/lomba+jenjang/QR lewat angka di bawah (pratinjau berubah langsung), lalu cetak kartu semua peserta sekaligus sebagai satu file PDF siap cetak. Ukuran cetaknya SELALU tetap ' + KARTU_LEBAR_CM + ' × ' + KARTU_TINGGI_CM + ' cm (ukuran cocard standar) — template PNG yang diupload otomatis disesuaikan supaya pas mengisi penuh, jadi sebaiknya didesain dengan rasio yang sama supaya tidak gepeng/melar. QR di tiap kartu berisi kode unik yang nanti dipakai untuk absen kedatangan & pemberian snack.</p>' +
     '</div>' +
     kartuEditorHTML("peserta", "Kartu Peserta", FIELD_PESERTA, settings && settings.kartu_peserta_url) +
     kartuEditorHTML("pendamping", "Kartu Pendamping / Penanggung Jawab", FIELD_PENDAMPING, settings && settings.kartu_pendamping_url) +
