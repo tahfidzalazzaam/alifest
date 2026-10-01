@@ -755,6 +755,82 @@ function kotakBulat(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// Karakter/maskot kecil per cabang lomba untuk hiasan poster rekap -- SELAIN
+// `r.ikon` (yang tetap dipakai di sebelah nama lomba seperti sebelumnya),
+// dipetakan dari `lomba_id` ke emoji "karakter" yang lebih hidup/menggambarkan
+// kegiatannya, dipakai sebagai gambar watermark samar di tiap kartu. Kalau
+// lomba_id tidak dikenali (lomba baru yang ditambah panitia sendiri lewat
+// "Kelola Lomba"), jatuh balik ke `r.ikon` apa adanya -- tidak pernah kosong.
+const KARAKTER_LOMBA = {
+  adzan: "🕌",
+  panahan: "🏹",
+  mhq: "📖",
+  kaligrafi: "🖋️",
+  futsal: "⚽",
+};
+
+// Pita bendera-bendera kecil (bunting) warna-warni di tepi atas poster,
+// senada dengan dekorasi ".bunting" yang sudah ada di navbar situs
+// (index.html) -- murni hiasan meriah bertema festival, tidak menampilkan
+// data apa pun.
+function gambarBuntingAtas(ctx, W) {
+  const warnaBendera = ["#ffc93c", "#ffffff", "#2fa84f", "#ffc93c", "#17914a", "#ffffff"];
+  const lebarBendera = 46;
+  const tinggiBendera = 56;
+  const yTali = 16;
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, yTali);
+  ctx.lineTo(W, yTali);
+  ctx.stroke();
+
+  let i = 0;
+  for (let x = -lebarBendera / 2; x < W; x += lebarBendera) {
+    ctx.fillStyle = warnaBendera[i % warnaBendera.length];
+    ctx.beginPath();
+    ctx.moveTo(x, yTali);
+    ctx.lineTo(x + lebarBendera, yTali);
+    ctx.lineTo(x + lebarBendera / 2, yTali + tinggiBendera);
+    ctx.closePath();
+    ctx.fill();
+    i++;
+  }
+  ctx.restore();
+}
+
+// Taburan confetti/bintang di area header hijau -- posisi & ukuran TETAP
+// (bukan acak) supaya poster yang sama selalu tampil identik tiap digambar
+// ulang (mis. setelah klik "Muat Ulang Data"). Sengaja ditaruh di kolom
+// kiri/kanan saja (menjauhi logo & judul di tengah) supaya tidak mengganggu
+// keterbacaan.
+const KONFETI_HEADER = [
+  { x: 150, y: 90, e: "✨", s: 40, o: 0.85 },
+  { x: 95, y: 230, e: "⭐", s: 30, o: 0.7 },
+  { x: 175, y: 380, e: "🎊", s: 42, o: 0.8 },
+  { x: 110, y: 520, e: "🎉", s: 36, o: 0.75 },
+  { x: 220, y: 600, e: "✨", s: 26, o: 0.65 },
+  { x: 1050, y: 90, e: "🎉", s: 38, o: 0.8 },
+  { x: 1105, y: 230, e: "✨", s: 28, o: 0.7 },
+  { x: 1025, y: 380, e: "⭐", s: 34, o: 0.75 },
+  { x: 1090, y: 520, e: "🎊", s: 40, o: 0.8 },
+  { x: 980, y: 600, e: "✨", s: 26, o: 0.65 },
+];
+
+function gambarKonfetiHeader(ctx) {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  KONFETI_HEADER.forEach(function (k) {
+    ctx.globalAlpha = k.o;
+    ctx.font = k.s + "px sans-serif";
+    ctx.fillText(k.e, k.x, k.y);
+  });
+  ctx.restore();
+}
+
 // Pecah teks jadi beberapa baris supaya tidak keluar dari lebar maksimal --
 // dipakai untuk nama lomba yang bisa panjang (mis. "Musabaqah Hifdzil
 // Qur'an (MHQ)"), jadi SENGAJA TIDAK dipotong/disingkat ("...").
@@ -784,29 +860,31 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
 
   // -------- Latar belakang: krem (sama seperti --page-bg web) + pita hijau
   // dekoratif atas-bawah, senada dengan warna situs (--green-700/--yellow-500).
+  const tinggiHeader = 640;
   ctx.fillStyle = "#fffdf7";
   ctx.fillRect(0, 0, W, H);
-  const gradAtas = ctx.createLinearGradient(0, 0, 0, 440);
+  const gradAtas = ctx.createLinearGradient(0, 0, 0, tinggiHeader);
   gradAtas.addColorStop(0, "#0f7b3e");
   gradAtas.addColorStop(1, "#17914a");
   ctx.fillStyle = gradAtas;
-  ctx.fillRect(0, 0, W, 440);
+  ctx.fillRect(0, 0, W, tinggiHeader);
   ctx.fillStyle = "#ffc93c";
-  ctx.fillRect(0, 440, W, 10);
+  ctx.fillRect(0, tinggiHeader, W, 10);
+
+  // -------- Hiasan meriah bertema festival: bendera bunting + confetti --------
+  gambarBuntingAtas(ctx, W);
+  gambarKonfetiHeader(ctx);
 
   ctx.textAlign = "center";
 
-  // -------- Logo besar (apa adanya, TANPA latar/bingkai bulat) --------
-  // Sebelumnya logo dipotong jadi lingkaran (object-fit: cover) di atas latar
-  // putih bulat. Sekarang logo ditampilkan utuh persis seperti file aslinya
-  // (object-fit: contain -- tidak ada bagian yang terpotong), cuma dibesarkan
-  // sedikit dari ukuran sebelumnya, tanpa latar/bingkai apa pun di belakangnya.
-  const logoSize = 260;
-  const logoCx = W / 2, logoCy = 190;
+  // -------- Logo besar (apa adanya, TANPA latar/bingkai bulat), dibesarkan
+  // 2x lipat dari versi sebelumnya (260px -> 520px), supaya jadi fokus utama
+  // di bagian atas poster -- tetap object-fit: contain (utuh, tidak
+  // terpotong), tanpa latar/bingkai apa pun di belakangnya.
+  const logoSize = 520;
+  const logoCx = W / 2, logoCy = 300;
 
   if (logoImg) {
-    // object-fit: contain manual -- logo ditampilkan utuh (tidak dipotong),
-    // diperbesar sebisa mungkin selama masih muat di kotak logoSize x logoSize.
     const skala = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
     const lw = logoImg.width * skala, lh = logoImg.height * skala;
     ctx.drawImage(logoImg, logoCx - lw / 2, logoCy - lh / 2, lw, lh);
@@ -819,15 +897,16 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
   // -------- Judul --------
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 64px 'Outfit', sans-serif";
-  ctx.fillText("ALIF 5.0", W / 2, 350);
-  ctx.font = "600 30px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", W / 2, 395);
+  ctx.font = "800 60px 'Outfit', sans-serif";
+  ctx.fillText("ALIF 5.0", W / 2, 595);
+  ctx.font = "600 28px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", W / 2, 628);
 
   // -------- Kartu per cabang lomba --------
-  const atasKartu = 480;
-  const bawahKartu = H - 190;
-  const tinggiTiapKartu = Math.floor((bawahKartu - atasKartu) / Math.max(rules.length, 1)) - 18;
+  const atasKartu = tinggiHeader + 16;
+  const bawahKartu = H - 140;
+  const celahKartu = 10;
+  const tinggiTiapKartu = Math.floor((bawahKartu - atasKartu) / Math.max(rules.length, 1)) - celahKartu;
 
   let y = atasKartu;
   ctx.textAlign = "left";
@@ -836,6 +915,7 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
     const d = perLomba[r.id] || { total: 0, l: 0, p: 0, perJenjang: {} };
     const genderTerkunci = r.gender_diizinkan && r.gender_diizinkan !== "semua";
     const jenjangList = r.jenjang && r.jenjang.length ? r.jenjang : ["-"];
+    const karakter = KARAKTER_LOMBA[r.id] || r.ikon || "🏆";
 
     // Kartu putih dengan bayangan lembut, radius besar -- senada komponen
     // ".form-shell"/".rekap-card" di web (var(--radius-lg), var(--shadow-card)).
@@ -844,58 +924,103 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
     ctx.shadowBlur = 18;
     ctx.shadowOffsetY = 6;
     ctx.fillStyle = "#ffffff";
-    kotakBulat(ctx, marginX, y, W - marginX * 2, tinggiTiapKartu, 24);
+    kotakBulat(ctx, marginX, y, W - marginX * 2, tinggiTiapKartu, 22);
     ctx.fill();
     ctx.restore();
 
-    const padKiri = marginX + 34;
-    let ty = y + 56;
+    // Maskot/karakter sesuai cabang lomba -- watermark samar di sisi kanan
+    // kartu, DIGAMBAR SEBELUM teks supaya teks tetap jelas terbaca di atasnya
+    // (murni hiasan, tidak menampilkan data apa pun).
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const ukuranMaskot = Math.min(tinggiTiapKartu - 16, 130);
+    ctx.font = ukuranMaskot + "px sans-serif";
+    ctx.fillText(karakter, W - marginX - 100, y + tinggiTiapKartu / 2);
+    ctx.restore();
 
+    const padKiri = marginX + 34;
+    let ty = y + 44;
+
+    ctx.textAlign = "left";
     ctx.fillStyle = "#12291c";
-    ctx.font = "700 36px 'Outfit', sans-serif";
+    ctx.font = "700 34px 'Outfit', sans-serif";
     ctx.fillText((r.ikon ? r.ikon + "  " : "") + r.nama, padKiri, ty);
 
     ctx.textAlign = "right";
     ctx.fillStyle = "#0f7b3e";
-    ctx.font = "800 40px 'Outfit', sans-serif";
+    ctx.font = "800 36px 'Outfit', sans-serif";
     ctx.fillText(String(d.total), W - marginX - 34, ty);
     ctx.textAlign = "left";
 
-    ty += 20;
-    ctx.fillStyle = "#4a5f52";
-    ctx.font = "500 24px 'Plus Jakarta Sans', sans-serif";
-    ctx.fillText(d.total === 1 ? "1 pendaftar" : d.total + " pendaftar", padKiri, ty + 22);
+    // -------- Rincian per jenjang & jenis kelamin -- dirapikan jadi badge
+    // (pil) jenjang + chip bertitik warna per jenis kelamin, kolomnya rata
+    // (bukan satu kalimat panjang seperti sebelumnya), supaya lebih mudah
+    // dipindai sekilas dan rapi walau jumlah jenjangnya beda-beda. Ukuran pil
+    // & font rincian dibesarkan supaya lebih jelas terbaca di poster.
+    const pillW = 94, pillH = 44;
+    const kolom1X = padKiri + pillW + 22;
+    const kolom2X = kolom1X + 235;
 
-    ty += 50;
+    ty += 20;
     jenjangList.forEach(function (j) {
       const jd = d.perJenjang[j] || { l: 0, p: 0 };
-      let baris;
+      const baseline = ty + 29;
+
+      ctx.fillStyle = "#eafbe9";
+      kotakBulat(ctx, padKiri, ty, pillW, pillH, pillH / 2);
+      ctx.fill();
+      ctx.fillStyle = "#0f7b3e";
+      ctx.font = "700 24px 'Outfit', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(j, padKiri + pillW / 2, baseline);
+      ctx.textAlign = "left";
+
+      ctx.font = "600 26px 'Plus Jakarta Sans', sans-serif";
+
       if (genderTerkunci) {
         const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
-        baris = "Jenjang " + j + ": " + terisi + " peserta (" +
-          (r.gender_diizinkan === "laki-laki" ? "Laki-laki" : "Perempuan") + ")";
+        const warnaDot = r.gender_diizinkan === "laki-laki" ? "#3f7fb0" : "#d1588f";
+        const labelGender = r.gender_diizinkan === "laki-laki" ? "Laki-laki" : "Perempuan";
+        ctx.fillStyle = warnaDot;
+        ctx.beginPath();
+        ctx.arc(kolom1X + 8, baseline - 8, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#12291c";
+        ctx.fillText(labelGender + " " + terisi, kolom1X + 26, baseline);
       } else {
-        baris = "Jenjang " + j + ": Laki-laki " + jd.l + " · Perempuan " + jd.p;
+        ctx.fillStyle = "#3f7fb0";
+        ctx.beginPath();
+        ctx.arc(kolom1X + 8, baseline - 8, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#12291c";
+        ctx.fillText("Laki-laki " + jd.l, kolom1X + 26, baseline);
+
+        ctx.fillStyle = "#d1588f";
+        ctx.beginPath();
+        ctx.arc(kolom2X + 8, baseline - 8, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#12291c";
+        ctx.fillText("Perempuan " + jd.p, kolom2X + 26, baseline);
       }
-      ctx.fillStyle = "#12291c";
-      ctx.font = "500 25px 'Plus Jakarta Sans', sans-serif";
-      ctx.fillText(baris, padKiri, ty + 20);
-      ty += 38;
+
+      ty += pillH + 12;
     });
 
-    y += tinggiTiapKartu + 18;
+    y += tinggiTiapKartu + celahKartu;
   });
 
   // -------- Footer: total keseluruhan + tanggal --------
   ctx.textAlign = "center";
   ctx.fillStyle = "#0f7b3e";
-  ctx.font = "800 46px 'Outfit', sans-serif";
-  ctx.fillText("Total Pendaftar: " + totalPendaftar, W / 2, H - 120);
+  ctx.font = "800 44px 'Outfit', sans-serif";
+  ctx.fillText("Total Pendaftar: " + totalPendaftar, W / 2, H - 105);
 
   const tanggalCetak = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
   ctx.fillStyle = "#7c9186";
   ctx.font = "500 22px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 75);
+  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 65);
 }
 
 // Caption siap-salin untuk dibagikan bersamaan dengan poster (mis. di
