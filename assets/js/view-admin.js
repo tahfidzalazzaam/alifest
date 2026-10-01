@@ -796,28 +796,20 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
 
   ctx.textAlign = "center";
 
-  // -------- Logo besar (lingkaran putih di atas pita hijau) --------
-  const logoSize = 230;
+  // -------- Logo besar (apa adanya, TANPA latar/bingkai bulat) --------
+  // Sebelumnya logo dipotong jadi lingkaran (object-fit: cover) di atas latar
+  // putih bulat. Sekarang logo ditampilkan utuh persis seperti file aslinya
+  // (object-fit: contain -- tidak ada bagian yang terpotong), cuma dibesarkan
+  // sedikit dari ukuran sebelumnya, tanpa latar/bingkai apa pun di belakangnya.
+  const logoSize = 260;
   const logoCx = W / 2, logoCy = 190;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(logoCx, logoCy, logoSize / 2 + 14, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
-  ctx.restore();
 
   if (logoImg) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(logoCx, logoCy, logoSize / 2, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-    // object-fit: cover manual -- supaya logo persegi/potret/lanskap apa pun
-    // tetap mengisi penuh lingkaran tanpa gepeng.
-    const skala = Math.max(logoSize / logoImg.width, logoSize / logoImg.height);
+    // object-fit: contain manual -- logo ditampilkan utuh (tidak dipotong),
+    // diperbesar sebisa mungkin selama masih muat di kotak logoSize x logoSize.
+    const skala = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
     const lw = logoImg.width * skala, lh = logoImg.height * skala;
     ctx.drawImage(logoImg, logoCx - lw / 2, logoCy - lh / 2, lw, lh);
-    ctx.restore();
   } else {
     ctx.font = (logoSize * 0.62) + "px sans-serif";
     ctx.textBaseline = "middle";
