@@ -2,6 +2,8 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/admin", "destination": "/index.html" }
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/bazar", "destination": "/index.html" },
+    { "source": "/adminbazar", "destination": "/index.html" }
   ]
 }
