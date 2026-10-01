@@ -438,6 +438,9 @@ async function loadTabPendaftar() {
 
   content.innerHTML =
     '<div class="rekap-grid" id="rekap-grid"></div>' +
+    '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap">🖼️ Buat Poster Rekap</button>' +
+    '</div>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari" placeholder="Cari nama / nomor pendaftaran..." />' +
     '</div>' +
@@ -700,6 +703,328 @@ async function loadTabPendaftar() {
   renderRekap();
   renderBaris();
   document.getElementById("filter-cari").addEventListener("input", renderBaris);
+
+  document.getElementById("btn-buka-poster-rekap").addEventListener("click", function () {
+    bukaPosterRekap(rules, rows);
+  });
+}
+
+/* -------- Poster Rekap Pendaftar: dibuat & diunduh langsung dari browser
+   panitia (data yang dipakai SAMA dengan `rules`/`rows` yang sudah dimuat
+   tab "Data Pendaftar" -- tidak ada query/akses tambahan apa pun), supaya
+   tidak perlu memasukkan angka manual satu-satu. Gambar dibuat di <canvas>
+   (sama seperti Kartu Peserta, lihat gambarKartu()), bukan lewat library
+   screenshot DOM -- lebih ringan & hasilnya tajam di ukuran berapa pun.
+   Rasio POSTER_LEBAR_PX:POSTER_TINGGI_PX = 2:3 (setara "6:9" sesuai yang
+   diminta), resolusi asli dibuat besar (1200x1800) supaya tetap tajam kalau
+   diunggah ke Instagram dsb walau pratinjaunya di modal ditampilkan kecil. */
+const POSTER_LEBAR_PX = 1200;
+const POSTER_TINGGI_PX = 1800;
+
+// Hitung ulang rekap per lomba (total, laki-laki/perempuan, per jenjang) --
+// SENGAJA dihitung terpisah dari renderRekap() (bukan dipakai bersama)
+// supaya perubahan di salah satu fungsi tidak berisiko mematahkan fungsi
+// lain; keduanya memakai data `rows`/`rules` yang sama jadi hasilnya selalu
+// konsisten dengan kartu rekap yang terlihat di atas tabel.
+function hitungRekapUntukPoster(rules, rows) {
+  const perLomba = {};
+  rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0, perJenjang: {} }; });
+  rows.forEach(function (r) {
+    const d = perLomba[r.lomba_id];
+    if (!d) return;
+    d.total++;
+    if (r.jenis_kelamin === "laki-laki") d.l++;
+    else if (r.jenis_kelamin === "perempuan") d.p++;
+    if (!d.perJenjang[r.jenjang]) d.perJenjang[r.jenjang] = { l: 0, p: 0 };
+    if (r.jenis_kelamin === "laki-laki") d.perJenjang[r.jenjang].l++;
+    else if (r.jenis_kelamin === "perempuan") d.perJenjang[r.jenjang].p++;
+  });
+  return { perLomba: perLomba, totalPendaftar: rows.length };
+}
+
+// Rounded-rect kompatibel browser lama yang belum punya ctx.roundRect bawaan.
+function kotakBulat(ctx, x, y, w, h, r) {
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Pecah teks jadi beberapa baris supaya tidak keluar dari lebar maksimal --
+// dipakai untuk nama lomba yang bisa panjang (mis. "Musabaqah Hifdzil
+// Qur'an (MHQ)"), jadi SENGAJA TIDAK dipotong/disingkat ("...").
+function pecahTeks(ctx, teks, lebarMaks) {
+  const kata = String(teks || "").split(" ");
+  const baris = [];
+  let sekarang = "";
+  kata.forEach(function (k) {
+    const coba = sekarang ? sekarang + " " + k : k;
+    if (ctx.measureText(coba).width > lebarMaks && sekarang) {
+      baris.push(sekarang);
+      sekarang = k;
+    } else {
+      sekarang = coba;
+    }
+  });
+  if (sekarang) baris.push(sekarang);
+  return baris;
+}
+
+function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
+  canvas.width = POSTER_LEBAR_PX;
+  canvas.height = POSTER_TINGGI_PX;
+  const ctx = canvas.getContext("2d");
+  const W = POSTER_LEBAR_PX, H = POSTER_TINGGI_PX;
+  const marginX = 70;
+
+  // -------- Latar belakang: krem (sama seperti --page-bg web) + pita hijau
+  // dekoratif atas-bawah, senada dengan warna situs (--green-700/--yellow-500).
+  ctx.fillStyle = "#fffdf7";
+  ctx.fillRect(0, 0, W, H);
+  const gradAtas = ctx.createLinearGradient(0, 0, 0, 440);
+  gradAtas.addColorStop(0, "#0f7b3e");
+  gradAtas.addColorStop(1, "#17914a");
+  ctx.fillStyle = gradAtas;
+  ctx.fillRect(0, 0, W, 440);
+  ctx.fillStyle = "#ffc93c";
+  ctx.fillRect(0, 440, W, 10);
+
+  ctx.textAlign = "center";
+
+  // -------- Logo besar (lingkaran putih di atas pita hijau) --------
+  const logoSize = 230;
+  const logoCx = W / 2, logoCy = 190;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(logoCx, logoCy, logoSize / 2 + 14, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+
+  if (logoImg) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(logoCx, logoCy, logoSize / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    // object-fit: cover manual -- supaya logo persegi/potret/lanskap apa pun
+    // tetap mengisi penuh lingkaran tanpa gepeng.
+    const skala = Math.max(logoSize / logoImg.width, logoSize / logoImg.height);
+    const lw = logoImg.width * skala, lh = logoImg.height * skala;
+    ctx.drawImage(logoImg, logoCx - lw / 2, logoCy - lh / 2, lw, lh);
+    ctx.restore();
+  } else {
+    ctx.font = (logoSize * 0.62) + "px sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText("🌙", logoCx, logoCy + 6);
+  }
+
+  // -------- Judul --------
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 64px 'Outfit', sans-serif";
+  ctx.fillText("ALIF 5.0", W / 2, 350);
+  ctx.font = "600 30px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", W / 2, 395);
+
+  // -------- Kartu per cabang lomba --------
+  const atasKartu = 480;
+  const bawahKartu = H - 190;
+  const tinggiTiapKartu = Math.floor((bawahKartu - atasKartu) / Math.max(rules.length, 1)) - 18;
+
+  let y = atasKartu;
+  ctx.textAlign = "left";
+
+  rules.forEach(function (r) {
+    const d = perLomba[r.id] || { total: 0, l: 0, p: 0, perJenjang: {} };
+    const genderTerkunci = r.gender_diizinkan && r.gender_diizinkan !== "semua";
+    const jenjangList = r.jenjang && r.jenjang.length ? r.jenjang : ["-"];
+
+    // Kartu putih dengan bayangan lembut, radius besar -- senada komponen
+    // ".form-shell"/".rekap-card" di web (var(--radius-lg), var(--shadow-card)).
+    ctx.save();
+    ctx.shadowColor = "rgba(15, 61, 34, 0.12)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "#ffffff";
+    kotakBulat(ctx, marginX, y, W - marginX * 2, tinggiTiapKartu, 24);
+    ctx.fill();
+    ctx.restore();
+
+    const padKiri = marginX + 34;
+    let ty = y + 56;
+
+    ctx.fillStyle = "#12291c";
+    ctx.font = "700 36px 'Outfit', sans-serif";
+    ctx.fillText((r.ikon ? r.ikon + "  " : "") + r.nama, padKiri, ty);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#0f7b3e";
+    ctx.font = "800 40px 'Outfit', sans-serif";
+    ctx.fillText(String(d.total), W - marginX - 34, ty);
+    ctx.textAlign = "left";
+
+    ty += 20;
+    ctx.fillStyle = "#4a5f52";
+    ctx.font = "500 24px 'Plus Jakarta Sans', sans-serif";
+    ctx.fillText(d.total === 1 ? "1 pendaftar" : d.total + " pendaftar", padKiri, ty + 22);
+
+    ty += 50;
+    jenjangList.forEach(function (j) {
+      const jd = d.perJenjang[j] || { l: 0, p: 0 };
+      let baris;
+      if (genderTerkunci) {
+        const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
+        baris = "Jenjang " + j + ": " + terisi + " peserta (" +
+          (r.gender_diizinkan === "laki-laki" ? "Laki-laki" : "Perempuan") + ")";
+      } else {
+        baris = "Jenjang " + j + ": Laki-laki " + jd.l + " · Perempuan " + jd.p;
+      }
+      ctx.fillStyle = "#12291c";
+      ctx.font = "500 25px 'Plus Jakarta Sans', sans-serif";
+      ctx.fillText(baris, padKiri, ty + 20);
+      ty += 38;
+    });
+
+    y += tinggiTiapKartu + 18;
+  });
+
+  // -------- Footer: total keseluruhan + tanggal --------
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#0f7b3e";
+  ctx.font = "800 46px 'Outfit', sans-serif";
+  ctx.fillText("Total Pendaftar: " + totalPendaftar, W / 2, H - 120);
+
+  const tanggalCetak = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  ctx.fillStyle = "#7c9186";
+  ctx.font = "500 22px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 75);
+}
+
+// Caption siap-salin untuk dibagikan bersamaan dengan poster (mis. di
+// Instagram/WhatsApp) -- angka & nama lomba diambil dari data yang SAMA
+// dipakai menggambar poster, supaya tidak pernah berbeda dari posternya.
+function buatCaptionPosterRekap(rules, perLomba, totalPendaftar) {
+  const tanggalCetak = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  const baris = rules.map(function (r) {
+    const d = perLomba[r.id] || { total: 0, l: 0, p: 0, perJenjang: {} };
+    const genderTerkunci = r.gender_diizinkan && r.gender_diizinkan !== "semua";
+    const jenjangList = r.jenjang && r.jenjang.length ? r.jenjang : ["-"];
+    const rincian = jenjangList.map(function (j) {
+      const jd = d.perJenjang[j] || { l: 0, p: 0 };
+      if (genderTerkunci) {
+        const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
+        return j + " " + terisi;
+      }
+      return j + " (L" + jd.l + "/P" + jd.p + ")";
+    }).join(", ");
+    return (r.ikon ? r.ikon + " " : "") + r.nama + ": " + d.total + " pendaftar — " + rincian;
+  }).join("\n");
+
+  return (
+    "📢 REKAP PENDAFTAR ALIF 5.0 — Al Azzaam Islamic Fair\n" +
+    "Update per " + tanggalCetak + "\n\n" +
+    baris + "\n\n" +
+    "Total keseluruhan: " + totalPendaftar + " pendaftar\n\n" +
+    "Yuk segera daftarkan ananda sebelum kuota penuh! 🔥\n" +
+    "#ALIF5 #AlAzzaamIslamicFair #PPTQAlAzzaam"
+  );
+}
+
+async function bukaPosterRekap(rules, rows) {
+  bukaModal(
+    "🖼️ Poster Rekap Pendaftar",
+    '<p class="hint">Memuat logo & menyiapkan poster...</p>'
+  );
+
+  const { perLomba, totalPendaftar } = hitungRekapUntukPoster(rules, rows);
+  const { data: settingsData } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
+  const logoUrl = settingsData ? settingsData.logo_url : null;
+
+  let logoImg = null;
+  if (logoUrl) {
+    try { logoImg = await muatGambar(logoUrl); }
+    catch (e) { console.warn("Logo situs gagal dimuat untuk poster, dipakai ikon bulan sebagai gantinya:", e); }
+  }
+
+  const caption = buatCaptionPosterRekap(rules, perLomba, totalPendaftar);
+
+  const overlay = document.getElementById("modal-overlay");
+  if (!overlay || overlay.style.display === "none") {
+    return; // modal sudah ditutup (mis. diklik di luar kotak) sebelum logo selesai dimuat
+  }
+
+  bukaModal(
+    "🖼️ Poster Rekap Pendaftar",
+    '<p class="hint">Rasio 2:3 (setara "6:9"), resolusi ' + POSTER_LEBAR_PX + '×' + POSTER_TINGGI_PX + 'px — cukup tajam untuk diunggah ke Instagram/WhatsApp. Angkanya otomatis dari data "Data Pendaftar" saat ini.</p>' +
+    '<div class="poster-rekap-preview-wrap">' +
+      '<canvas id="poster-rekap-canvas"></canvas>' +
+    '</div>' +
+    '<div class="submit-row" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">' +
+      '<button type="button" class="btn btn--primary" id="btn-unduh-poster-rekap">⬇️ Unduh PNG</button>' +
+      '<button type="button" class="btn btn--ghost" id="btn-ulang-poster-rekap">🔄 Muat Ulang Data</button>' +
+    '</div>' +
+    '<div class="field" style="margin-top:18px;">' +
+      '<label for="poster-caption-text">Caption (bisa diedit sebelum disalin)</label>' +
+      '<textarea id="poster-caption-text" rows="10">' + escapeHTML(caption) + '</textarea>' +
+    '</div>' +
+    '<div class="submit-row" style="display:flex;gap:10px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-salin-caption-poster">📋 Salin Caption</button>' +
+    '</div>' +
+    '<p class="hint" id="poster-rekap-status" style="margin-top:8px;"></p>'
+  );
+
+  const canvas = document.getElementById("poster-rekap-canvas");
+  gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar);
+
+  document.getElementById("btn-unduh-poster-rekap").addEventListener("click", function () {
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "poster-rekap-alif5-" + new Date().toISOString().slice(0, 10) + ".png";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    }, "image/png");
+  });
+
+  document.getElementById("btn-ulang-poster-rekap").addEventListener("click", async function () {
+    const { data: rowsBaru } = await supabaseClient.from("pendaftaran").select("*");
+    const ulang = hitungRekapUntukPoster(rules, rowsBaru || rows);
+    gambarPosterRekap(canvas, logoImg, rules, ulang.perLomba, ulang.totalPendaftar);
+    document.getElementById("poster-caption-text").value = buatCaptionPosterRekap(rules, ulang.perLomba, ulang.totalPendaftar);
+    const statusEl = document.getElementById("poster-rekap-status");
+    statusEl.textContent = "Data diperbarui.";
+    setTimeout(function () { statusEl.textContent = ""; }, 2500);
+  });
+
+  document.getElementById("btn-salin-caption-poster").addEventListener("click", async function () {
+    const teks = document.getElementById("poster-caption-text").value;
+    const statusEl = document.getElementById("poster-rekap-status");
+    try {
+      await navigator.clipboard.writeText(teks);
+      statusEl.textContent = "Caption tersalin ke clipboard.";
+    } catch (e) {
+      // Fallback untuk browser/konteks yang tidak mengizinkan Clipboard API
+      // (mis. bukan HTTPS) -- pilih teksnya otomatis supaya tinggal Ctrl+C.
+      const area = document.getElementById("poster-caption-text");
+      area.focus();
+      area.select();
+      statusEl.textContent = "Tidak bisa menyalin otomatis -- teks sudah diseleksi, tekan Ctrl+C (atau Cmd+C).";
+    }
+    setTimeout(function () { statusEl.textContent = ""; }, 3500);
+  });
 }
 
 /* ==================== TAB 2: KELOLA LOMBA ==================== */
