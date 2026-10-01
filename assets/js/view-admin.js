@@ -272,21 +272,16 @@ function ekstrakPathBerkas(url) {
   return decodeURIComponent(url.substring(idx + penanda.length));
 }
 
-// Nomor pendaftaran (mis. "MHQ-005") yang dihapus panitia dimasukkan ke pool
-// "nomor_bebas" (lihat migrasi 0021) supaya nomor itu BISA DIPAKAI ULANG oleh
-// pendaftar baru berikutnya untuk lomba yang sama, bukan dibiarkan bolong
-// selamanya -- berlaku untuk nomor mana pun yang dihapus (bukan cuma kalau
-// kebetulan nomor terakhir). Fungsi ambil_nomor_berikutnya() di database yang
-// akan mengambil nomor terkecil dari pool ini duluan sebelum lanjut increment
-// lomba_counter seperti biasa.
-async function bebaskanNomorPendaftaran(lombaId, nomorPendaftaran) {
-  const bagian = nomorPendaftaran.split("-");
-  const angka = parseInt(bagian[bagian.length - 1], 10);
-  if (isNaN(angka)) return;
-
-  const { error } = await supabaseClient.from("nomor_bebas").upsert({ lomba_id: lombaId, nomor: angka });
-  if (error) console.error("Gagal membebaskan nomor pendaftaran untuk dipakai ulang:", error);
-}
+// Catatan: sebelum migrasi 0029, ada fungsi bebaskanNomorPendaftaran() di
+// sini yang mencatat nomor yang dihapus ke tabel pool "nomor_bebas" supaya
+// bisa dipakai ulang. Fungsi itu DIHAPUS -- sejak migrasi 0029,
+// ambil_nomor_berikutnya() di database menghitung LANGSUNG dari nomor yang
+// masih terpakai sekarang (bukan dari pool yang perlu dicatat manual), jadi
+// nomor yang dihapus otomatis bisa dipakai ulang TANPA perlu kode apa pun di
+// sini -- berlaku apa pun cara menghapusnya (tombol Hapus di Panitia,
+// Table Editor Supabase, dll). Lihat migrasi 0029 untuk penjelasan lengkap
+// kenapa perubahan ini diperlukan (bug: nomor tidak terulang kalau baris
+// dihapus lewat cara lain selain tombol Hapus).
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
 // "rule" (opsional) = baris lomba_rules yang cocok dengan row.lomba_id --
@@ -690,7 +685,9 @@ async function loadTabPendaftar() {
           return;
         }
 
-        if (row) await bebaskanNomorPendaftaran(row.lomba_id, row.nomor_pendaftaran);
+        // Nomor pendaftaran yang terpakai baris ini otomatis bebas untuk
+        // dipakai ulang lewat ambil_nomor_berikutnya() (migrasi 0029) --
+        // tidak perlu pencatatan manual apa pun di sini lagi.
 
         rows = rows.filter(function (r) { return r.id !== id; });
         renderBaris();
