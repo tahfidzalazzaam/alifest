@@ -13,7 +13,9 @@
 const ROUTES = {
   "#/": window.ViewBeranda,
   "#/daftar": window.ViewDaftar,
-  "#/admin": window.ViewAdmin
+  "#/admin": window.ViewAdmin,
+  "#/bazar": window.ViewBazar,
+  "#/adminbazar": window.ViewAdminBazar
 };
 
 function normalisasiHash() {
@@ -27,6 +29,21 @@ function setNavAktif(hash) {
   });
 }
 
+// Judul tab browser per halaman -- dicocokkan lewat IDENTITAS objek view
+// (window.ViewXxx), BUKAN lewat hash, supaya tetap benar walau halaman
+// dibuka lewat akses path langsung ("/admin", "/bazar", "/adminbazar" --
+// lihat cekAksesLangsungAdmin) yang tidak selalu membawa hash. Logo/ikon tab
+// (favicon) TIDAK ikut berubah di sini -- itu diatur terpisah lewat
+// window.terapkanLogo (logo situs yang diupload panitia, sama untuk semua
+// halaman).
+function judulUntukView(view) {
+  if (view === window.ViewBeranda || view === window.ViewDaftar) return "Lomba - ALIF 5.0";
+  if (view === window.ViewAdmin) return "Panitia Lomba - ALIF 5.0";
+  if (view === window.ViewBazar) return "Bazar - ALIF 5.0";
+  if (view === window.ViewAdminBazar) return "Panitia Bazar - ALIF 5.0";
+  return document.title; // view tak dikenal -- biarkan judul tab apa adanya
+}
+
 function router() {
   const hash = normalisasiHash();
   const view = ROUTES[hash];
@@ -38,6 +55,7 @@ function tampilkanView(view, hashUntukNav) {
   const app = document.getElementById("app");
   app.innerHTML = view.template;
   setNavAktif(hashUntukNav || "");
+  document.title = judulUntukView(view);
   window.scrollTo(0, 0);
 
   // Restart animasi fade-in tiap navigasi (lihat komentar .app-enter di style.css).
@@ -57,6 +75,14 @@ function cekAksesLangsungAdmin() {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/admin") {
     tampilkanView(window.ViewAdmin, "");
+    return true;
+  }
+  if (path === "/bazar") {
+    tampilkanView(window.ViewBazar, "");
+    return true;
+  }
+  if (path === "/adminbazar") {
+    tampilkanView(window.ViewAdminBazar, "");
     return true;
   }
   return false;
@@ -249,9 +275,20 @@ window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 // menampilkan gerbang ini -- panitia sendiri yang mengatur buka/tutup
 // pendaftaran, jadi tidak perlu ditanyai/diganggu pesan lucu + PIN uji coba
 // tiap kali mereka membuka halaman admin.
+// Halaman Bazar ("/bazar" & "/adminbazar") juga dikecualikan -- pendaftaran
+// stand/tenant bazar ini SEPENUHNYA independen dari status buka/tutup
+// pendaftaran LOMBA (site_settings.pendaftaran_dibuka). Status buka/tutup
+// bazar sendiri (bazar_settings.pendaftaran_dibuka) sudah ditangani langsung
+// di dalam view-bazar.js (muatPengaturanBazar), jadi gerbang lomba ini tidak
+// relevan sama sekali untuk kedua halaman tersebut.
 function sedangDiHalamanAdmin() {
   const path = window.location.pathname.replace(/\/+$/, "");
-  return path === "/admin" || window.location.hash === "#/admin";
+  const hash = window.location.hash;
+  return (
+    path === "/admin" || hash === "#/admin" ||
+    path === "/bazar" || hash === "#/bazar" ||
+    path === "/adminbazar" || hash === "#/adminbazar"
+  );
 }
 
 async function cekGerbangTutup() {
