@@ -865,6 +865,29 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: 8px;
   box-shadow: var(--shadow-card);
 }
+/* ---------- Poster Rekap Pendaftar ---------- */
+.poster-rekap-toolbar { display: flex; justify-content: flex-end; }
+.poster-rekap-preview-wrap {
+  border: 1.5px dashed #cfd9d1;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin: 12px 0;
+  text-align: center;
+  background: #faf9f4;
+}
+.poster-rekap-preview-wrap canvas {
+  max-width: 100%;
+  width: 320px;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+#poster-caption-text {
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .kartu-pos-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
