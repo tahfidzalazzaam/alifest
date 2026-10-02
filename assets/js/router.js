@@ -1,21 +1,32 @@
 // Router SPA sederhana berbasis hash — satu file HTML (index.html), tapi
-// terasa seperti berpindah halaman (Beranda <-> Daftar Lomba), sama seperti
-// pola yang dipakai di Al-Hafizh.
+// terasa seperti berpindah halaman, sama seperti pola yang dipakai di
+// Al-Hafizh.
 //
-// Rute yang dikenal: "#/" (Beranda) dan "#/daftar" (Form Pendaftaran).
-// Halaman Panitia sengaja TIDAK ditautkan di navbar — dibuka lewat path
-// tersembunyi "/admin" (lihat cekAksesLangsungAdmin di bawah), atau lewat
-// hash "#/admin" kalau perlu.
-// Hash lain (mis. "#lomba" dari tautan anchor di halaman Beranda) sengaja
+// Rute publik yang ditautkan di navbar: "#/" (Beranda -- profil & info umum
+// acara), "#/lomba" (info cabang lomba) dan "#/bazar" (info Bazar). Dari
+// masing-masing ada tombol menuju form pendaftarannya: "#/daftar" (Lomba)
+// dan "#/daftar-bazar" (Bazar) -- form-form ini sengaja TIDAK ditautkan
+// langsung di navbar, cuma dicapai lewat tombol di halaman info-nya.
+// Halaman Panitia (lomba, bazar, & profil Beranda) sengaja TIDAK ditautkan
+// di navbar — dibuka lewat path tersembunyi "/admin"/"/adminbazar"/
+// "/adminprofil" (lihat cekAksesLangsungAdmin di bawah), atau lewat hash
+// kalau perlu. "/adminprofil" sengaja dipisah dari "/admin" (bukan jadi tab
+// di dalamnya) supaya pengaturan profil Beranda tidak dicampur dengan
+// pengelolaan data lomba -- tapi login-nya tetap pakai akun panitia yang
+// sama (Supabase Auth, role `authenticated`).
+// Hash lain (mis. "#lomba" dari tautan anchor di halaman Lomba) sengaja
 // TIDAK ditangani di sini, supaya perilaku scroll-ke-anchor bawaan browser
 // tetap jalan normal tanpa bentrok dengan router.
 
 const ROUTES = {
   "#/": window.ViewBeranda,
+  "#/lomba": window.ViewLomba,
   "#/daftar": window.ViewDaftar,
   "#/admin": window.ViewAdmin,
   "#/bazar": window.ViewBazar,
-  "#/adminbazar": window.ViewAdminBazar
+  "#/daftar-bazar": window.ViewDaftarBazar,
+  "#/adminbazar": window.ViewAdminBazar,
+  "#/adminprofil": window.ViewAdminProfil
 };
 
 function normalisasiHash() {
@@ -37,10 +48,12 @@ function setNavAktif(hash) {
 // window.terapkanLogo (logo situs yang diupload panitia, sama untuk semua
 // halaman).
 function judulUntukView(view) {
-  if (view === window.ViewBeranda || view === window.ViewDaftar) return "Lomba - ALIF 5.0";
+  if (view === window.ViewBeranda) return "ALIF 5.0";
+  if (view === window.ViewLomba || view === window.ViewDaftar) return "Lomba - ALIF 5.0";
   if (view === window.ViewAdmin) return "Panitia Lomba - ALIF 5.0";
-  if (view === window.ViewBazar) return "Bazar - ALIF 5.0";
+  if (view === window.ViewBazar || view === window.ViewDaftarBazar) return "Bazar - ALIF 5.0";
   if (view === window.ViewAdminBazar) return "Panitia Bazar - ALIF 5.0";
+  if (view === window.ViewAdminProfil) return "Panitia Beranda - ALIF 5.0";
   return document.title; // view tak dikenal -- biarkan judul tab apa adanya
 }
 
@@ -66,23 +79,33 @@ function tampilkanView(view, hashUntukNav) {
   if (typeof view.init === "function") view.init();
 }
 
-// Akses tersembunyi ke halaman Panitia: buka "/admin" langsung (bukan lewat
-// link navbar, karena sengaja disembunyikan dari pengunjung biasa). Perlu
-// rewrite di vercel.json supaya path "/admin" tidak 404 di hosting statis.
-// Ini cuma soal kemudahan akses, BUKAN lapisan keamanan — keamanan
-// sesungguhnya tetap dari login Supabase Auth di dalam halamannya.
+// Akses lewat PATH langsung (bukan cuma hash) untuk halaman-halaman yang
+// punya rewrite di vercel.json: "/admin" & "/adminbazar" sengaja TIDAK
+// ditautkan di navbar (disembunyikan dari pengunjung biasa) -- keamanan
+// sesungguhnya tetap dari login Supabase Auth di dalam halamannya, ini cuma
+// soal kemudahan akses. "/lomba" & "/bazar" SUDAH ditautkan di navbar juga,
+// path langsungnya cuma supaya linknya enak dibagikan/di-bookmark
+// (mis. "alif5.com/bazar") tanpa perlu diawali "#/".
 function cekAksesLangsungAdmin() {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/admin") {
     tampilkanView(window.ViewAdmin, "");
     return true;
   }
+  if (path === "/lomba") {
+    tampilkanView(window.ViewLomba, "#/lomba");
+    return true;
+  }
   if (path === "/bazar") {
-    tampilkanView(window.ViewBazar, "");
+    tampilkanView(window.ViewBazar, "#/bazar");
     return true;
   }
   if (path === "/adminbazar") {
     tampilkanView(window.ViewAdminBazar, "");
+    return true;
+  }
+  if (path === "/adminprofil") {
+    tampilkanView(window.ViewAdminProfil, "");
     return true;
   }
   return false;
@@ -128,8 +151,8 @@ async function muatLogoNavbar() {
 // manual panitia (site_settings.pendaftaran_dibuka, migrasi 0013) DENGAN
 // tanggal tutup otomatis (site_settings.tanggal_tutup_pendaftaran, migrasi
 // 0022): pendaftaran dianggap TERTUTUP kalau salah satu dari keduanya bilang
-// tertutup. Dipakai di sini (navbar, gerbang) dan oleh view-beranda.js /
-// view-daftar.js supaya logikanya SATU tempat saja, tidak dobel-dobel dan
+// tertutup. Dipakai di sini (navbar, gerbang) dan oleh view-lomba.js /
+// view-daftar.js / view-beranda.js supaya logikanya SATU tempat saja, tidak dobel-dobel dan
 // berisiko beda hasil antar halaman. `data` adalah baris site_settings (atau
 // null/undefined kalau gagal dimuat -- dianggap dibuka, gagal-aman ke arah
 // yang tidak mengunci situs kalau query bermasalah).
@@ -271,28 +294,36 @@ window.ujiCobaAktif = function () {
 };
 window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 
-// Halaman Panitia (path "/admin" ATAU hash "#/admin") sengaja TIDAK pernah
-// menampilkan gerbang ini -- panitia sendiri yang mengatur buka/tutup
-// pendaftaran, jadi tidak perlu ditanyai/diganggu pesan lucu + PIN uji coba
-// tiap kali mereka membuka halaman admin.
-// Halaman Bazar ("/bazar" & "/adminbazar") juga dikecualikan -- pendaftaran
-// stand/tenant bazar ini SEPENUHNYA independen dari status buka/tutup
-// pendaftaran LOMBA (site_settings.pendaftaran_dibuka). Status buka/tutup
-// bazar sendiri (bazar_settings.pendaftaran_dibuka) sudah ditangani langsung
-// di dalam view-bazar.js (muatPengaturanBazar), jadi gerbang lomba ini tidak
-// relevan sama sekali untuk kedua halaman tersebut.
-function sedangDiHalamanAdmin() {
+// Gerbang "pendaftaran LOMBA ditutup" ini sekarang HANYA relevan untuk
+// halaman seputar lomba: "/lomba" & "/daftar" (dan "#/lomba"/"#/daftar").
+// Dikecualikan untuk:
+//  - "/admin", "/adminbazar", & "/adminprofil" -- panitia sendiri yang
+//    mengatur buka/tutup, tidak perlu ditanyai/diganggu pesan lucu + PIN
+//    uji coba tiap kali mereka membuka halaman admin.
+//  - "/" (Beranda) -- sejak Beranda jadi halaman profil umum acara (bukan
+//    lagi berisi info lomba), memaksa gerbang lomba tampil di sana tidak
+//    relevan lagi untuk pengunjung yang mungkin cuma mau lihat info Bazar.
+//  - "/bazar" & "/daftar-bazar" -- pendaftaran stand/tenant bazar ini
+//    SEPENUHNYA independen dari status buka/tutup pendaftaran LOMBA
+//    (site_settings.pendaftaran_dibuka). Status buka/tutup bazar sendiri
+//    (bazar_settings.pendaftaran_dibuka) ditangani langsung di dalam
+//    view-bazar.js/view-daftarbazar.js (muatPengaturanBazar), jadi gerbang
+//    lomba ini tidak relevan sama sekali untuk halaman-halaman itu.
+function halamanTanpaGerbangLomba() {
   const path = window.location.pathname.replace(/\/+$/, "");
   const hash = window.location.hash;
   return (
     path === "/admin" || hash === "#/admin" ||
+    path === "/adminbazar" || hash === "#/adminbazar" ||
+    path === "/adminprofil" || hash === "#/adminprofil" ||
+    path === "" || path === "/" || hash === "" || hash === "#" || hash === "#/" ||
     path === "/bazar" || hash === "#/bazar" ||
-    path === "/adminbazar" || hash === "#/adminbazar"
+    path === "/daftar-bazar" || hash === "#/daftar-bazar"
   );
 }
 
 async function cekGerbangTutup() {
-  if (sedangDiHalamanAdmin()) return; // halaman panitia tidak ikut ditutup
+  if (halamanTanpaGerbangLomba()) return; // halaman di luar lomba tidak ikut ditutup
   if (window.ujiCobaAktif()) return; // panitia sudah masuk mode uji coba sesi ini, tidak usah tampil lagi
 
   const { data } = await supabaseClient.from("site_settings").select("pendaftaran_dibuka,tanggal_tutup_pendaftaran").eq("id", 1).single();
