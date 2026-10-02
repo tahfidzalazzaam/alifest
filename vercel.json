@@ -4,7 +4,7 @@
   "rewrites": [
     { "source": "/admin", "destination": "/index.html" },
     { "source": "/lomba", "destination": "/index.html" },
-    { "source": "/bazar", "destination": "" },
+    { "source": "/bazar", "destination": "/index.html" },
     { "source": "/adminbazar", "destination": "/index.html" },
     { "source": "/adminprofil", "destination": "/index.html" }
   ]
