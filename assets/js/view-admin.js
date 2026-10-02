@@ -1573,6 +1573,11 @@ async function loadTabLogo() {
 
 /* ==================== TAB 4: PETUNJUK TEKNIS (PDF) ==================== */
 
+// Catatan: pengaturan profil Beranda ("Beranda/Profil") TIDAK ADA LAGI di
+// sini -- dipindah ke halaman Panitia terpisah "#/adminprofil"
+// (lihat view-adminprofil.js), supaya tidak dicampur dengan tab-tab
+// pengelolaan lomba di panel ini. Login tetap pakai akun panitia yang sama.
+
 async function loadTabJuknis() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data juknis...</p>';
@@ -1584,7 +1589,7 @@ async function loadTabJuknis() {
   content.innerHTML =
     '<div class="form-shell" style="max-width:480px;">' +
       '<h3>Petunjuk Teknis (Juknis)</h3>' +
-      '<p>Format PDF saja. File ini akan muncul sebagai tombol unduh di Beranda dan halaman Daftar Lomba.</p>' +
+      '<p>Format PDF saja. File ini akan muncul sebagai tombol unduh di halaman Lomba dan halaman Daftar Lomba.</p>' +
       '<div id="juknis-preview" style="margin:16px 0;">' +
         (juknisUrl
           ? '<a href="' + juknisUrl + '" target="_blank" rel="noopener">📄 ' + (juknisNama || "Lihat juknis saat ini") + '</a>'
