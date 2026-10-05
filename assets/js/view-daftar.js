@@ -878,9 +878,17 @@ function initDaftar() {
      yang dihitung dari situ SUNGGUHAN dicek terhadap syarat jenjang yang
      dipilih (bukan cuma informasi buat panitia lagi seperti sebelumnya) --
      lihat evaluasiKelayakanTim() & perbaruiUsiaAnggota() di atas. */
+  // Nomor punggung cuma relevan buat Futsal (dipakai panitia buat
+  // mencocokkan pemain dengan jersey saat pertandingan). Opsional --
+  // tidak wajib diisi & tidak menghalangi pengiriman form kalau kosong
+  // (lihat validasi server di submit_pendaftaran, migrasi 0032).
+  function isLombaFutsal() {
+    return !!(selectedLomba && selectedLomba.nama && selectedLomba.nama.toLowerCase().indexOf("futsal") !== -1);
+  }
+
   function buatBarisAnggota(index) {
     const row = document.createElement("div");
-    row.className = "anggota-row";
+    row.className = "anggota-row" + (isLombaFutsal() ? " anggota-row--futsal" : "");
     row.innerHTML =
       '<input type="text" placeholder="Nama lengkap peserta ' + index + ' (sesuai akte)" class="anggota-nama" required />' +
       '<input type="text" placeholder="Tempat lahir" class="anggota-tempat" required />' +
@@ -889,6 +897,9 @@ function initDaftar() {
         '<small class="anggota-usia"></small>' +
       '</span>' +
       '<input type="text" placeholder="Kelas" class="anggota-kelas" required />' +
+      (isLombaFutsal() ?
+        '<input type="number" min="1" max="99" placeholder="No. Punggung (opsional)" class="anggota-punggung" />' :
+        '') +
       '<button type="button" class="btn-remove">Hapus</button>';
 
     const inputTgl = row.querySelector(".anggota-tgl");
@@ -1337,11 +1348,13 @@ function initDaftar() {
       .then(function (u) {
         const anggotaTim = isTim
           ? Array.from(anggotaListEl.querySelectorAll(".anggota-row")).map(function (row) {
+              const punggungEl = row.querySelector(".anggota-punggung");
               return {
                 nama: row.querySelector(".anggota-nama").value.trim(),
                 tempat_lahir: row.querySelector(".anggota-tempat").value.trim(),
                 tanggal_lahir: row.querySelector(".anggota-tgl").value,
-                kelas: row.querySelector(".anggota-kelas").value.trim()
+                kelas: row.querySelector(".anggota-kelas").value.trim(),
+                nomor_punggung: punggungEl ? punggungEl.value.trim() : ""
               };
             })
           : [];
