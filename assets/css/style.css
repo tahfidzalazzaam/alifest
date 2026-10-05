@@ -590,6 +590,9 @@ textarea { resize: vertical; min-height: 80px; }
 /* Anggota tim (futsal): Nama, Tempat Lahir, Tanggal Lahir (+ usia), Kelas, tombol hapus */
 .anggota-list { display: grid; gap: 10px; margin-bottom: 10px; }
 .anggota-row { display: grid; grid-template-columns: 1.1fr 0.9fr 1.1fr 0.7fr auto; gap: 10px; align-items: center; }
+/* Futsal: baris anggota punya kolom tambahan "No. Punggung" (opsional) */
+.anggota-row--futsal { grid-template-columns: 1.1fr 0.9fr 1.1fr 0.7fr 0.6fr auto; }
+.anggota-punggung { width: 100%; }
 .anggota-tgl-wrap { display: flex; align-items: center; gap: 6px; }
 .anggota-tgl-wrap .anggota-tgl { width: 100%; }
 .anggota-usia { font-size: 0.72rem; color: var(--ink-400); white-space: nowrap; }
@@ -839,6 +842,52 @@ textarea { resize: vertical; min-height: 80px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* ---------- Chip list (dipakai halaman info Bazar untuk daftar kategori
+   stand, murni tampilan read-only -- bukan pilihan form) ---------- */
+.chip-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--green-100);
+  color: var(--green-700);
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 8px 16px;
+  border-radius: 999px;
+}
+
+/* ---------- Video embed responsif (dipakai Beranda untuk video dokumentasi
+   tahun lalu, lihat view-beranda.js) ---------- */
+.video-embed {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* rasio 16:9 */
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  background: #000;
+}
+.video-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* ---------- Kartu navigasi di Beranda (link ke halaman Lomba/Bazar) --
+   dipakai lewat <a class="lomba-card"> -- reuse tampilan kartu lomba yang
+   sudah ada, tambah efek hover + hilangkan garis bawah tautan. ---------- */
+a.lomba-card { text-decoration: none; color: inherit; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+a.lomba-card:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(15, 61, 34, 0.18); }
+.lomba-card__cta {
+  display: inline-block;
+  margin-top: 14px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--green-700);
+}
+
 .lp-badge {
   display: inline-block;
   font-size: 0.68rem;
@@ -1057,12 +1106,14 @@ tr.row-clickable:hover { background: var(--green-100); }
   .container { padding: 0 16px; }
   .bunting { padding: 0 16px; height: 16px; gap: 4px; }
 
-  /* Navbar */
-  .navbar { padding: 12px 16px; }
+  /* Navbar -- flex-wrap supaya 4 link (Beranda/Lomba/Bazar/Daftar) tidak
+     berdesakan atau kepotong di layar sempit, turun ke baris kedua kalau
+     perlu. */
+  .navbar { padding: 12px 16px; flex-wrap: wrap; row-gap: 8px; }
   .navbar__brand { font-size: 1rem; gap: 8px; }
   .navbar__brand span.mark { width: 32px; height: 32px; font-size: 0.95rem; }
   .navbar__brand-logo { height: 30px; max-width: 110px; }
-  .navbar__links { gap: 2px; }
+  .navbar__links { gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
   .nav-link { padding: 7px 12px; font-size: 0.82rem; }
 
   /* Tombol, dipakai di mana-mana */
