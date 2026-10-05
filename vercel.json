@@ -6,6 +6,7 @@
     { "source": "/lomba", "destination": "/index.html" },
     { "source": "/bazar", "destination": "/index.html" },
     { "source": "/adminbazar", "destination": "/index.html" },
-    { "source": "/adminprofil", "destination": "/index.html" }
+    { "source": "/adminprofil", "destination": "/index.html" },
+    { "source": "/lengkapi", "destination": "/index.html" }
   ]
 }
