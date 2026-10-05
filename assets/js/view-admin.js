@@ -290,7 +290,7 @@ function ekstrakPathBerkas(url) {
 // disediakan (mis. dipanggil dari tempat lain), popup tetap tampil normal
 // tanpa penyorotan.
 async function bukaModalTim(row, rule) {
-  const statusClass = row.status === "Perlu Verifikasi Usia" ? " modal-status--warn" : "";
+  const statusClass = (row.status === "Perlu Verifikasi Usia" || row.status === "Perlu Tambah Nomor Punggung") ? " modal-status--warn" : "";
   const infoHTML =
     '<div class="modal-tim-info">' +
       '<div><strong>Nama Tim/Sekolah:</strong> ' + row.nama_tim + '</div>' +
@@ -301,6 +301,9 @@ async function bukaModalTim(row, rule) {
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="hint modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
+      : "") +
+    (row.status === "Perlu Tambah Nomor Punggung"
+      ? '<p class="hint modal-status-hint">Link "Lengkapi Nomor Punggung" sudah/akan dikirim ke pendamping lewat WA -- status otomatis balik ke "Menunggu Verifikasi" begitu mereka selesai mengisi semua nomor punggung lewat link itu.</p>'
       : "") +
     '<div class="modal-tim-berkas">' +
       '<strong>Berkas:</strong> ' +
@@ -329,7 +332,7 @@ async function bukaModalTim(row, rule) {
   wrap.innerHTML = error
     ? ('<p>Gagal memuat anggota tim: ' + error.message + '</p>')
     : (
-      '<table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat, Tanggal Lahir</th><th>Usia</th><th>Kelas</th></tr></thead><tbody>' +
+      '<table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat, Tanggal Lahir</th><th>Usia</th><th>Kelas</th><th>No. Punggung</th></tr></thead><tbody>' +
       (anggota && anggota.length ? anggota.map(function (a, i) {
         // Data lama (sebelum migrasi 0017) cuma punya tempat_tanggal_lahir
         // sebagai teks bebas, jadi usianya tidak bisa dihitung -- tampil "-".
@@ -344,8 +347,12 @@ async function bukaModalTim(row, rule) {
         const diLuarSyarat = syaratUsiaTim && usiaPadaAcuan != null &&
           (usiaPadaAcuan < syaratUsiaTim.min || usiaPadaAcuan > syaratUsiaTim.max);
 
-        return '<tr class="' + (diLuarSyarat ? "row-usia-warn" : "") + '"><td>' + (i + 1) + '</td><td>' + a.nama + '</td><td>' + ttl + '</td><td>' + (usia != null ? usia + ' th' : '-') + (diLuarSyarat ? ' ⚠️' : '') + '</td><td>' + a.kelas + '</td></tr>';
-      }).join("") : '<tr><td colspan="5">Belum ada data anggota.</td></tr>') +
+        // nomor_punggung opsional (migrasi 0032) -- "-" kalau belum diisi,
+        // misalnya sebelum pendamping mengisi lewat link /lengkapi.
+        const punggung = (a.nomor_punggung != null && a.nomor_punggung !== "") ? a.nomor_punggung : "-";
+
+        return '<tr class="' + (diLuarSyarat ? "row-usia-warn" : "") + '"><td>' + (i + 1) + '</td><td>' + a.nama + '</td><td>' + ttl + '</td><td>' + (usia != null ? usia + ' th' : '-') + (diLuarSyarat ? ' ⚠️' : '') + '</td><td>' + a.kelas + '</td><td>' + punggung + '</td></tr>';
+      }).join("") : '<tr><td colspan="6">Belum ada data anggota.</td></tr>') +
       '</tbody></table>'
     );
 }
@@ -433,8 +440,9 @@ async function loadTabPendaftar() {
 
   content.innerHTML =
     '<div class="rekap-grid" id="rekap-grid"></div>' +
-    '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;">' +
+    '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' +
       '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap">🖼️ Buat Poster Rekap</button>' +
+      '<button type="button" class="btn btn--ghost" id="btn-unduh-xlsx">⬇️ Unduh Data (XLSX)</button>' +
     '</div>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari" placeholder="Cari nama / nomor pendaftaran..." />' +
@@ -589,7 +597,10 @@ async function loadTabPendaftar() {
           '<td>' + r.whatsapp + '</td>' +
           '<td>' + berkasCell + '</td>' +
           '<td><select class="status-select" data-id="' + r.id + '">' +
-            ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"].map(function (s) {
+            (isTim
+              ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
+              : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"]
+            ).map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
           '</select> <span class="wa-status-note" data-note-for="' + r.id + '"></span></td>' +
@@ -631,6 +642,21 @@ async function loadTabPendaftar() {
       sel.addEventListener("change", async function () {
         const id = sel.getAttribute("data-id");
         const statusBaru = sel.value;
+
+        // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
+        // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
+        // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
+        // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
+        // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
+        if (statusBaru === "Perlu Tambah Nomor Punggung") {
+          const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: id });
+          if (tokenError) {
+            alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
+            sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
+            return;
+          }
+        }
+
         const { error } = await supabaseClient.from("pendaftaran").update({ status: statusBaru }).eq("id", id);
         if (error) {
           alert("Gagal mengubah status: " + error.message);
@@ -640,14 +666,15 @@ async function loadTabPendaftar() {
         if (row) row.status = statusBaru;
         renderRekap();
 
-        // "Perlu Verifikasi Usia" juga mengirim notifikasi WA (sama seperti
-        // Diterima/Ditolak) begitu panitia MEMILIH status ini di dropdown --
-        // untuk lomba tim (Futsal), pesannya otomatis menyebut nama anggota
-        // yang usianya di luar syarat lewat placeholder {anggota_usia}
-        // (dihitung di Edge Function kirim-notifikasi-wa, lihat file itu).
-        // Ini cuma perubahan kode (frontend + Edge Function), tidak perlu
-        // migrasi SQL baru.
-        if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia") {
+        // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga
+        // mengirim notifikasi WA (sama seperti Diterima/Ditolak) begitu panitia
+        // MEMILIH status ini di dropdown -- untuk lomba tim (Futsal), pesannya
+        // otomatis menyebut nama anggota yang usianya di luar syarat lewat
+        // placeholder {anggota_usia}, atau link lengkapi nomor punggung lewat
+        // placeholder {link_lengkapi} (dihitung di Edge Function
+        // kirim-notifikasi-wa, lihat file itu). Ini cuma perubahan kode
+        // (frontend + Edge Function), tidak perlu migrasi SQL baru lagi.
+        if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
           kirimNotifikasiWA(id, sel);
         }
       });
@@ -704,6 +731,138 @@ async function loadTabPendaftar() {
   document.getElementById("btn-buka-poster-rekap").addEventListener("click", function () {
     bukaPosterRekap(rules, rows);
   });
+
+  document.getElementById("btn-unduh-xlsx").addEventListener("click", function () {
+    unduhXLSXPendaftar(this, rows);
+  });
+}
+
+/* -------- Unduh Data Pendaftar sebagai XLSX (murni client-side) --------
+   Memakai pustaka SheetJS (xlsx), dimuat LAZY dari CDN (sama pola dengan
+   muatTesseract() di view-daftar.js) -- HANYA saat tombol ini diklik, jadi
+   panitia yang tidak pernah pakai fitur ini tidak ikut mengunduh pustaka
+   ini sama sekali. Sheet 1 "Pendaftaran" berisi SEMUA kolom tabel
+   `pendaftaran` apa adanya (termasuk kolom teknis seperti `id`/`lomba_id`
+   yang tidak ditampilkan di tabel UI) -- `rows` di sini SAMA dengan data
+   yang sudah dimuat loadTabPendaftar() (select("*")), tidak ada query
+   tambahan untuk sheet ini. Sheet 2 "Anggota Tim" (cuma dibuat kalau ada
+   minimal satu pendaftaran tim) berisi SEMUA kolom tabel `anggota_tim`
+   untuk tim-tim yang ada di `rows`, satu query tambahan `.in()` sekali
+   jalan (bukan satu query per tim). */
+let sheetJSPromise = null;
+function muatSheetJS() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (sheetJSPromise) return sheetJSPromise;
+  sheetJSPromise = new Promise(function (resolve, reject) {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    script.onload = function () {
+      if (window.XLSX) resolve(window.XLSX);
+      else reject(new Error("Pustaka XLSX gagal dimuat."));
+    };
+    script.onerror = function () { reject(new Error("Gagal memuat pustaka XLSX dari CDN.")); };
+    document.head.appendChild(script);
+  });
+  return sheetJSPromise;
+}
+
+async function unduhXLSXPendaftar(btn, rows) {
+  const labelAsli = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Menyiapkan...";
+
+  try {
+    const XLSX = await muatSheetJS();
+
+    // -------- Sheet 1: Pendaftaran (SEMUA kolom tabel `pendaftaran`) --------
+    const barisPendaftaran = rows.map(function (r) {
+      return {
+        "Nomor Pendaftaran": r.nomor_pendaftaran,
+        "Waktu Daftar": r.created_at,
+        "ID Lomba": r.lomba_id,
+        "Nama Lomba": r.lomba_nama,
+        "Tipe (individu/tim)": r.tipe,
+        "Kategori Pendaftar (individu/lembaga)": r.tipe_pendaftar || "",
+        "Nama Lengkap / Nama Tim": r.nama_lengkap,
+        "Jenis Kelamin": r.jenis_kelamin || "",
+        "Jenjang": r.jenjang || "",
+        "Kelas": r.kelas || "",
+        "Tanggal Lahir": r.tanggal_lahir || "",
+        "Usia": r.usia != null ? r.usia : "",
+        "Asal Sekolah": r.asal_sekolah,
+        "No. WhatsApp": r.whatsapp,
+        "Email": r.email || "",
+        "Nama Pendamping (individu)": r.nama_pendamping || "",
+        "Penanggung Jawab Lembaga": r.penanggung_jawab_lembaga || "",
+        "Nama Tim": r.nama_tim || "",
+        "Guru/Pendamping Tim": r.pembina || "",
+        "Link Surat Aktif Sekolah": r.url_surat_aktif || "",
+        "Link Kartu Pelajar": r.url_kartu_pelajar || "",
+        "Link Bukti Follow IG": Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig.join(", ") : (r.url_bukti_follow_ig || ""),
+        "Link Berkas Tim": Array.isArray(r.url_berkas_tim) ? r.url_berkas_tim.join(", ") : (r.url_berkas_tim || ""),
+        "Link Surat Delegasi": r.url_surat_delegasi || "",
+        "Status": r.status,
+        "ID (internal)": r.id
+      };
+    });
+
+    const HEADER_PENDAFTARAN = [
+      "Nomor Pendaftaran", "Waktu Daftar", "ID Lomba", "Nama Lomba", "Tipe (individu/tim)",
+      "Kategori Pendaftar (individu/lembaga)", "Nama Lengkap / Nama Tim", "Jenis Kelamin",
+      "Jenjang", "Kelas", "Tanggal Lahir", "Usia", "Asal Sekolah", "No. WhatsApp", "Email",
+      "Nama Pendamping (individu)", "Penanggung Jawab Lembaga", "Nama Tim", "Guru/Pendamping Tim",
+      "Link Surat Aktif Sekolah", "Link Kartu Pelajar", "Link Bukti Follow IG", "Link Berkas Tim",
+      "Link Surat Delegasi", "Status", "ID (internal)"
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(barisPendaftaran, { header: HEADER_PENDAFTARAN });
+    XLSX.utils.book_append_sheet(wb, ws1, "Pendaftaran");
+
+    // -------- Sheet 2: Anggota Tim (SEMUA kolom tabel `anggota_tim`) --------
+    // Cuma dibuat kalau ada minimal satu pendaftaran tim di `rows` -- satu
+    // query .in() sekali jalan untuk semua tim, bukan satu query per tim.
+    const idTim = rows.filter(function (r) { return r.tipe === "tim"; }).map(function (r) { return r.id; });
+    if (idTim.length > 0) {
+      const { data: anggota, error: errAnggota } = await supabaseClient
+        .from("anggota_tim")
+        .select("*")
+        .in("pendaftaran_id", idTim)
+        .order("created_at", { ascending: true });
+
+      if (errAnggota) {
+        console.error("Gagal memuat data anggota tim untuk XLSX:", errAnggota);
+      } else if (anggota && anggota.length > 0) {
+        const barisAnggota = anggota.map(function (a) {
+          return {
+            "Nomor Pendaftaran": a.nomor_pendaftaran,
+            "Nama Tim": a.nama_tim,
+            "Nama Anggota": a.nama,
+            "Tempat Lahir": a.tempat_lahir || "",
+            "Tanggal Lahir": a.tanggal_lahir || "",
+            "Kelas": a.kelas,
+            "No. Punggung": (a.nomor_punggung != null ? a.nomor_punggung : ""),
+            "Tempat/Tanggal Lahir (data lama)": a.tempat_tanggal_lahir || "",
+            "ID Pendaftaran (internal)": a.pendaftaran_id,
+            "ID Anggota (internal)": a.id
+          };
+        });
+        const HEADER_ANGGOTA = [
+          "Nomor Pendaftaran", "Nama Tim", "Nama Anggota", "Tempat Lahir", "Tanggal Lahir", "Kelas", "No. Punggung",
+          "Tempat/Tanggal Lahir (data lama)", "ID Pendaftaran (internal)", "ID Anggota (internal)"
+        ];
+        const ws2 = XLSX.utils.json_to_sheet(barisAnggota, { header: HEADER_ANGGOTA });
+        XLSX.utils.book_append_sheet(wb, ws2, "Anggota Tim");
+      }
+    }
+
+    XLSX.writeFile(wb, "data-pendaftar-alif5-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  } catch (err) {
+    alert("Gagal membuat file XLSX: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = labelAsli;
+  }
 }
 
 /* -------- Poster Rekap Pendaftar: dibuat & diunduh langsung dari browser
@@ -2055,22 +2214,23 @@ function escapeHTML(teks) {
 // kosong untuk pendaftar individu atau kalau semua anggota tim usianya
 // sesuai syarat.
 const WA_PLACEHOLDER_HINT =
-  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu).';
+  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu), <code>{link_lengkapi}</code> (link khusus buat pendamping tim melengkapi nomor punggung — cuma terisi kalau statusnya "Perlu Tambah Nomor Punggung", kosong untuk status lain, butuh "URL Situs" di bawah sudah diisi).';
 
 async function loadTabNotifWa() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat pengaturan notifikasi WA...</p>';
 
   const { data: settingsData } = await supabaseClient
-    .from("site_settings").select("wa_notif_template, link_grup_wa").eq("id", 1).single();
+    .from("site_settings").select("wa_notif_template, link_grup_wa, site_url").eq("id", 1).single();
 
   const templateDefault = (settingsData && settingsData.wa_notif_template) || "";
   const linkGrupDefault = (settingsData && settingsData.link_grup_wa) || "";
+  const siteUrlDefault = (settingsData && settingsData.site_url) || "";
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
       '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
-      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, atau <strong>Perlu Verifikasi Usia</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim, dengan pesan &amp; link grup WA yang SAMA (satu grup WA untuk semua pendaftar, tidak dibedakan per lomba). Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>.</p>' +
+      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, <strong>Perlu Verifikasi Usia</strong>, atau <strong>Perlu Tambah Nomor Punggung</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim, dengan pesan &amp; link grup WA yang SAMA (satu grup WA untuk semua pendaftar, tidak dibedakan per lomba). Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>; yang statusnya "Perlu Tambah Nomor Punggung" otomatis menerima link khusus lewat <code>{link_lengkapi}</code>.</p>' +
       '<div class="field">' +
         '<label for="wa-template">Pesan Notifikasi</label>' +
         '<textarea id="wa-template" rows="9">' + escapeHTML(templateDefault) + '</textarea>' +
@@ -2080,6 +2240,11 @@ async function loadTabNotifWa() {
         '<label for="wa-link-grup">Link Grup WA</label>' +
         '<input type="text" id="wa-link-grup" value="' + escapeHTML(linkGrupDefault) + '" placeholder="https://chat.whatsapp.com/..." />' +
         '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, tapi HANYA untuk pendaftar yang statusnya diubah jadi "Diterima" — pendaftar yang Ditolak (atau status lain) tidak pernah menerima link ini.</div>' +
+      '</div>' +
+      '<div class="field">' +
+        '<label for="wa-site-url">URL Situs</label>' +
+        '<input type="text" id="wa-site-url" value="' + escapeHTML(siteUrlDefault) + '" placeholder="https://alif5.vercel.app" />' +
+        '<div class="hint">Alamat website ini sendiri (TANPA garis miring/slash di akhir). Dipakai untuk merangkai link lengkap pada placeholder <code>{link_lengkapi}</code> di atas, misalnya <code>https://alif5.vercel.app/lengkapi?token=...</code>.</div>' +
       '</div>' +
       '<div class="form-error" id="wa-template-error" style="display:none;"></div>' +
       '<div class="submit-row" style="display:flex;gap:10px;">' +
@@ -2100,6 +2265,7 @@ async function loadTabNotifWa() {
 
     const teks = document.getElementById("wa-template").value;
     const linkGrup = document.getElementById("wa-link-grup").value.trim();
+    const siteUrl = document.getElementById("wa-site-url").value.trim().replace(/\/+$/, "");
     if (!teks.trim()) {
       errEl.textContent = "Pesan tidak boleh kosong.";
       errEl.style.display = "block";
@@ -2110,7 +2276,7 @@ async function loadTabNotifWa() {
     btn.textContent = "Menyimpan...";
     const { error } = await supabaseClient
       .from("site_settings")
-      .update({ wa_notif_template: teks, link_grup_wa: linkGrup || null })
+      .update({ wa_notif_template: teks, link_grup_wa: linkGrup || null, site_url: siteUrl || null })
       .eq("id", 1);
     btn.disabled = false;
     btn.textContent = "Simpan";
