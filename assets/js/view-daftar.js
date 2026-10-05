@@ -216,13 +216,27 @@ const DAFTAR_TEMPLATE = `
 
           <div class="field">
             <label>Screenshot Bukti Follow Instagram</label>
-            <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil kedua akun (terlihat tombol "Following"). Minimal 2 berkas (satu per akun), boleh lebih.</p>
-            <div class="upload-field" id="upload-ig">
-              <label class="upload-trigger" for="fileIg">Pilih berkas (minimal 2, JPG/PNG/PDF, maks 4MB/file)</label>
-              <input type="file" id="fileIg" name="fileIg" accept=".jpg,.jpeg,.png,.pdf" multiple />
-              <div class="filename" id="filename-ig">Belum ada berkas dipilih.</div>
+            <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil MASING-MASING akun (terlihat tombol "Following"), satu screenshot per kotak di bawah ini.</p>
+            <div class="field-row">
+              <div class="field" style="margin-bottom:0;">
+                <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @al.azzaam.id</label>
+                <div class="upload-field" id="upload-ig1">
+                  <label class="upload-trigger" for="fileIg1">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+                  <input type="file" id="fileIg1" name="fileIg1" accept=".jpg,.jpeg,.png,.pdf" />
+                  <div class="filename" id="filename-ig1">Belum ada berkas dipilih.</div>
+                </div>
+                <div class="form-error">Screenshot follow @al.azzaam.id wajib diunggah.</div>
+              </div>
+              <div class="field" style="margin-bottom:0;">
+                <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @alifest.26</label>
+                <div class="upload-field" id="upload-ig2">
+                  <label class="upload-trigger" for="fileIg2">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+                  <input type="file" id="fileIg2" name="fileIg2" accept=".jpg,.jpeg,.png,.pdf" />
+                  <div class="filename" id="filename-ig2">Belum ada berkas dipilih.</div>
+                </div>
+                <div class="form-error">Screenshot follow @alifest.26 wajib diunggah.</div>
+              </div>
             </div>
-            <div class="form-error">Screenshot bukti follow Instagram wajib diunggah, minimal 2 berkas.</div>
           </div>
         </fieldset>
 
@@ -299,7 +313,7 @@ function initDaftar() {
     resultPanel.classList.remove("is-visible");
     form.querySelectorAll(".has-error").forEach(function (el) { el.classList.remove("has-error"); });
 
-    ["kartu", "ig", "delegasi"].forEach(function (key) {
+    ["kartu", "ig1", "ig2", "delegasi"].forEach(function (key) {
       document.getElementById("upload-" + key).classList.remove("has-file");
       document.getElementById("filename-" + key).textContent = "Belum ada berkas dipilih.";
     });
@@ -986,47 +1000,21 @@ function initDaftar() {
     });
   }
 
-  // Bukti follow IG: sama seperti Kartu Pelajar tim -- selalu bisa pilih
-  // banyak file sekaligus, tapi di sini WAJIB minimal 2 file (lihat migrasi
-  // 0021: submit_pendaftaran menolak kalau array-nya kurang dari 2 elemen).
-  function setupUploadIg() {
-    const input = document.getElementById("fileIg");
-    const box = document.getElementById("upload-ig");
-    const filenameEl = document.getElementById("filename-ig");
-
-    input.addEventListener("change", function () {
-      const files = Array.from(input.files || []);
-      if (files.length === 0) {
-        box.classList.remove("has-file");
-        filenameEl.textContent = "Belum ada berkas dipilih.";
-        return;
-      }
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
-        const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
-        if (!sizeOk || !typeOk) {
-          filenameEl.textContent = !sizeOk
-            ? ('Berkas "' + file.name + '" melebihi ' + MAX_FILE_SIZE_MB + 'MB. Pilih ulang berkas.')
-            : ('Format "' + file.name + '" tidak didukung. Gunakan JPG, PNG, atau PDF.');
-          box.classList.remove("has-file");
-          input.value = "";
-          return;
-        }
-      }
-      const daftarNama = files.length + " berkas dipilih: " + files.map(function (f) { return f.name; }).join(", ");
-      if (files.length < 2) {
-        filenameEl.textContent = daftarNama + " — minimal 2 berkas, pilih tambahan lagi.";
-        box.classList.remove("has-file");
-        return;
-      }
-      filenameEl.textContent = daftarNama;
-      box.classList.add("has-file");
-    });
-  }
-
   setupUploadKartu();
-  setupUploadIg();
+  // Bukti follow IG: DULU satu kotak upload dengan "multiple" yang WAJIB
+  // diisi minimal 2 file sekaligus (satu per akun) -- banyak pendaftar
+  // (terutama lewat HP) kesulitan memilih 2 file sekaligus dalam satu kotak
+  // pemilih berkas. Sekarang dipecah jadi DUA kotak upload terpisah
+  // ("fileIg1" untuk @al.azzaam.id, "fileIg2" untuk @alifest.26), masing-
+  // masing cukup satu berkas -- lebih gampang dipakai di HP, dan hasil
+  // akhirnya (array 2 URL dikirim ke p_url_bukti_follow_ig) tetap sama
+  // persis seperti sebelumnya, jadi tidak perlu perubahan apa pun di
+  // database (migrasi 0021 tetap berlaku, cuma mensyaratkan array minimal 2
+  // elemen, tidak peduli dari berapa kotak upload asalnya). Keduanya pakai
+  // setupUpload() generik yang sama dengan Kartu Pelajar individu/Surat
+  // Delegasi (satu file wajib per kotak).
+  setupUpload("fileIg1", "upload-ig1", "filename-ig1");
+  setupUpload("fileIg2", "upload-ig2", "filename-ig2");
   setupUpload("fileDelegasi", "upload-delegasi", "filename-delegasi");
 
   /* ---------------- Upload ke Supabase Storage ---------------- */
@@ -1242,11 +1230,17 @@ function initDaftar() {
     setFieldError(fileKartuField, !kartuOk);
     if (!kartuOk) valid = false;
 
-    const fileIg = document.getElementById("fileIg");
-    const fileIgField = fileIg.closest(".field");
-    const igOk = fileIg.files.length >= 2 && fileIg.closest(".upload-field").classList.contains("has-file");
-    setFieldError(fileIgField, !igOk);
-    if (!igOk) valid = false;
+    const fileIg1 = document.getElementById("fileIg1");
+    const fileIg1Field = fileIg1.closest(".field");
+    const ig1Ok = fileIg1.files.length > 0 && fileIg1.closest(".upload-field").classList.contains("has-file");
+    setFieldError(fileIg1Field, !ig1Ok);
+    if (!ig1Ok) valid = false;
+
+    const fileIg2 = document.getElementById("fileIg2");
+    const fileIg2Field = fileIg2.closest(".field");
+    const ig2Ok = fileIg2.files.length > 0 && fileIg2.closest(".upload-field").classList.contains("has-file");
+    setFieldError(fileIg2Field, !ig2Ok);
+    if (!ig2Ok) valid = false;
 
     if (isTim) {
       const fileDelegasi = document.getElementById("fileDelegasi");
@@ -1282,7 +1276,12 @@ function initDaftar() {
     const isTim = selectedLomba.tipe === "tim";
     const namaTimVal = isTim ? document.getElementById("namaTim").value.trim() : "";
     const labelDasar = isTim ? namaFileAman(namaTimVal) : "";
-    const fileIgList = Array.from(document.getElementById("fileIg").files || []);
+    // Digabung dari dua kotak upload terpisah (fileIg1/fileIg2, satu per
+    // akun IG -- lihat setupUpload di atas) jadi satu array, supaya kode
+    // pengunggahan & pengiriman ke p_url_bukti_follow_ig di bawah ini (yang
+    // sudah mengharapkan array, sejak migrasi 0021) tidak perlu diubah sama
+    // sekali.
+    const fileIgList = [document.getElementById("fileIg1").files[0], document.getElementById("fileIg2").files[0]].filter(Boolean);
 
     let uploadTugas;
     if (isTim) {
