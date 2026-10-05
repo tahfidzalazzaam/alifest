@@ -26,7 +26,8 @@ const ROUTES = {
   "#/bazar": window.ViewBazar,
   "#/daftar-bazar": window.ViewDaftarBazar,
   "#/adminbazar": window.ViewAdminBazar,
-  "#/adminprofil": window.ViewAdminProfil
+  "#/adminprofil": window.ViewAdminProfil,
+  "#/lengkapi": window.ViewLengkapi
 };
 
 function normalisasiHash() {
@@ -54,6 +55,7 @@ function judulUntukView(view) {
   if (view === window.ViewBazar || view === window.ViewDaftarBazar) return "Bazar - ALIF 5.0";
   if (view === window.ViewAdminBazar) return "Panitia Bazar - ALIF 5.0";
   if (view === window.ViewAdminProfil) return "Panitia Beranda - ALIF 5.0";
+  if (view === window.ViewLengkapi) return "Lengkapi Nomor Punggung - ALIF 5.0";
   return document.title; // view tak dikenal -- biarkan judul tab apa adanya
 }
 
@@ -106,6 +108,10 @@ function cekAksesLangsungAdmin() {
   }
   if (path === "/adminprofil") {
     tampilkanView(window.ViewAdminProfil, "");
+    return true;
+  }
+  if (path === "/lengkapi") {
+    tampilkanView(window.ViewLengkapi, "");
     return true;
   }
   return false;
@@ -309,6 +315,11 @@ window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 //    (bazar_settings.pendaftaran_dibuka) ditangani langsung di dalam
 //    view-bazar.js/view-daftarbazar.js (muatPengaturanBazar), jadi gerbang
 //    lomba ini tidak relevan sama sekali untuk halaman-halaman itu.
+//  - "/lengkapi" -- halaman publik token-only (migrasi 0032) yang dibuka
+//    pendaftar lewat link khusus di WhatsApp untuk melengkapi nomor
+//    punggung tim Futsal yang sudah mendaftar; tidak relevan dipaksa lewat
+//    gerbang pendaftaran lomba (pendaftarannya sendiri sudah pasti sudah
+//    masuk, cuma melengkapi data).
 function halamanTanpaGerbangLomba() {
   const path = window.location.pathname.replace(/\/+$/, "");
   const hash = window.location.hash;
@@ -318,7 +329,8 @@ function halamanTanpaGerbangLomba() {
     path === "/adminprofil" || hash === "#/adminprofil" ||
     path === "" || path === "/" || hash === "" || hash === "#" || hash === "#/" ||
     path === "/bazar" || hash === "#/bazar" ||
-    path === "/daftar-bazar" || hash === "#/daftar-bazar"
+    path === "/daftar-bazar" || hash === "#/daftar-bazar" ||
+    path === "/lengkapi" || hash === "#/lengkapi"
   );
 }
 
