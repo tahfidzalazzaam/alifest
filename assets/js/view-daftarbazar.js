@@ -113,6 +113,20 @@ const DAFTAR_BAZAR_TEMPLATE = `
 </main>
 `;
 
+// Pesan lucu bertema "lagi maintenance, ngumpulin cakra dulu" untuk saklar
+// "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) -- dipilih
+// acak tiap kali form ini dirender. Disalin apa adanya (duplikat, bukan
+// lewat window.xxx) juga di view-bazar.js -- kalau isinya mau diubah, ganti
+// di KEDUA tempat itu supaya tetap konsisten.
+const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
+  "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
+  "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
+  "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
+  "Lagi semedi di Air Terjun Kebenaran sambil ngumpulin cakra buat Bazar ALIF 5.0. Jangan diganggu dulu, nanti juga muncul sendiri. 🏞️🧘",
+  "Rasengan Bazar-nya masih dalam proses pembentukan cakra, belum stabil kalau dibuka sekarang. Ditunggu ya sampai sempurna. 🌀",
+  "Mode Sage lagi aktif: panitia sedang menyerap cakra alam demi persiapan Bazar yang maksimal. Coba mampir lagi nanti. 🍃"
+];
+
 function initDaftarBazar() {
   const form = document.getElementById("form-bazar");
   const kategoriChoicesEl = document.getElementById("bazar-kategori-choices");
@@ -148,10 +162,43 @@ function initDaftarBazar() {
 
   /* ---------------- Muat pengaturan bazar (buka/tutup, kategori, kuota, info biaya/rekening) ---------------- */
   async function muatPengaturanBazar() {
-    const [{ data: settings }, { data: jumlahTerisi }] = await Promise.all([
-      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
-      supabaseClient.rpc("bazar_jumlah_terisi")
+    const [{ data: settings }, { data: jumlahTerisi }, { data: sesi }] = await Promise.all([
+      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
+      supabaseClient.rpc("bazar_jumlah_terisi"),
+      supabaseClient.auth.getSession()
     ]);
+
+    // "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) --
+    // sama seperti di view-bazar.js: form ini juga ikut disembunyikan dari
+    // pengunjung biasa (bukan cuma pesan "pendaftaran ditutup" seperti
+    // pendaftaran_dibuka=false), kecuali panitia yang sedang login.
+    const panitiaLogin = !!(sesi && sesi.session);
+    if (settings && settings.tutup_total === true && !panitiaLogin) {
+      const shell = document.querySelector(".form-shell");
+      if (shell) {
+        const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL.length)];
+        shell.innerHTML =
+          '<div style="text-align:center;padding:20px 0;">' +
+            '<div style="font-size:2.4rem;margin-bottom:12px;">🌀</div>' +
+            '<h2>Bazar Belum Dibuka</h2>' +
+            '<p>' + escapeHTMLDaftarBazar(pesan) + '</p>' +
+          '</div>';
+      }
+      return;
+    }
+
+    // Panitia yang login tetap melihat form ini seperti biasa walau
+    // tutup_total aktif (supaya bisa pratinjau) -- banner pengingat di atas.
+    if (settings && settings.tutup_total === true && panitiaLogin) {
+      const shell = document.querySelector(".form-shell");
+      if (shell) {
+        const banner = document.createElement("div");
+        banner.className = "notice notice--error";
+        banner.style.marginBottom = "16px";
+        banner.textContent = "🔒 Mode Pratinjau Panitia: halaman ini sedang DISEMBUNYIKAN dari publik (\"Tutup Total Bazar\" aktif di /adminbazar).";
+        shell.insertBefore(banner, shell.firstChild);
+      }
+    }
 
     pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
     kategoriList = (settings && Array.isArray(settings.kategori_list) && settings.kategori_list.length)
