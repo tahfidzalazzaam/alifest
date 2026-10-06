@@ -81,11 +81,68 @@ function escapeHTMLBazarInfo(teks) {
   return div.innerHTML;
 }
 
+// Pesan lucu bertema "lagi maintenance, ngumpulin cakra dulu" -- dipilih
+// acak tiap kali halaman ini dirender supaya tidak monoton, gayanya sama
+// seperti PESAN_LUCU_TUTUP di router.js (gerbang pendaftaran lomba), tapi
+// isinya khusus dibuat berbeda/lebih "ninja-bertema-cakra" sesuai
+// permintaan supaya pesan tutup Bazar juga terasa lucu, bukan cuma pesan
+// error polos. Disalin apa adanya (duplikat, bukan dipakai bersama lewat
+// window.xxx) juga di view-daftarbazar.js -- kalau isinya mau diubah,
+// ganti di KEDUA tempat itu supaya tetap konsisten.
+const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
+  "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
+  "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
+  "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
+  "Lagi semedi di Air Terjun Kebenaran sambil ngumpulin cakra buat Bazar ALIF 5.0. Jangan diganggu dulu, nanti juga muncul sendiri. 🏞️🧘",
+  "Rasengan Bazar-nya masih dalam proses pembentukan cakra, belum stabil kalau dibuka sekarang. Ditunggu ya sampai sempurna. 🌀",
+  "Mode Sage lagi aktif: panitia sedang menyerap cakra alam demi persiapan Bazar yang maksimal. Coba mampir lagi nanti. 🍃"
+];
+
+// "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) --
+// menyembunyikan halaman info INI juga (bukan cuma form "/daftar-bazar"
+// seperti pendaftaran_dibuka=false), KECUALI untuk panitia yang sedang
+// login di browser ini (akun Supabase Auth yang sama dengan
+// "/admin"/"/adminbazar" -- lihat getSession() di bawah), supaya panitia
+// tetap bisa pratinjau halaman ini sebelum/sambil memutuskan kapan
+// dibuka lagi ke publik.
+function tampilkanPesanBazarTutupTotal() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL.length)];
+  app.innerHTML =
+    '<section class="hero container">' +
+      '<span class="hero__eyebrow">Al Azzaam Islamic Fair</span>' +
+      '<h1>🌀 Bazar Belum Dibuka</h1>' +
+      '<p class="lede">' + escapeHTMLBazarInfo(pesan) + '</p>' +
+    '</section>';
+}
+
 async function initBazar() {
-  const [{ data: settings }, { data: jumlahTerisi }] = await Promise.all([
-    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
-    supabaseClient.rpc("bazar_jumlah_terisi")
+  const [{ data: settings }, { data: jumlahTerisi }, { data: sesi }] = await Promise.all([
+    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,tutup_total,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
+    supabaseClient.rpc("bazar_jumlah_terisi"),
+    supabaseClient.auth.getSession()
   ]);
+
+  const panitiaLogin = !!(sesi && sesi.session);
+  if (settings && settings.tutup_total === true && !panitiaLogin) {
+    tampilkanPesanBazarTutupTotal();
+    return;
+  }
+
+  // Panitia yang login tetap melihat halaman ini seperti biasa walau
+  // tutup_total aktif (supaya bisa pratinjau) -- diberi banner pengingat
+  // di paling atas supaya tidak lupa ini sedang tersembunyi dari publik.
+  if (settings && settings.tutup_total === true && panitiaLogin) {
+    const hero = document.querySelector(".hero.container");
+    if (hero) {
+      const banner = document.createElement("div");
+      banner.className = "notice notice--error";
+      banner.style.marginBottom = "16px";
+      banner.textContent = "🔒 Mode Pratinjau Panitia: halaman ini sedang DISEMBUNYIKAN dari publik (\"Tutup Total Bazar\" aktif di /adminbazar).";
+      hero.insertBefore(banner, hero.firstChild);
+    }
+  }
 
   const judulEl = document.getElementById("bazar-judul");
   const deskripsiEl = document.getElementById("bazar-deskripsi");
