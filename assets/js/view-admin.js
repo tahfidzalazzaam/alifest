@@ -733,7 +733,7 @@ async function loadTabPendaftar() {
   });
 
   document.getElementById("btn-unduh-xlsx").addEventListener("click", function () {
-    unduhXLSXPendaftar(this, rows);
+    unduhXLSXPendaftar(this, rows, rules, lombaFilter);
   });
 }
 
@@ -741,14 +741,28 @@ async function loadTabPendaftar() {
    Memakai pustaka SheetJS (xlsx), dimuat LAZY dari CDN (sama pola dengan
    muatTesseract() di view-daftar.js) -- HANYA saat tombol ini diklik, jadi
    panitia yang tidak pernah pakai fitur ini tidak ikut mengunduh pustaka
-   ini sama sekali. Sheet 1 "Pendaftaran" berisi SEMUA kolom tabel
-   `pendaftaran` apa adanya (termasuk kolom teknis seperti `id`/`lomba_id`
-   yang tidak ditampilkan di tabel UI) -- `rows` di sini SAMA dengan data
-   yang sudah dimuat loadTabPendaftar() (select("*")), tidak ada query
-   tambahan untuk sheet ini. Sheet 2 "Anggota Tim" (cuma dibuat kalau ada
-   minimal satu pendaftaran tim) berisi SEMUA kolom tabel `anggota_tim`
-   untuk tim-tim yang ada di `rows`, satu query tambahan `.in()` sekali
-   jalan (bukan satu query per tim). */
+   ini sama sekali.
+
+   Cakupan datanya ikut kartu rekap lomba yang sedang AKTIF/difilter di atas
+   tabel (`lombaFilter`), BUKAN kotak cari teks (kotak cari murni buat
+   mencari sekilas di tabel, tidak dimaksudkan membatasi arsip unduhan):
+     - Kartu "Semua Lomba" aktif (lombaFilter === "") -> unduh SEMUA
+       pendaftar, dipisah jadi SATU SHEET PER CABANG LOMBA (urutannya
+       mengikuti urutan lomba di tab "Kelola Lomba"), dan baris di tiap
+       sheet diurutkan menurut Jenis Kelamin (Laki-laki dulu, lalu
+       Perempuan).
+     - Kartu salah satu lomba aktif (lombaFilter = id lomba itu) -> unduh
+       HANYA pendaftar lomba itu. Kalau pendaftarnya mencakup lebih dari
+       satu kombinasi Jenjang+Jenis Kelamin, dipisah lagi jadi satu sheet
+       per kombinasi (mis. "SD - Laki-laki", "SMP - Perempuan"); kalau
+       cuma ada satu kombinasi, tetap satu sheet saja (tidak dipecah
+       percuma).
+   Sheet terakhir, "Anggota Tim" (cuma dibuat kalau ada minimal satu
+   pendaftaran tim di dalam cakupan yang sama di atas), berisi kolom-kolom
+   relevan tabel `anggota_tim` untuk tim-tim itu, satu query tambahan
+   `.in()` sekali jalan (bukan satu query per tim). Kolom ID internal
+   (`id`, `lomba_id`, dst) dan "Waktu Daftar" SENGAJA TIDAK disertakan --
+   tidak relevan buat panitia yang cuma butuh rekap datanya. */
 let sheetJSPromise = null;
 function muatSheetJS() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -766,7 +780,81 @@ function muatSheetJS() {
   return sheetJSPromise;
 }
 
-async function unduhXLSXPendaftar(btn, rows) {
+// Urutan tampil Jenis Kelamin di tiap sheet: Laki-laki dulu, lalu
+// Perempuan, lalu yang tidak diketahui/kosong di paling akhir.
+function urutanJenisXLSX(j) {
+  if (j === "laki-laki") return 0;
+  if (j === "perempuan") return 1;
+  return 2;
+}
+function labelJenisXLSX(j) {
+  if (j === "laki-laki") return "Laki-laki";
+  if (j === "perempuan") return "Perempuan";
+  return "-";
+}
+
+// Nama sheet Excel maksimal 31 karakter & tidak boleh berisi \ / ? * [ ] : --
+// dibersihkan, dipotong, dan dipastikan unik dalam satu file (ditambah
+// " (2)", " (3)", dst kalau ada nama yang jadi sama setelah dibersihkan).
+function namaSheetXLSXAman(nama, dipakai) {
+  let bersih = String(nama || "Sheet").replace(/[\\/?*[\]:]/g, "-").trim();
+  if (!bersih) bersih = "Sheet";
+  if (bersih.length > 31) bersih = bersih.slice(0, 31);
+  let final = bersih;
+  let i = 2;
+  while (dipakai[final]) {
+    const sufiks = " (" + i + ")";
+    final = bersih.slice(0, 31 - sufiks.length) + sufiks;
+    i++;
+  }
+  dipakai[final] = true;
+  return final;
+}
+
+function slugXLSXNamaFile(teks) {
+  return String(teks || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "lomba";
+}
+
+const HEADER_PENDAFTARAN_XLSX = [
+  "Nomor Pendaftaran", "Nama Lomba", "Tipe (individu/tim)",
+  "Kategori Pendaftar (individu/lembaga)", "Nama Lengkap / Nama Tim", "Jenis Kelamin",
+  "Jenjang", "Kelas", "Tanggal Lahir", "Usia", "Asal Sekolah", "No. WhatsApp", "Email",
+  "Nama Pendamping (individu)", "Penanggung Jawab Lembaga", "Nama Tim", "Guru/Pendamping Tim",
+  "Link Surat Aktif Sekolah", "Link Kartu Pelajar", "Link Bukti Follow IG", "Link Berkas Tim",
+  "Link Surat Delegasi", "Status"
+];
+
+function petakanBarisPendaftaranXLSX(list) {
+  return list.map(function (r) {
+    return {
+      "Nomor Pendaftaran": r.nomor_pendaftaran,
+      "Nama Lomba": r.lomba_nama,
+      "Tipe (individu/tim)": r.tipe,
+      "Kategori Pendaftar (individu/lembaga)": r.tipe_pendaftar || "",
+      "Nama Lengkap / Nama Tim": r.nama_lengkap,
+      "Jenis Kelamin": r.jenis_kelamin || "",
+      "Jenjang": r.jenjang || "",
+      "Kelas": r.kelas || "",
+      "Tanggal Lahir": r.tanggal_lahir || "",
+      "Usia": r.usia != null ? r.usia : "",
+      "Asal Sekolah": r.asal_sekolah,
+      "No. WhatsApp": r.whatsapp,
+      "Email": r.email || "",
+      "Nama Pendamping (individu)": r.nama_pendamping || "",
+      "Penanggung Jawab Lembaga": r.penanggung_jawab_lembaga || "",
+      "Nama Tim": r.nama_tim || "",
+      "Guru/Pendamping Tim": r.pembina || "",
+      "Link Surat Aktif Sekolah": r.url_surat_aktif || "",
+      "Link Kartu Pelajar": r.url_kartu_pelajar || "",
+      "Link Bukti Follow IG": Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig.join(", ") : (r.url_bukti_follow_ig || ""),
+      "Link Berkas Tim": Array.isArray(r.url_berkas_tim) ? r.url_berkas_tim.join(", ") : (r.url_berkas_tim || ""),
+      "Link Surat Delegasi": r.url_surat_delegasi || "",
+      "Status": r.status
+    };
+  });
+}
+
+async function unduhXLSXPendaftar(btn, rows, rules, lombaFilter) {
   const labelAsli = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Menyiapkan...";
@@ -774,55 +862,72 @@ async function unduhXLSXPendaftar(btn, rows) {
   try {
     const XLSX = await muatSheetJS();
 
-    // -------- Sheet 1: Pendaftaran (SEMUA kolom tabel `pendaftaran`) --------
-    const barisPendaftaran = rows.map(function (r) {
-      return {
-        "Nomor Pendaftaran": r.nomor_pendaftaran,
-        "Waktu Daftar": r.created_at,
-        "ID Lomba": r.lomba_id,
-        "Nama Lomba": r.lomba_nama,
-        "Tipe (individu/tim)": r.tipe,
-        "Kategori Pendaftar (individu/lembaga)": r.tipe_pendaftar || "",
-        "Nama Lengkap / Nama Tim": r.nama_lengkap,
-        "Jenis Kelamin": r.jenis_kelamin || "",
-        "Jenjang": r.jenjang || "",
-        "Kelas": r.kelas || "",
-        "Tanggal Lahir": r.tanggal_lahir || "",
-        "Usia": r.usia != null ? r.usia : "",
-        "Asal Sekolah": r.asal_sekolah,
-        "No. WhatsApp": r.whatsapp,
-        "Email": r.email || "",
-        "Nama Pendamping (individu)": r.nama_pendamping || "",
-        "Penanggung Jawab Lembaga": r.penanggung_jawab_lembaga || "",
-        "Nama Tim": r.nama_tim || "",
-        "Guru/Pendamping Tim": r.pembina || "",
-        "Link Surat Aktif Sekolah": r.url_surat_aktif || "",
-        "Link Kartu Pelajar": r.url_kartu_pelajar || "",
-        "Link Bukti Follow IG": Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig.join(", ") : (r.url_bukti_follow_ig || ""),
-        "Link Berkas Tim": Array.isArray(r.url_berkas_tim) ? r.url_berkas_tim.join(", ") : (r.url_berkas_tim || ""),
-        "Link Surat Delegasi": r.url_surat_delegasi || "",
-        "Status": r.status,
-        "ID (internal)": r.id
-      };
-    });
-
-    const HEADER_PENDAFTARAN = [
-      "Nomor Pendaftaran", "Waktu Daftar", "ID Lomba", "Nama Lomba", "Tipe (individu/tim)",
-      "Kategori Pendaftar (individu/lembaga)", "Nama Lengkap / Nama Tim", "Jenis Kelamin",
-      "Jenjang", "Kelas", "Tanggal Lahir", "Usia", "Asal Sekolah", "No. WhatsApp", "Email",
-      "Nama Pendamping (individu)", "Penanggung Jawab Lembaga", "Nama Tim", "Guru/Pendamping Tim",
-      "Link Surat Aktif Sekolah", "Link Kartu Pelajar", "Link Bukti Follow IG", "Link Berkas Tim",
-      "Link Surat Delegasi", "Status", "ID (internal)"
-    ];
+    // Cakupan: HANYA lomba yang sedang difilter kartu rekapnya (kalau ada),
+    // atau semua pendaftar (kalau kartu "Semua Lomba" yang aktif).
+    const data = lombaFilter ? rows.filter(function (r) { return r.lomba_id === lombaFilter; }) : rows;
 
     const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.json_to_sheet(barisPendaftaran, { header: HEADER_PENDAFTARAN });
-    XLSX.utils.book_append_sheet(wb, ws1, "Pendaftaran");
+    const namaSheetDipakai = {};
 
-    // -------- Sheet 2: Anggota Tim (SEMUA kolom tabel `anggota_tim`) --------
-    // Cuma dibuat kalau ada minimal satu pendaftaran tim di `rows` -- satu
-    // query .in() sekali jalan untuk semua tim, bukan satu query per tim.
-    const idTim = rows.filter(function (r) { return r.tipe === "tim"; }).map(function (r) { return r.id; });
+    function tambahSheetPendaftaran(nama, list) {
+      const ws = XLSX.utils.json_to_sheet(petakanBarisPendaftaranXLSX(list), { header: HEADER_PENDAFTARAN_XLSX });
+      XLSX.utils.book_append_sheet(wb, ws, namaSheetXLSXAman(nama, namaSheetDipakai));
+    }
+
+    if (lombaFilter) {
+      // -------- Mode TERFILTER (satu kartu lomba aktif): HANYA lomba itu,
+      // dipecah jadi beberapa sheet (satu per kombinasi Jenjang+Jenis
+      // Kelamin) KALAU memang ada lebih dari satu kombinasi -- kalau cuma
+      // satu kombinasi, tetap satu sheet saja.
+      const kelompok = {};
+      data.forEach(function (r) {
+        const kunci = (r.jenjang || "-") + "||" + (r.jenis_kelamin || "-");
+        if (!kelompok[kunci]) kelompok[kunci] = { jenjang: r.jenjang || "-", jenis: r.jenis_kelamin || "", list: [] };
+        kelompok[kunci].list.push(r);
+      });
+      const daftarKelompok = Object.keys(kelompok).map(function (k) { return kelompok[k]; });
+      daftarKelompok.sort(function (a, b) {
+        if (a.jenjang !== b.jenjang) return a.jenjang < b.jenjang ? -1 : 1;
+        return urutanJenisXLSX(a.jenis) - urutanJenisXLSX(b.jenis);
+      });
+
+      const namaLomba = (rules.find(function (r) { return r.id === lombaFilter; }) || {}).nama || "Lomba";
+
+      if (daftarKelompok.length <= 1) {
+        tambahSheetPendaftaran(namaLomba, data);
+      } else {
+        daftarKelompok.forEach(function (g) {
+          g.list.sort(function (a, b) { return urutanJenisXLSX(a.jenis_kelamin) - urutanJenisXLSX(b.jenis_kelamin); });
+          tambahSheetPendaftaran(g.jenjang + " - " + labelJenisXLSX(g.jenis), g.list);
+        });
+      }
+    } else {
+      // -------- Mode SEMUA LOMBA (tidak ada kartu yang difilter): satu
+      // sheet per cabang lomba yang punya minimal 1 pendaftar, urutan sheet
+      // mengikuti urutan lomba di tab "Kelola Lomba", baris di tiap sheet
+      // diurutkan menurut Jenis Kelamin.
+      rules.forEach(function (rule) {
+        const list = data.filter(function (r) { return r.lomba_id === rule.id; });
+        if (list.length === 0) return;
+        list.sort(function (a, b) { return urutanJenisXLSX(a.jenis_kelamin) - urutanJenisXLSX(b.jenis_kelamin); });
+        tambahSheetPendaftaran(rule.nama, list);
+      });
+
+      // Pendaftar yang lomba-nya sudah tidak ada lagi di "Kelola Lomba"
+      // (lomba_id tidak cocok rule manapun, mis. lomba itu sudah dihapus) --
+      // jangan sampai hilang dari unduhan, kumpulkan jadi satu sheet terakhir.
+      const idLombaDikenal = rules.map(function (r) { return r.id; });
+      const sisa = data.filter(function (r) { return idLombaDikenal.indexOf(r.lomba_id) === -1; });
+      if (sisa.length > 0) {
+        sisa.sort(function (a, b) { return urutanJenisXLSX(a.jenis_kelamin) - urutanJenisXLSX(b.jenis_kelamin); });
+        tambahSheetPendaftaran("Lainnya", sisa);
+      }
+    }
+
+    // -------- Sheet Anggota Tim -- HANYA untuk tim yang ada di `data`
+    // (ikut terfilter kalau lombaFilter aktif), satu query .in() sekali
+    // jalan untuk semua tim dalam cakupan itu (bukan satu query per tim).
+    const idTim = data.filter(function (r) { return r.tipe === "tim"; }).map(function (r) { return r.id; });
     if (idTim.length > 0) {
       const { data: anggota, error: errAnggota } = await supabaseClient
         .from("anggota_tim")
@@ -842,21 +947,22 @@ async function unduhXLSXPendaftar(btn, rows) {
             "Tanggal Lahir": a.tanggal_lahir || "",
             "Kelas": a.kelas,
             "No. Punggung": (a.nomor_punggung != null ? a.nomor_punggung : ""),
-            "Tempat/Tanggal Lahir (data lama)": a.tempat_tanggal_lahir || "",
-            "ID Pendaftaran (internal)": a.pendaftaran_id,
-            "ID Anggota (internal)": a.id
+            "Tempat/Tanggal Lahir (data lama)": a.tempat_tanggal_lahir || ""
           };
         });
         const HEADER_ANGGOTA = [
           "Nomor Pendaftaran", "Nama Tim", "Nama Anggota", "Tempat Lahir", "Tanggal Lahir", "Kelas", "No. Punggung",
-          "Tempat/Tanggal Lahir (data lama)", "ID Pendaftaran (internal)", "ID Anggota (internal)"
+          "Tempat/Tanggal Lahir (data lama)"
         ];
         const ws2 = XLSX.utils.json_to_sheet(barisAnggota, { header: HEADER_ANGGOTA });
-        XLSX.utils.book_append_sheet(wb, ws2, "Anggota Tim");
+        XLSX.utils.book_append_sheet(wb, ws2, namaSheetXLSXAman("Anggota Tim", namaSheetDipakai));
       }
     }
 
-    XLSX.writeFile(wb, "data-pendaftar-alif5-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+    const sufiksNama = lombaFilter
+      ? ("-" + slugXLSXNamaFile((rules.find(function (r) { return r.id === lombaFilter; }) || {}).nama))
+      : "";
+    XLSX.writeFile(wb, "data-pendaftar-alif5" + sufiksNama + "-" + new Date().toISOString().slice(0, 10) + ".xlsx");
   } catch (err) {
     alert("Gagal membuat file XLSX: " + err.message);
   } finally {
