@@ -1,13 +1,29 @@
-// View: Lengkapi Nomor Punggung ("/lengkapi?token=...") -- halaman PUBLIK,
-// tidak butuh login, diakses pendaftar lewat link khusus yang dikirim
-// panitia lewat WhatsApp (placeholder {link_lengkapi}, lihat Edge Function
-// kirim-notifikasi-wa & migrasi 0032). TIDAK ditautkan di navbar mana pun
-// -- hanya bisa dicapai lewat link itu sendiri. Berbeda dari halaman
-// "/admin" dkk, token-nya dibaca dari QUERY STRING ("?token=..."), BUKAN
-// dari hash, karena halaman ini tidak pernah dinavigasi dari dalam SPA.
+// View: Lengkapi Nomor Punggung ("#/lengkapi?token=..." ATAU "/lengkapi?token=...")
+// -- halaman PUBLIK, tidak butuh login, diakses pendaftar lewat link khusus
+// yang dikirim panitia lewat WhatsApp (placeholder {link_lengkapi}, lihat
+// Edge Function kirim-notifikasi-wa & migrasi 0032). TIDAK ditautkan di
+// navbar mana pun -- hanya bisa dicapai lewat link itu sendiri.
+//
+// Linknya memakai bentuk HASH ("#/lengkapi?token=...") sebagai JALUR UTAMA
+// (lihat kirim-notifikasi-wa/index.ts) -- BUKAN path langsung
+// ("/lengkapi?token=..."), karena rute hash SELALU berfungsi murni di
+// browser tanpa butuh konfigurasi rewrite apa pun di sisi hosting, sedangkan
+// rute path langsung bergantung pada "rewrites" di vercel.json yang
+// ternyata TIDAK SELALU bisa diandalkan tergantung pengaturan project
+// Vercel masing-masing (pernah ditemukan kasus production 404 walau
+// vercel.json & kode sudah 100% benar). Dukungan path langsung TETAP
+// dipertahankan di router.js/vercel.json sebagai alternatif kalau memang
+// berhasil, tapi link yang DIKIRIM selalu memakai bentuk hash yang lebih
+// bisa diandalkan.
+//
+// Karena itu, `ambilTokenDariUrl()` di bawah membaca token dari KEDUA
+// kemungkinan tempat: query string asli (window.location.search, untuk
+// akses lewat path langsung) ATAU dari bagian "?..." di DALAM hash
+// (window.location.hash, untuk akses lewat "#/lengkapi?token=...") --
+// yang mana saja yang terisi duluan dipakai.
 //
 // Alurnya:
-//  1. Baca token dari window.location.search.
+//  1. Baca token lewat ambilTokenDariUrl().
 //  2. Panggil RPC ambil_tim_untuk_lengkapi(token) -- kalau sukses, tampilkan
 //     nama tim & daftar anggotanya dengan input nomor punggung (prefilled
 //     kalau sudah pernah diisi sebelumnya).
@@ -32,8 +48,20 @@ function escapeHTMLLengkapi(teks) {
 }
 
 function ambilTokenDariUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return (params.get("token") || "").trim();
+  // 1) Query string ASLI -- berlaku kalau halaman ini diakses lewat path
+  //    langsung "/lengkapi?token=..." dan rewrite vercel.json-nya berhasil.
+  const dariQuery = new URLSearchParams(window.location.search).get("token");
+  if (dariQuery) return dariQuery.trim();
+
+  // 2) Bagian "?..." DI DALAM hash -- berlaku untuk bentuk utama
+  //    "#/lengkapi?token=...": semua yang di belakang "#" tidak pernah
+  //    dikirim ke server sama sekali (murni ditangani browser), jadi
+  //    window.location.search akan selalu kosong untuk bentuk ini -- perlu
+  //    diuraikan manual dari window.location.hash.
+  const hash = window.location.hash || "";
+  const tandaTanya = hash.indexOf("?");
+  if (tandaTanya === -1) return "";
+  return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("token") || "").trim();
 }
 
 async function initLengkapi() {
