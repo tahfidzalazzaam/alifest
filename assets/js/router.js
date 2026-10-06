@@ -32,7 +32,12 @@ const ROUTES = {
 
 function normalisasiHash() {
   const h = window.location.hash;
-  return h === "" || h === "#" ? "#/" : h;
+  if (h === "" || h === "#") return "#/";
+  // Buang bagian "?..." kalau ada (dipakai "#/lengkapi?token=..." -- lihat
+  // view-lengkapi.js) supaya tetap cocok dengan key di ROUTES di bawah,
+  // yang tidak menyertakan query string apa pun.
+  const tandaTanya = h.indexOf("?");
+  return tandaTanya === -1 ? h : h.slice(0, tandaTanya);
 }
 
 function setNavAktif(hash) {
@@ -323,14 +328,17 @@ window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 function halamanTanpaGerbangLomba() {
   const path = window.location.pathname.replace(/\/+$/, "");
   const hash = window.location.hash;
+  // Hash bisa berbentuk "#/lengkapi?token=..." (lihat view-lengkapi.js) --
+  // buang bagian "?..."-nya dulu sebelum dibandingkan supaya tetap dikenali.
+  const hashTanpaQuery = hash.indexOf("?") === -1 ? hash : hash.slice(0, hash.indexOf("?"));
   return (
-    path === "/admin" || hash === "#/admin" ||
-    path === "/adminbazar" || hash === "#/adminbazar" ||
-    path === "/adminprofil" || hash === "#/adminprofil" ||
-    path === "" || path === "/" || hash === "" || hash === "#" || hash === "#/" ||
-    path === "/bazar" || hash === "#/bazar" ||
-    path === "/daftar-bazar" || hash === "#/daftar-bazar" ||
-    path === "/lengkapi" || hash === "#/lengkapi"
+    path === "/admin" || hashTanpaQuery === "#/admin" ||
+    path === "/adminbazar" || hashTanpaQuery === "#/adminbazar" ||
+    path === "/adminprofil" || hashTanpaQuery === "#/adminprofil" ||
+    path === "" || path === "/" || hashTanpaQuery === "" || hashTanpaQuery === "#" || hashTanpaQuery === "#/" ||
+    path === "/bazar" || hashTanpaQuery === "#/bazar" ||
+    path === "/daftar-bazar" || hashTanpaQuery === "#/daftar-bazar" ||
+    path === "/lengkapi" || hashTanpaQuery === "#/lengkapi"
   );
 }
 
