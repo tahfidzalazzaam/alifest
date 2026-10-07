@@ -667,6 +667,30 @@ async function loadTabDenahBazar() {
       return Math.round(((derajat % 360) + 360) % 360);
     }
 
+    // Tulisan DI DALAM kotak stand diringkas jadi "<kode area>-<nomor>" (mis.
+    // "B-DA-07" -> "DA-7") supaya tidak kepotong/kekecilan di kotak yang
+    // ukurannya kecil -- kode LENGKAPnya (dengan awalan jenis A/B/C) tetap
+    // dipakai apa adanya di tempat lain (tooltip `title` lewat `kodeAsli`,
+    // tabel "📋 Tampilan Daftar", tab "Data Tenant", dll), cuma tampilan di
+    // kotak kanvas ini saja yang dipendekkan. Logika SAMA PERSIS dengan
+    // `labelRingkasKodeBazarPublik()` di `view-daftarbazar.js` (dipakai
+    // untuk kotak denah di form publik "/daftar-bazar") -- NAMA fungsinya
+    // sengaja dibedakan (`_Admin` di sini) karena kedua file sama-sama
+    // <script> klasik yang berbagi satu scope global (lihat catatan bug
+    // `PESAN_LUCU_BAZAR_TUTUP_TOTAL` kalau mau tahu kenapa ini wajib).
+    function labelRingkasKodeBazarAdmin(kode) {
+      const bagian = String(kode || "").split("-");
+      if (bagian.length >= 3) {
+        const nomor = parseInt(bagian[bagian.length - 1], 10);
+        return bagian.slice(1, -1).join("-") + "-" + (isNaN(nomor) ? bagian[bagian.length - 1] : nomor);
+      }
+      if (bagian.length === 2) {
+        const nomor = parseInt(bagian[1], 10);
+        return "DM-" + (isNaN(nomor) ? bagian[1] : nomor);
+      }
+      return kode;
+    }
+
     function buatKotak(opsi) {
       // `el` sendiri TIDAK diberi `overflow:hidden` (beda dari sebelumnya) --
       // supaya handle resize & handle rotasi yang posisinya ada di PINGGIR/LUAR
@@ -676,6 +700,12 @@ async function loadTabDenahBazar() {
       // memang `hidden`.
       const el = document.createElement("div");
       el.setAttribute("data-id", opsi.id);
+      // Tulisan di dalam kotak stand (opsi.label) sudah diringkas pemanggil
+      // jadi "<kode area>-<nomor>" (mis. "DA-7") -- `opsi.kodeAsli` (kalau
+      // ada) menyimpan kode LENGKAPNYA ("B-DA-07") buat ditaruh di tooltip
+      // `title`, supaya panitia tetap bisa lihat kode persis tanpa perlu
+      // tulisan di kotaknya sendiri jadi panjang/kepotong.
+      if (opsi.kodeAsli) el.title = opsi.kodeAsli;
       el.style.position = "absolute";
       el.style.left = opsi.x + "px";
       el.style.top = opsi.y + "px";
@@ -975,7 +1005,7 @@ async function loadTabDenahBazar() {
           rotasi: s.rotasi,
           warnaBg: s.tenant_id ? "#fde8e8" : warna,
           warnaTeks: s.tenant_id ? "#b91c1c" : "#ffffff",
-          label: s.kode, bisaResize: true
+          label: labelRingkasKodeBazarAdmin(s.kode), kodeAsli: s.kode, bisaResize: true
         });
         innerEl.appendChild(el);
         kotakElMap[s.id] = el;
