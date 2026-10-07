@@ -329,7 +329,7 @@ async function loadTabDenahBazar() {
   }
 
   const [{ data: standData, error }, { data: tenantData }, { data: elemenData, error: errorElemen }] = await Promise.all([
-    supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi").order("jenis").order("area").order("nomor"),
+    supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("area").order("nomor"),
     supabaseClient.from("bazar_tenant").select("id,nama_usaha,nomor_pendaftaran,status"),
     supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
   ]);
@@ -441,14 +441,26 @@ async function loadTabDenahBazar() {
     let perubahan = { stand: {}, elemen: {} };
 
     subEl.innerHTML =
-      '<p class="hint">Geser kotak untuk memindahkan lokasinya, tarik pojok kanan-bawah kotak untuk membesarkan/mengecilkan ukurannya (berlaku untuk kotak STAND maupun LABEL). Kode stand sendiri tetap tidak bisa diubah teksnya di sini -- klik sebuah LABEL bangunan/area (bukan menariknya) untuk mengedit teks, emoji, warna, atau menghapusnya.</p>' +
+      '<p class="hint">Geser kotak untuk memindahkan lokasinya, tarik pojok kanan-bawah kotak untuk membesarkan/mengecilkan ukurannya, atau tarik BULATAN KECIL di atas kotak untuk memutar/memiringkannya (berlaku untuk kotak STAND maupun LABEL). Kode stand sendiri tetap tidak bisa diubah teksnya di sini -- klik sebuah LABEL bangunan/area (bukan menariknya) untuk mengedit teks, emoji, warna, atau menghapusnya.</p>' +
       '<div class="submit-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
         '<button type="button" class="btn btn--primary" id="btn-simpan-denah-visual">💾 Simpan Tata Letak</button>' +
         '<button type="button" class="btn btn--ghost" id="btn-tambah-label-denah">➕ Tambah Kotak/Label</button>' +
         '<span class="hint" id="denah-visual-status" style="margin-left:6px;"></span>' +
       '</div>' +
-      '<div id="denah-visual-outer" style="width:100%;max-width:900px;overflow:hidden;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;">' +
-        '<div id="denah-visual-inner" style="position:relative;width:' + DENAH_CANVAS_W + 'px;height:' + DENAH_CANVAS_H + 'px;transform-origin:top left;"></div>' +
+      // `#denah-visual-pad` membungkus kanvas dengan jarak kosong di semua
+      // sisi (40px) -- supaya handle rotasi (mengambang di ATAS tiap kotak)
+      // & handle resize (di pojok kanan-bawah) milik kotak yang posisinya
+      // pas di pinggir kanvas TETAP punya tempat terlihat/bisa diklik,
+      // tidak terpotong kanvas atau tertutup tombol-tombol di atasnya.
+      // `#denah-visual-outer` SENGAJA `overflow:visible` (beda dari
+      // sebelumnya yang `hidden`) dengan alasan yang sama -- konsekuensinya,
+      // kotak yang digeser/diresize sampai sedikit melewati tepi kanvas akan
+      // terlihat "bocor" keluar garis putus-putus, itu sengaja dibiarkan
+      // (murni kosmetik) demi handle-nya tetap bisa dipakai.
+      '<div id="denah-visual-pad" style="padding:40px 20px 20px 20px;">' +
+        '<div id="denah-visual-outer" style="width:100%;max-width:900px;overflow:visible;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;">' +
+          '<div id="denah-visual-inner" style="position:relative;width:' + DENAH_CANVAS_W + 'px;height:' + DENAH_CANVAS_H + 'px;transform-origin:top left;"></div>' +
+        '</div>' +
       '</div>' +
       '<div id="denah-visual-panel"></div>';
 
@@ -480,7 +492,19 @@ async function loadTabDenahBazar() {
       return Math.max(8, Math.min(40, Math.min(w, h) / 3.4));
     }
 
+    // Sudut (derajat) dibulatkan ke bilangan bulat & dinormalkan ke rentang
+    // [0, 360) -- dipakai tiap kali rotasi baru dihitung/disimpan.
+    function normalisasiSudut(derajat) {
+      return Math.round(((derajat % 360) + 360) % 360);
+    }
+
     function buatKotak(opsi) {
+      // `el` sendiri TIDAK diberi `overflow:hidden` (beda dari sebelumnya) --
+      // supaya handle resize & handle rotasi yang posisinya ada di PINGGIR/LUAR
+      // kotak (pojok kanan-bawah, bulatan di atas kotak) tidak ikut terpotong.
+      // Pembatasan teks supaya tidak meluber keluar kotak sekarang jadi
+      // tanggung jawab `isiEl` (wrapper di dalamnya) yang overflow-nya
+      // memang `hidden`.
       const el = document.createElement("div");
       el.setAttribute("data-id", opsi.id);
       el.style.position = "absolute";
@@ -488,39 +512,45 @@ async function loadTabDenahBazar() {
       el.style.top = opsi.y + "px";
       el.style.width = opsi.w + "px";
       el.style.height = opsi.h + "px";
-      el.style.background = opsi.warnaBg;
-      el.style.color = opsi.warnaTeks;
-      el.style.border = "1.5px solid rgba(0,0,0,0.15)";
-      el.style.borderRadius = "6px";
-      el.style.display = "flex";
-      el.style.flexDirection = "column";
-      el.style.alignItems = "center";
-      el.style.justifyContent = "center";
-      el.style.fontSize = skalaFontKotak(opsi.w, opsi.h) + "px";
-      el.style.fontWeight = "700";
-      el.style.textAlign = "center";
       el.style.cursor = "grab";
       el.style.userSelect = "none";
       el.style.touchAction = "none";
-      el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.15)";
-      el.style.lineHeight = "1.15";
-      el.style.overflow = "hidden";
-      el.style.padding = "2px";
-      // `pointer-events:none` di label teks di dalamnya -- supaya elemen yang
-      // sebenarnya menerima klik/pointerdown SELALU `el` itu sendiri (bukan
-      // <span> teks di dalamnya), karena logika drag di bawah membedakan
-      // drag-kotak vs drag-handle-resize dengan membandingkan `e.target`.
+      el.style.transformOrigin = "50% 50%";
+
+      let rotasi = normalisasiSudut(opsi.rotasi || 0);
+      el.style.transform = "rotate(" + rotasi + "deg)";
+
+      const isiEl = document.createElement("div");
+      isiEl.style.position = "absolute";
+      isiEl.style.inset = "0";
+      isiEl.style.background = opsi.warnaBg;
+      isiEl.style.color = opsi.warnaTeks;
+      isiEl.style.border = "1.5px solid rgba(0,0,0,0.15)";
+      isiEl.style.borderRadius = "6px";
+      isiEl.style.display = "flex";
+      isiEl.style.flexDirection = "column";
+      isiEl.style.alignItems = "center";
+      isiEl.style.justifyContent = "center";
+      isiEl.style.fontSize = skalaFontKotak(opsi.w, opsi.h) + "px";
+      isiEl.style.fontWeight = "700";
+      isiEl.style.textAlign = "center";
+      isiEl.style.boxShadow = "0 2px 4px rgba(0,0,0,0.15)";
+      isiEl.style.lineHeight = "1.15";
+      isiEl.style.overflow = "hidden";
+      isiEl.style.padding = "2px";
+      isiEl.style.pointerEvents = "none"; // klik/drag selalu ditangkap `el`, bukan isinya
       // Sublabel (emoji) sengaja dalam satuan `em` (bukan px tetap) supaya
-      // ukurannya ikut skala `el.style.fontSize` otomatis -- tidak perlu
+      // ukurannya ikut skala `isiEl.style.fontSize` otomatis -- tidak perlu
       // dihitung ulang terpisah tiap kali kotak di-resize.
-      el.innerHTML =
-        (opsi.sublabel ? ('<span style="font-size:1.4em;pointer-events:none;">' + escapeHTMLBazarAdmin(opsi.sublabel) + '</span>') : "") +
-        '<span style="pointer-events:none;">' + escapeHTMLBazarAdmin(opsi.label) + '</span>';
+      isiEl.innerHTML =
+        (opsi.sublabel ? ('<span style="font-size:1.4em;">' + escapeHTMLBazarAdmin(opsi.sublabel) + '</span>') : "") +
+        '<span>' + escapeHTMLBazarAdmin(opsi.label) + '</span>';
+      el.appendChild(isiEl);
 
       let dragging = false, startX = 0, startY = 0, startPosX = opsi.x, startPosY = opsi.y;
 
       el.addEventListener("pointerdown", function (e) {
-        if (e.target !== el) return; // bukan drag kotak kalau yang diklik adalah handle resize anaknya
+        if (e.target !== el) return; // bukan drag kotak kalau yang diklik adalah handle resize/rotasi anaknya
         e.preventDefault();
         dragging = true;
         el.setPointerCapture(e.pointerId);
@@ -531,6 +561,10 @@ async function loadTabDenahBazar() {
       });
       el.addEventListener("pointermove", function (e) {
         if (!dragging) return;
+        // Menggeser kotak SELALU mengikuti arah mouse di layar apa adanya,
+        // TIDAK perlu dikoreksi sudut rotasi -- beda dari resize di bawah
+        // (lihat komentar di situ) karena menggeser cuma mengubah
+        // `left`/`top`, bukan menghitung ulang sisi kotak yang sudah miring.
         const dx = (e.clientX - startX) / scale;
         const dy = (e.clientY - startY) / scale;
         const baruX = Math.max(0, Math.min(DENAH_CANVAS_W - parseFloat(el.style.width), startPosX + dx));
@@ -551,13 +585,14 @@ async function loadTabDenahBazar() {
       if (opsi.bisaResize) {
         const handle = document.createElement("div");
         handle.style.position = "absolute";
-        handle.style.right = "0";
-        handle.style.bottom = "0";
+        handle.style.right = "-6px";
+        handle.style.bottom = "-6px";
         handle.style.width = "14px";
         handle.style.height = "14px";
-        handle.style.background = "rgba(0,0,0,0.3)";
+        handle.style.background = "#fff";
+        handle.style.border = "2px solid rgba(0,0,0,0.45)";
+        handle.style.borderRadius = "3px";
         handle.style.cursor = "nwse-resize";
-        handle.style.borderTopLeftRadius = "4px";
         handle.style.touchAction = "none";
         el.appendChild(handle);
 
@@ -572,15 +607,25 @@ async function loadTabDenahBazar() {
         });
         handle.addEventListener("pointermove", function (e) {
           if (!resizing) return;
-          const dx = (e.clientX - startX) / scale;
-          const dy = (e.clientY - startY) / scale;
-          const baruW = Math.max(30, startW + dx);
-          const baruH = Math.max(24, startH + dy);
+          // Kotak yang sudah diputar (rotasi != 0): pergeseran mouse di
+          // layar (dxLayar/dyLayar, SUMBU GLOBAL) harus diputar BALIK
+          // (-rotasi) dulu supaya jadi pergeseran di sumbu LOKAL kotak itu
+          // sendiri -- baru hasil itu yang dipakai menambah lebar/tinggi.
+          // Tanpa koreksi ini, menarik pojok kotak yang sedang miring akan
+          // terasa "salah arah" (lebar/tinggi berubah tidak sesuai arah
+          // tarikan mouse di layar).
+          const dxLayar = (e.clientX - startX) / scale;
+          const dyLayar = (e.clientY - startY) / scale;
+          const rad = -(rotasi * Math.PI / 180);
+          const dxLokal = dxLayar * Math.cos(rad) - dyLayar * Math.sin(rad);
+          const dyLokal = dxLayar * Math.sin(rad) + dyLayar * Math.cos(rad);
+          const baruW = Math.max(30, startW + dxLokal);
+          const baruH = Math.max(24, startH + dyLokal);
           el.style.width = baruW + "px";
           el.style.height = baruH + "px";
           // Tulisan di dalamnya ikut membesar/mengecil SAAT resize berlangsung
           // (bukan cuma setelah dilepas) supaya terasa langsung seperti Canva.
-          el.style.fontSize = skalaFontKotak(baruW, baruH) + "px";
+          isiEl.style.fontSize = skalaFontKotak(baruW, baruH) + "px";
         });
         handle.addEventListener("pointerup", function (e) {
           if (!resizing) return;
@@ -590,6 +635,71 @@ async function loadTabDenahBazar() {
           tandaiBerubah();
         });
       }
+
+      // -------- Handle ROTASI ala Canva: bulatan kecil mengambang di atas
+      // kotak, dihubungkan garis tipis -- digeser memutar seluruh kotak di
+      // sekeliling titik tengahnya sendiri. Dipasang untuk SEMUA kotak
+      // (stand maupun label), bukan cuma yang `bisaResize`.
+      const garisRotasi = document.createElement("div");
+      garisRotasi.style.position = "absolute";
+      garisRotasi.style.left = "50%";
+      garisRotasi.style.top = "-22px";
+      garisRotasi.style.width = "1px";
+      garisRotasi.style.height = "20px";
+      garisRotasi.style.background = "rgba(0,0,0,0.35)";
+      garisRotasi.style.transform = "translateX(-50%)";
+      garisRotasi.style.pointerEvents = "none";
+      el.appendChild(garisRotasi);
+
+      const handleRotasi = document.createElement("div");
+      handleRotasi.style.position = "absolute";
+      handleRotasi.style.left = "50%";
+      handleRotasi.style.top = "-30px";
+      handleRotasi.style.width = "14px";
+      handleRotasi.style.height = "14px";
+      handleRotasi.style.marginLeft = "-7px";
+      handleRotasi.style.borderRadius = "50%";
+      handleRotasi.style.background = "#fff";
+      handleRotasi.style.border = "2px solid rgba(0,0,0,0.45)";
+      handleRotasi.style.cursor = "grab";
+      handleRotasi.style.touchAction = "none";
+      el.appendChild(handleRotasi);
+
+      let memutar = false;
+      handleRotasi.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        memutar = true;
+        handleRotasi.setPointerCapture(e.pointerId);
+        handleRotasi.style.cursor = "grabbing";
+      });
+      handleRotasi.addEventListener("pointermove", function (e) {
+        if (!memutar) return;
+        // Titik tengah kotak di koordinat LAYAR (bukan koordinat kanvas
+        // virtual) -- dipakai menghitung sudut dari tengah kotak ke posisi
+        // mouse saat ini. `getBoundingClientRect()` selalu mengembalikan
+        // kotak pembungkus (axis-aligned) dari bentuk yang SUDAH diputar,
+        // tapi titik TENGAHNYA tidak pernah bergeser akibat rotasi di
+        // sekeliling `transform-origin: 50% 50%` -- jadi aman dipanggil
+        // ulang tiap gerakan mouse walau kotaknya sendiri sedang miring.
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const sudutLayar = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI;
+        // Handle beristirahat di posisi "12 arah jam" (tepat di atas kotak)
+        // saat rotasi = 0 -- posisi itu sesuai sudut layar -90°, jadi
+        // ditambah 90° supaya rotasi = 0 saat mouse tepat di atas kotak.
+        rotasi = normalisasiSudut(sudutLayar + 90);
+        el.style.transform = "rotate(" + rotasi + "deg)";
+      });
+      handleRotasi.addEventListener("pointerup", function (e) {
+        if (!memutar) return;
+        memutar = false;
+        handleRotasi.style.cursor = "grab";
+        const bucketRotasi = opsi.tipe === "stand" ? perubahan.stand : perubahan.elemen;
+        bucketRotasi[opsi.id] = Object.assign({}, bucketRotasi[opsi.id], { rotasi: rotasi });
+        tandaiBerubah();
+      });
 
       if (opsi.tipe === "elemen") {
         el.addEventListener("click", function (e) {
@@ -607,6 +717,7 @@ async function loadTabDenahBazar() {
         innerEl.appendChild(buatKotak({
           id: elm.id, tipe: "elemen",
           x: elm.pos_x, y: elm.pos_y, w: elm.lebar, h: elm.tinggi,
+          rotasi: elm.rotasi,
           warnaBg: elm.warna_bg, warnaTeks: elm.warna_teks,
           label: elm.teks, sublabel: elm.emoji, bisaResize: true
         }));
@@ -617,6 +728,7 @@ async function loadTabDenahBazar() {
           id: s.id, tipe: "stand",
           x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
           w: s.lebar || 54, h: s.tinggi || 40,
+          rotasi: s.rotasi,
           warnaBg: s.tenant_id ? "#fde8e8" : warna,
           warnaTeks: s.tenant_id ? "#b91c1c" : "#ffffff",
           label: s.kode, bisaResize: true
