@@ -8,6 +8,16 @@
 // fungsi RPC, status buka/tutup, dan kuotanya sendiri-sendiri (lihat migrasi
 // 0030). Satu halaman form sederhana (tidak ada langkah/wizard seperti form
 // lomba, karena datanya lebih sedikit & seragam untuk semua tenant).
+//
+// Sejak migrasi 0037: kategori stand teks bebas (Kecil/Sedang/Besar) DIGANTI
+// TOTAL oleh "Denah Stand" -- 3 JENIS baku (A/B/C, lihat
+// `bazar_settings.jenis_stand_info`) yang MASING-MASING punya AREA & KUOTA
+// PASTI (tabel `bazar_stand`, satu baris per petak stand fisik). Tenant
+// pilih SATU jenis dulu, lalu pilih SATU ATAU LEBIH lokasi/kode stand dari
+// jenis itu (boleh sewa lebih dari satu stand sekaligus, asal jenisnya
+// sama -- mau jenis lain, daftar lagi terpisah). Belum ada gambar denah
+// visualnya (menyusul kalau panitia sudah punya gambar kasarnya) -- untuk
+// sekarang dipilih lewat daftar/grid kode per area.
 
 const DAFTAR_BAZAR_TEMPLATE = `
 <main class="form-page container">
@@ -19,7 +29,6 @@ const DAFTAR_BAZAR_TEMPLATE = `
   <div class="form-shell">
     <div class="notice" id="bazar-info-biaya" style="display:none;"></div>
     <div class="notice" id="bazar-info-rekening" style="display:none;"></div>
-    <div class="notice" id="bazar-info-kuota" style="display:none;"></div>
 
     <form id="form-bazar" novalidate>
 
@@ -38,10 +47,17 @@ const DAFTAR_BAZAR_TEMPLATE = `
           <div class="form-error">Jenis produk/dagangan wajib diisi.</div>
         </div>
 
-        <div class="field" id="bazar-kategori-field">
-          <label>Kategori/Ukuran Stand</label>
-          <div class="lomba-choices" id="bazar-kategori-choices"></div>
-          <div class="form-error" id="bazar-kategori-error" style="margin-top:10px;">Pilih salah satu kategori stand.</div>
+        <div class="field" id="bazar-jenis-field">
+          <label>Pilih Jenis Stand</label>
+          <div class="lomba-choices" id="bazar-jenis-choices"></div>
+          <div class="form-error" id="bazar-jenis-error" style="margin-top:10px;">Pilih salah satu jenis stand.</div>
+        </div>
+
+        <div class="field" id="bazar-lokasi-field" style="display:none;">
+          <label>Pilih Lokasi Stand <span style="font-weight:400;">(boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus)</span></label>
+          <div id="bazar-lokasi-areas"></div>
+          <p class="hint" id="bazar-lokasi-total" style="margin-top:8px;"></p>
+          <div class="form-error" id="bazar-lokasi-error" style="margin-top:10px;">Pilih minimal satu lokasi stand.</div>
         </div>
       </fieldset>
 
@@ -78,7 +94,7 @@ const DAFTAR_BAZAR_TEMPLATE = `
 
         <div class="field" id="bazar-bukti-bayar-wrap">
           <label id="bazar-bukti-bayar-label">Bukti Pembayaran Sewa Stand</label>
-          <p class="hint" style="margin-top:-4px;" id="bazar-bukti-bayar-hint">Transfer biaya sewa stand sesuai kategori yang dipilih, lalu unggah screenshot/foto bukti transfernya di sini.</p>
+          <p class="hint" style="margin-top:-4px;" id="bazar-bukti-bayar-hint">Transfer biaya sewa stand sesuai jenis & jumlah lokasi yang dipilih di atas, lalu unggah screenshot/foto bukti transfernya di sini.</p>
           <div class="upload-field" id="upload-bazar-bukti">
             <label class="upload-trigger" for="bazarFileBukti">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
             <input type="file" id="bazarFileBukti" name="bazarFileBukti" accept=".jpg,.jpeg,.png,.pdf" />
@@ -127,32 +143,29 @@ const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
   "Mode Sage lagi aktif: panitia sedang menyerap cakra alam demi persiapan Bazar yang maksimal. Coba mampir lagi nanti. 🍃"
 ];
 
+// Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
+const URUTAN_JENIS_STAND = ["A", "B", "C"];
+
+function formatRupiahDaftarBazar(angka) {
+  return "Rp" + Number(angka || 0).toLocaleString("id-ID");
+}
+
 function initDaftarBazar() {
   const form = document.getElementById("form-bazar");
-  const kategoriChoicesEl = document.getElementById("bazar-kategori-choices");
-  const kategoriErrorEl = document.getElementById("bazar-kategori-error");
+  const jenisChoicesEl = document.getElementById("bazar-jenis-choices");
+  const jenisErrorEl = document.getElementById("bazar-jenis-error");
+  const lokasiFieldEl = document.getElementById("bazar-lokasi-field");
+  const lokasiAreasEl = document.getElementById("bazar-lokasi-areas");
+  const lokasiTotalEl = document.getElementById("bazar-lokasi-total");
+  const lokasiErrorEl = document.getElementById("bazar-lokasi-error");
   const btnSubmit = document.getElementById("btn-submit-bazar");
   const resultPanel = document.getElementById("result-panel-bazar");
   const regNumberEl = document.getElementById("reg-number-bazar");
 
-  let kategoriList = [];
+  let jenisStandInfo = {};
+  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id}
+  let jenisTerpilih = null;
   let pendaftaranDibuka = true;
-  let kuotaTotal = null;
-
-  /* ---------------- Pilihan kategori stand (dari bazar_settings.kategori_list) ---------------- */
-  function renderKategoriChoices() {
-    kategoriChoicesEl.innerHTML = kategoriList.map(function (k, i) {
-      return (
-        '<div class="lomba-choice">' +
-          '<label>' +
-            '<input type="radio" name="bazarKategori" value="' + escapeHTMLDaftarBazar(k) + '" ' + (i === 0 ? "" : "") + ' />' +
-            '<span class="lomba-choice__icon">🏪</span>' +
-            '<span class="lomba-choice__text"><strong>' + escapeHTMLDaftarBazar(k) + '</strong></span>' +
-          '</label>' +
-        '</div>'
-      );
-    }).join("");
-  }
 
   function escapeHTMLDaftarBazar(teks) {
     const div = document.createElement("div");
@@ -160,11 +173,88 @@ function initDaftarBazar() {
     return div.innerHTML;
   }
 
-  /* ---------------- Muat pengaturan bazar (buka/tutup, kategori, kuota, info biaya/rekening) ---------------- */
+  /* ---------------- Pilihan Jenis Stand (A/B/C, dari bazar_settings.jenis_stand_info) ---------------- */
+  function renderJenisChoices() {
+    jenisChoicesEl.innerHTML = URUTAN_JENIS_STAND.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
+      const info = jenisStandInfo[j];
+      const standJenisIni = standList.filter(function (s) { return s.jenis === j; });
+      const sisa = standJenisIni.filter(function (s) { return !s.tenant_id; }).length;
+      const penuh = sisa === 0;
+      return (
+        '<div class="lomba-choice' + (penuh ? " is-disabled" : "") + '">' +
+          '<label>' +
+            '<input type="radio" name="bazarJenis" value="' + j + '"' + (penuh ? " disabled" : "") + ' />' +
+            '<span class="lomba-choice__icon">🏪</span>' +
+            '<span class="lomba-choice__text"><strong>' + escapeHTMLDaftarBazar(info.nama || ("Jenis " + j)) + '</strong>' +
+              '<br/>' + escapeHTMLDaftarBazar(info.ukuran || "-") + ' · ' + formatRupiahDaftarBazar(info.harga) +
+              '<br/>' + (penuh ? '<span style="color:#b42318;">Penuh, tidak ada stand tersisa</span>' : ('Sisa ' + sisa + ' dari ' + standJenisIni.length + ' stand')) +
+            '</span>' +
+          '</label>' +
+        '</div>'
+      );
+    }).join("");
+
+    jenisChoicesEl.querySelectorAll('input[name="bazarJenis"]').forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        jenisTerpilih = radio.value;
+        renderLokasiPicker();
+      });
+    });
+  }
+
+  /* ---------------- Pilihan Lokasi Stand (checkbox per kode, dikelompokkan per area) ---------------- */
+  function renderLokasiPicker() {
+    if (!jenisTerpilih) {
+      lokasiFieldEl.style.display = "none";
+      return;
+    }
+    lokasiFieldEl.style.display = "block";
+
+    const standJenisIni = standList.filter(function (s) { return s.jenis === jenisTerpilih; });
+    const areaList = [];
+    standJenisIni.forEach(function (s) {
+      if (areaList.indexOf(s.area) === -1) areaList.push(s.area);
+    });
+
+    lokasiAreasEl.innerHTML = areaList.map(function (area) {
+      const standArea = standJenisIni.filter(function (s) { return s.area === area; }).sort(function (a, b) { return a.nomor - b.nomor; });
+      return (
+        '<div class="bazar-lokasi-area" style="margin-bottom:14px;">' +
+          '<p class="hint" style="margin:0 0 6px;font-weight:700;color:#1C2541;">' + escapeHTMLDaftarBazar(area) + '</p>' +
+          '<div class="bazar-lokasi-grid" style="display:flex;flex-wrap:wrap;gap:8px;">' +
+            standArea.map(function (s) {
+              const terisi = !!s.tenant_id;
+              return (
+                '<label class="bazar-lokasi-chip' + (terisi ? " is-taken" : "") + '" style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1.5px solid ' + (terisi ? "#F3E9CE" : "#F6E3A8") + ';border-radius:8px;cursor:' + (terisi ? "not-allowed" : "pointer") + ';background:' + (terisi ? "#F6F3EA" : "#FFFFFF") + ';color:' + (terisi ? "#A9A38C" : "#1C2541") + ';font-size:13.5px;font-weight:600;">' +
+                  '<input type="checkbox" name="bazarLokasi" value="' + escapeHTMLDaftarBazar(s.kode) + '"' + (terisi ? " disabled" : "") + ' style="margin:0;" />' +
+                  escapeHTMLDaftarBazar(s.kode) + (terisi ? " (Terisi)" : "") +
+                '</label>'
+              );
+            }).join("") +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+
+    lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]').forEach(function (cb) {
+      cb.addEventListener("change", perbaruiTotalLokasi);
+    });
+    perbaruiTotalLokasi();
+  }
+
+  function perbaruiTotalLokasi() {
+    const dipilih = lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked').length;
+    const harga = jenisTerpilih && jenisStandInfo[jenisTerpilih] ? (jenisStandInfo[jenisTerpilih].harga || 0) : 0;
+    lokasiTotalEl.textContent = dipilih === 0
+      ? "Belum ada lokasi dipilih."
+      : (dipilih + " stand dipilih × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
+  }
+
+  /* ---------------- Muat pengaturan bazar (buka/tutup, jenis & denah stand, info biaya/rekening) ---------------- */
   async function muatPengaturanBazar() {
-    const [{ data: settings }, { data: jumlahTerisi }, { data: sesi }] = await Promise.all([
-      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
-      supabaseClient.rpc("bazar_jumlah_terisi"),
+    const [{ data: settings }, { data: standData }, { data: sesi }] = await Promise.all([
+      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id").order("jenis").order("nomor"),
       supabaseClient.auth.getSession()
     ]);
 
@@ -201,14 +291,15 @@ function initDaftarBazar() {
     }
 
     pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
-    kategoriList = (settings && Array.isArray(settings.kategori_list) && settings.kategori_list.length)
-      ? settings.kategori_list
-      : ["Kecil", "Sedang", "Besar"];
-    kuotaTotal = settings ? settings.kuota_total : null;
-    const terisi = typeof jumlahTerisi === "number" ? jumlahTerisi : 0;
-    const kuotaPenuh = kuotaTotal !== null && kuotaTotal !== undefined && terisi >= kuotaTotal;
+    jenisStandInfo = (settings && settings.jenis_stand_info) || {};
+    standList = standData || [];
+    // Kuota sekarang per jenis/area, otomatis dibatasi oleh jumlah fisik
+    // baris `bazar_stand` (migrasi 0037) -- "penuh total" cuma kalau SEMUA
+    // jenis sudah tidak ada sisa sama sekali (dicek lewat renderJenisChoices,
+    // yang menonaktifkan radio tiap jenis yang sudah penuh satu per satu).
+    const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
 
-    renderKategoriChoices();
+    renderJenisChoices();
 
     const infoBiayaEl = document.getElementById("bazar-info-biaya");
     if (settings && settings.info_biaya) {
@@ -222,25 +313,16 @@ function initDaftarBazar() {
       infoRekeningEl.style.display = "block";
     }
 
-    const infoKuotaEl = document.getElementById("bazar-info-kuota");
-    if (kuotaTotal !== null && kuotaTotal !== undefined) {
-      infoKuotaEl.textContent = kuotaPenuh
-        ? "🚫 Kuota stand bazar sudah penuh (" + terisi + "/" + kuotaTotal + ")."
-        : "📊 Sisa kuota stand: " + Math.max(kuotaTotal - terisi, 0) + " dari " + kuotaTotal + ".";
-      infoKuotaEl.className = "notice" + (kuotaPenuh ? " notice--error" : "");
-      infoKuotaEl.style.display = "block";
-    }
-
-    if (!pendaftaranDibuka || kuotaPenuh) {
+    if (!pendaftaranDibuka || semuaPenuh) {
       const shell = document.querySelector(".form-shell");
       const pesan = !pendaftaranDibuka
         ? "Mohon maaf, pendaftaran stand/tenant bazar ALIF 5.0 sedang tidak dibuka sementara oleh panitia. Silakan cek kembali nanti atau hubungi panitia untuk informasi lebih lanjut."
-        : "Mohon maaf, kuota stand bazar ALIF 5.0 sudah penuh. Silakan hubungi panitia untuk informasi lebih lanjut.";
+        : "Mohon maaf, seluruh stand bazar ALIF 5.0 (semua jenis) sudah penuh terisi. Silakan hubungi panitia untuk informasi lebih lanjut.";
       if (shell) {
         shell.innerHTML =
           '<div style="text-align:center;padding:20px 0;">' +
             '<div style="font-size:2.4rem;margin-bottom:12px;">' + (!pendaftaranDibuka ? "🔒" : "🚫") + '</div>' +
-            '<h2>' + (!pendaftaranDibuka ? "Pendaftaran Bazar Sedang Ditutup" : "Kuota Stand Penuh") + '</h2>' +
+            '<h2>' + (!pendaftaranDibuka ? "Pendaftaran Bazar Sedang Ditutup" : "Stand Penuh") + '</h2>' +
             '<p>' + pesan + '</p>' +
             '<p><a href="#/bazar" class="btn btn--ghost">Kembali ke halaman Bazar</a></p>' +
           '</div>';
@@ -346,9 +428,13 @@ function initDaftarBazar() {
       if (!ok) valid = false;
     });
 
-    const kategoriChecked = kategoriChoicesEl.querySelector('input[name="bazarKategori"]:checked');
-    kategoriErrorEl.style.display = kategoriChecked ? "none" : "block";
-    if (!kategoriChecked) valid = false;
+    const jenisChecked = jenisChoicesEl.querySelector('input[name="bazarJenis"]:checked');
+    jenisErrorEl.style.display = jenisChecked ? "none" : "block";
+    if (!jenisChecked) valid = false;
+
+    const lokasiChecked = jenisChecked ? lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked') : [];
+    lokasiErrorEl.style.display = (jenisChecked && lokasiChecked.length === 0) ? "block" : "none";
+    if (jenisChecked && lokasiChecked.length === 0) valid = false;
 
     const fotoInput = document.getElementById("bazarFileFoto");
     const fotoOk = fotoInput.files && fotoInput.files.length > 0;
@@ -370,7 +456,7 @@ function initDaftarBazar() {
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     if (!validateForm()) {
-      const firstError = form.querySelector(".has-error, #bazar-kategori-error[style*='block']");
+      const firstError = form.querySelector(".has-error, #bazar-jenis-error[style*='block'], #bazar-lokasi-error[style*='block']");
       if (firstError) firstError.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
@@ -380,7 +466,8 @@ function initDaftarBazar() {
 
     const fotoList = Array.from(document.getElementById("bazarFileFoto").files || []);
     const fileBukti = document.getElementById("bazarFileBukti").files[0];
-    const kategoriChecked = kategoriChoicesEl.querySelector('input[name="bazarKategori"]:checked');
+    const jenisChecked = jenisChoicesEl.querySelector('input[name="bazarJenis"]:checked');
+    const kodeDipilih = Array.from(lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked')).map(function (cb) { return cb.value; });
 
     Promise.all([
       Promise.all(fotoList.map(function (f, i) { return uploadKeStorageBazar(f, "foto-produk-" + (i + 1)); })),
@@ -392,7 +479,8 @@ function initDaftarBazar() {
           p_jenis_produk: document.getElementById("bazarJenisProduk").value.trim(),
           p_nama_penanggung_jawab: document.getElementById("bazarPenanggungJawab").value.trim(),
           p_whatsapp: document.getElementById("bazarWhatsapp").value.trim(),
-          p_kategori_stand: kategoriChecked ? kategoriChecked.value : "",
+          p_jenis_stand: jenisChecked ? jenisChecked.value : "",
+          p_kode_stand: kodeDipilih,
           p_url_foto_produk: hasil[0],
           p_url_bukti_bayar: hasil[1]
         });
@@ -406,9 +494,14 @@ function initDaftarBazar() {
           resultPanel.classList.add("is-visible");
           resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
+          // Salah satu stand yang dipilih baru saja diambil pendaftar lain
+          // (lihat gating "for update" di submit_bazar, migrasi 0037) --
+          // muat ulang daftar denah supaya status terisi/tersedia langsung
+          // sinkron, bukan cuma tampil alert generik.
           alert("Pendaftaran gagal: " + (data.message || "Terjadi kesalahan, coba lagi."));
           btnSubmit.disabled = false;
           btnSubmit.textContent = "Kirim Pendaftaran Bazar";
+          muatPengaturanBazar();
         }
       })
       .catch(function (err) {
