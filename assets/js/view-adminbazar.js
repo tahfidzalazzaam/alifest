@@ -440,8 +440,23 @@ async function loadTabDenahBazar() {
     // database saat tombol "Simpan Tata Letak" diklik.
     let perubahan = { stand: {}, elemen: {} };
 
+    // -------- Seleksi berganda ala Canva --------
+    // `selectedIds`: id-id kotak (stand ATAU label) yang sedang terpilih.
+    // Diisi lewat shift+klik (tambah/lepas satu-satu) atau dengan men-drag
+    // persegi seleksi ("marquee") di area kanvas yang kosong. Kalau isinya
+    // lebih dari satu, men-drag salah satu kotak yang terpilih memindahkan
+    // SEMUA kotak terpilih sekaligus, dan muncul kotak garis putus-putus
+    // (`#denah-group-overlay`) membungkus semuanya dengan SATU handle resize
+    // di pojok kanan-bawahnya untuk membesarkan/mengecilkan semuanya
+    // sekaligus secara proporsional.
+    // `kotakElMap`: id -> elemen `<div>` kotaknya di DOM saat ini -- dipakai
+    // membaca posisi/ukuran TERKINI (termasuk yang belum disimpan) tanpa
+    // perlu query ulang ke `standList`/`elemenList` yang bisa sudah basi.
+    let selectedIds = new Set();
+    let kotakElMap = {};
+
     subEl.innerHTML =
-      '<p class="hint">Geser kotak untuk memindahkan lokasinya, tarik pojok kanan-bawah kotak untuk membesarkan/mengecilkan ukurannya, atau tarik BULATAN KECIL di atas kotak untuk memutar/memiringkannya (berlaku untuk kotak STAND maupun LABEL). Kode stand sendiri tetap tidak bisa diubah teksnya di sini -- klik sebuah LABEL bangunan/area (bukan menariknya) untuk mengedit teks, emoji, warna, atau menghapusnya.</p>' +
+      '<p class="hint">Geser kotak untuk memindahkan lokasinya, tarik pojok kanan-bawah kotak untuk membesarkan/mengecilkan ukurannya, atau tarik BULATAN KECIL di atas kotak untuk memutar/memiringkannya (berlaku untuk kotak STAND maupun LABEL). Tahan <b>Shift</b> sambil klik untuk memilih BEBERAPA kotak sekaligus (atau tarik persegi di area kanvas yang kosong) -- kotak yang terpilih bisa digeser/dibesarkan-kecilkan BERSAMAAN. Kode stand sendiri tetap tidak bisa diubah teksnya di sini -- klik sebuah LABEL bangunan/area (bukan menariknya, dan tanpa Shift) untuk mengedit teks, emoji, warna, atau menghapusnya.</p>' +
       '<div class="submit-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
         '<button type="button" class="btn btn--primary" id="btn-simpan-denah-visual">💾 Simpan Tata Letak</button>' +
         '<button type="button" class="btn btn--ghost" id="btn-tambah-label-denah">➕ Tambah Kotak/Label</button>' +
@@ -479,6 +494,160 @@ async function loadTabDenahBazar() {
     function tandaiBerubah() {
       statusEl.textContent = "Ada perubahan belum disimpan.";
       statusEl.style.color = "#b45309";
+    }
+
+    // Baca posisi/ukuran TERKINI sebuah kotak langsung dari DOM-nya (bukan
+    // dari `standList`/`elemenList` yang bisa sudah basi kalau kotak itu
+    // baru saja digeser/diresize tapi belum disimpan).
+    function rectVirtual(id) {
+      const el = kotakElMap[id];
+      if (!el) return null;
+      return {
+        x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+        w: parseFloat(el.style.width), h: parseFloat(el.style.height)
+      };
+    }
+
+    function duaKotakBertumpuk(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    // Tambah/lepas outline biru di kotak yang id-nya ada di `selectedIds` --
+    // dipanggil tiap kali seleksi berubah ATAU tiap kali `gambarSemua()`
+    // membangun ulang seluruh kotak dari awal (supaya seleksi tidak hilang
+    // begitu saja setelah menambah/menghapus label, mis.).
+    function terapkanSeleksiVisual() {
+      Object.keys(kotakElMap).forEach(function (id) {
+        const el = kotakElMap[id];
+        el.style.outline = selectedIds.has(id) ? "2.5px solid #2b6cff" : "none";
+        el.style.outlineOffset = selectedIds.has(id) ? "2px" : "0";
+      });
+    }
+
+    // Kotak pembungkus garis putus-putus biru di sekeliling SEMUA kotak yang
+    // terpilih (muncul hanya kalau terpilih lebih dari satu) -- punya SATU
+    // handle resize di pojok kanan-bawahnya untuk membesarkan/mengecilkan
+    // semua kotak terpilih sekaligus secara proporsional. `pointer-events`
+    // kotak pembungkus ini sendiri SENGAJA `none` (supaya klik/drag ke kotak
+    // di baliknya tetap tembus ke kotak itu seperti biasa), kecuali pada
+    // handle resize-nya yang `auto`.
+    let overlayGrupEl = null;
+    let handleGrupEl = null;
+
+    function pastikanOverlayGrup() {
+      if (overlayGrupEl) return;
+      overlayGrupEl = document.createElement("div");
+      overlayGrupEl.style.position = "absolute";
+      overlayGrupEl.style.border = "2px dashed #2b6cff";
+      overlayGrupEl.style.borderRadius = "4px";
+      overlayGrupEl.style.pointerEvents = "none";
+      overlayGrupEl.style.zIndex = "40";
+
+      handleGrupEl = document.createElement("div");
+      handleGrupEl.style.position = "absolute";
+      handleGrupEl.style.right = "-8px";
+      handleGrupEl.style.bottom = "-8px";
+      handleGrupEl.style.width = "16px";
+      handleGrupEl.style.height = "16px";
+      handleGrupEl.style.background = "#2b6cff";
+      handleGrupEl.style.border = "2px solid #fff";
+      handleGrupEl.style.borderRadius = "4px";
+      handleGrupEl.style.cursor = "nwse-resize";
+      handleGrupEl.style.touchAction = "none";
+      handleGrupEl.style.pointerEvents = "auto";
+      overlayGrupEl.appendChild(handleGrupEl);
+
+      let resizingGrup = false, startX = 0, startY = 0;
+      let kotakAwal = {}; // id -> {x,y,w,h} di awal drag
+      let boundAwal = null; // {x,y,w,h} kotak pembungkus di awal drag
+
+      handleGrupEl.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        resizingGrup = true;
+        handleGrupEl.setPointerCapture(e.pointerId);
+        startX = e.clientX; startY = e.clientY;
+        boundAwal = hitungBoundingBoxTerpilih();
+        kotakAwal = {};
+        selectedIds.forEach(function (id) { kotakAwal[id] = rectVirtual(id); });
+      });
+      handleGrupEl.addEventListener("pointermove", function (e) {
+        if (!resizingGrup || !boundAwal) return;
+        const dx = (e.clientX - startX) / scale;
+        const dy = (e.clientY - startY) / scale;
+        const bw = Math.max(40, boundAwal.w + dx);
+        const bh = Math.max(30, boundAwal.h + dy);
+        const skalaX = bw / boundAwal.w;
+        const skalaY = bh / boundAwal.h;
+
+        selectedIds.forEach(function (id) {
+          const r = kotakAwal[id];
+          const el = kotakElMap[id];
+          if (!r || !el) return;
+          const baruX = boundAwal.x + (r.x - boundAwal.x) * skalaX;
+          const baruY = boundAwal.y + (r.y - boundAwal.y) * skalaY;
+          const baruW = Math.max(20, r.w * skalaX);
+          const baruH = Math.max(16, r.h * skalaY);
+          el.style.left = baruX + "px";
+          el.style.top = baruY + "px";
+          el.style.width = baruW + "px";
+          el.style.height = baruH + "px";
+          const isiEl = el.firstElementChild;
+          if (isiEl) isiEl.style.fontSize = skalaFontKotak(baruW, baruH) + "px";
+        });
+
+        overlayGrupEl.style.left = boundAwal.x + "px";
+        overlayGrupEl.style.top = boundAwal.y + "px";
+        overlayGrupEl.style.width = bw + "px";
+        overlayGrupEl.style.height = bh + "px";
+      });
+      handleGrupEl.addEventListener("pointerup", function (e) {
+        if (!resizingGrup) return;
+        resizingGrup = false;
+        selectedIds.forEach(function (id) {
+          const el = kotakElMap[id];
+          if (!el) return;
+          const idTipe = standList.some(function (s) { return s.id === id; }) ? "stand" : "elemen";
+          const bucket = idTipe === "stand" ? perubahan.stand : perubahan.elemen;
+          bucket[id] = Object.assign({}, bucket[id], {
+            pos_x: Math.round(parseFloat(el.style.left)), pos_y: Math.round(parseFloat(el.style.top)),
+            lebar: Math.round(parseFloat(el.style.width)), tinggi: Math.round(parseFloat(el.style.height))
+          });
+        });
+        tandaiBerubah();
+      });
+
+      innerEl.appendChild(overlayGrupEl);
+    }
+
+    function hitungBoundingBoxTerpilih() {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      selectedIds.forEach(function (id) {
+        const r = rectVirtual(id);
+        if (!r) return;
+        minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+        maxX = Math.max(maxX, r.x + r.w); maxY = Math.max(maxY, r.y + r.h);
+      });
+      if (minX === Infinity) return null;
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+
+    function perbaruiOverlayGrup() {
+      if (selectedIds.size <= 1) {
+        if (overlayGrupEl) overlayGrupEl.style.display = "none";
+        return;
+      }
+      pastikanOverlayGrup();
+      const b = hitungBoundingBoxTerpilih();
+      if (!b) { overlayGrupEl.style.display = "none"; return; }
+      overlayGrupEl.style.display = "block";
+      // Beri sedikit jarak (6px) di sekeliling bounding box asli supaya
+      // garis putus-putusnya tidak menempel pas di tepi kotak-kotak di
+      // dalamnya -- murni kosmetik.
+      overlayGrupEl.style.left = (b.x - 6) + "px";
+      overlayGrupEl.style.top = (b.y - 6) + "px";
+      overlayGrupEl.style.width = (b.w + 12) + "px";
+      overlayGrupEl.style.height = (b.h + 12) + "px";
     }
 
     // Ukuran tulisan di dalam kotak ikut membesar/mengecil mengikuti ukuran
@@ -548,16 +717,51 @@ async function loadTabDenahBazar() {
       el.appendChild(isiEl);
 
       let dragging = false, startX = 0, startY = 0, startPosX = opsi.x, startPosY = opsi.y;
+      // Posisi AWAL semua kotak yang ikut digeser bersama kotak ini (anggota
+      // grup terpilih kalau lebih dari satu sedang terpilih, atau cuma kotak
+      // ini sendiri) -- dicatat di awal drag (pointerdown), dipakai terus
+      // selama pointermove supaya tiap kotak bergerak dengan jarak (dx, dy)
+      // yang SAMA PERSIS, bukan dihitung ulang dari posisi sekarang tiap
+      // event (yang bisa menumpuk galat pembulatan).
+      let posisiAwalGrup = {};
 
       el.addEventListener("pointerdown", function (e) {
         if (e.target !== el) return; // bukan drag kotak kalau yang diklik adalah handle resize/rotasi anaknya
         e.preventDefault();
+
+        if (e.shiftKey) {
+          // Shift+klik CUMA mengubah seleksi (tambah/lepas kotak ini dari
+          // grup terpilih) -- tidak langsung memulai drag, supaya orang bisa
+          // memilih beberapa kotak dulu tanpa sengaja menggesernya.
+          if (selectedIds.has(opsi.id)) selectedIds.delete(opsi.id);
+          else selectedIds.add(opsi.id);
+          terapkanSeleksiVisual();
+          perbaruiOverlayGrup();
+          return;
+        }
+
+        // Klik biasa (tanpa Shift): kalau kotak ini sudah bagian dari grup
+        // yang sedang terpilih (lebih dari satu kotak), pertahankan seluruh
+        // grup itu supaya bisa langsung digeser bersama -- kalau bukan,
+        // seleksi direset jadi cuma kotak ini sendiri.
+        if (!selectedIds.has(opsi.id) || selectedIds.size <= 1) {
+          selectedIds = new Set([opsi.id]);
+          terapkanSeleksiVisual();
+          perbaruiOverlayGrup();
+        }
+
         dragging = true;
         el.setPointerCapture(e.pointerId);
         startX = e.clientX; startY = e.clientY;
         startPosX = parseFloat(el.style.left); startPosY = parseFloat(el.style.top);
         el.style.cursor = "grabbing";
         el.style.zIndex = "50";
+
+        posisiAwalGrup = {};
+        selectedIds.forEach(function (id) {
+          const r = rectVirtual(id);
+          if (r) posisiAwalGrup[id] = r;
+        });
       });
       el.addEventListener("pointermove", function (e) {
         if (!dragging) return;
@@ -567,6 +771,24 @@ async function loadTabDenahBazar() {
         // `left`/`top`, bukan menghitung ulang sisi kotak yang sudah miring.
         const dx = (e.clientX - startX) / scale;
         const dy = (e.clientY - startY) / scale;
+
+        if (selectedIds.size > 1 && selectedIds.has(opsi.id)) {
+          // Lebih dari satu kotak terpilih & kotak ini salah satunya --
+          // geser SEMUA anggota grup dengan jarak (dx, dy) yang sama,
+          // masing-masing tetap dibatasi supaya tidak keluar tepi kanvas.
+          selectedIds.forEach(function (id) {
+            const awal = posisiAwalGrup[id];
+            const elLain = kotakElMap[id];
+            if (!awal || !elLain) return;
+            const baruXLain = Math.max(0, Math.min(DENAH_CANVAS_W - awal.w, awal.x + dx));
+            const baruYLain = Math.max(0, Math.min(DENAH_CANVAS_H - awal.h, awal.y + dy));
+            elLain.style.left = baruXLain + "px";
+            elLain.style.top = baruYLain + "px";
+          });
+          perbaruiOverlayGrup();
+          return;
+        }
+
         const baruX = Math.max(0, Math.min(DENAH_CANVAS_W - parseFloat(el.style.width), startPosX + dx));
         const baruY = Math.max(0, Math.min(DENAH_CANVAS_H - parseFloat(el.style.height), startPosY + dy));
         el.style.left = baruX + "px";
@@ -577,6 +799,19 @@ async function loadTabDenahBazar() {
         dragging = false;
         el.style.cursor = "grab";
         el.style.zIndex = "";
+
+        if (selectedIds.size > 1 && selectedIds.has(opsi.id)) {
+          selectedIds.forEach(function (id) {
+            const elLain = kotakElMap[id];
+            if (!elLain) return;
+            const idTipe = standList.some(function (s) { return s.id === id; }) ? "stand" : "elemen";
+            const bucketLain = idTipe === "stand" ? perubahan.stand : perubahan.elemen;
+            bucketLain[id] = Object.assign({}, bucketLain[id], { pos_x: Math.round(parseFloat(elLain.style.left)), pos_y: Math.round(parseFloat(elLain.style.top)) });
+          });
+          tandaiBerubah();
+          return;
+        }
+
         const bucket = opsi.tipe === "stand" ? perubahan.stand : perubahan.elemen;
         bucket[opsi.id] = Object.assign({}, bucket[opsi.id], { pos_x: Math.round(parseFloat(el.style.left)), pos_y: Math.round(parseFloat(el.style.top)) });
         tandaiBerubah();
@@ -704,6 +939,7 @@ async function loadTabDenahBazar() {
       if (opsi.tipe === "elemen") {
         el.addEventListener("click", function (e) {
           if (e.target !== el) return;
+          if (e.shiftKey) return; // Shift+klik cuma untuk seleksi, bukan membuka panel edit
           bukaPanelEditLabel(opsi.id);
         });
       }
@@ -713,18 +949,26 @@ async function loadTabDenahBazar() {
 
     function gambarSemua() {
       innerEl.innerHTML = "";
+      // `innerHTML = ""` di atas membuang SEMUA elemen anak sebelumnya,
+      // termasuk kotak pembungkus seleksi grup (`overlayGrupEl`) kalau ada --
+      // referensi JS-nya sendiri tidak hilang (cuma terlepas dari DOM), jadi
+      // nanti dipasang ulang (bukan dibuat baru) lewat `pastikanOverlayGrup()`
+      // + `appendChild` di akhir fungsi ini.
+      kotakElMap = {};
       elemenList.forEach(function (elm) {
-        innerEl.appendChild(buatKotak({
+        const el = buatKotak({
           id: elm.id, tipe: "elemen",
           x: elm.pos_x, y: elm.pos_y, w: elm.lebar, h: elm.tinggi,
           rotasi: elm.rotasi,
           warnaBg: elm.warna_bg, warnaTeks: elm.warna_teks,
           label: elm.teks, sublabel: elm.emoji, bisaResize: true
-        }));
+        });
+        innerEl.appendChild(el);
+        kotakElMap[elm.id] = el;
       });
       standList.forEach(function (s) {
         const warna = WARNA_JENIS_DENAH[s.jenis] || "#777777";
-        innerEl.appendChild(buatKotak({
+        const el = buatKotak({
           id: s.id, tipe: "stand",
           x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
           w: s.lebar || 54, h: s.tinggi || 40,
@@ -732,8 +976,19 @@ async function loadTabDenahBazar() {
           warnaBg: s.tenant_id ? "#fde8e8" : warna,
           warnaTeks: s.tenant_id ? "#b91c1c" : "#ffffff",
           label: s.kode, bisaResize: true
-        }));
+        });
+        innerEl.appendChild(el);
+        kotakElMap[s.id] = el;
       });
+
+      // Buang id yang sudah tidak ada lagi (mis. label yang baru dihapus)
+      // dari seleksi, baru terapkan ulang tampilan seleksi + kotak
+      // pembungkus grup supaya tetap konsisten setelah kanvas digambar ulang.
+      selectedIds.forEach(function (id) { if (!kotakElMap[id]) selectedIds.delete(id); });
+      pastikanOverlayGrup();
+      innerEl.appendChild(overlayGrupEl);
+      terapkanSeleksiVisual();
+      perbaruiOverlayGrup();
     }
 
     function bukaPanelEditLabel(id) {
@@ -836,6 +1091,75 @@ async function loadTabDenahBazar() {
       statusEl.textContent = "✓ Tata letak tersimpan.";
       statusEl.style.color = "#0f7b3e";
       setTimeout(function () { statusEl.textContent = ""; }, 2500);
+    });
+
+    // -------- Seleksi "marquee" (tarik persegi di area kanvas yang kosong) --
+    // dipasang di `innerEl` sendiri, cuma aktif kalau yang diklik pertama
+    // kali adalah kanvas kosong itu sendiri (`e.target === innerEl`) --
+    // kalau yang diklik sebuah kotak/handle, listener pointerdown kotak itu
+    // sendiri yang menangani (dan event tidak pernah mencapai sini sebagai
+    // `target === innerEl`).
+    let marqueeEl = null;
+    let marqueeAktif = false;
+    let marqueeStart = { x: 0, y: 0 };
+    let marqueeBase = new Set();
+
+    innerEl.addEventListener("pointerdown", function (e) {
+      if (e.target !== innerEl) return;
+      e.preventDefault();
+      marqueeAktif = true;
+      innerEl.setPointerCapture(e.pointerId);
+      const rect = innerEl.getBoundingClientRect();
+      marqueeStart = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
+
+      if (!e.shiftKey) selectedIds = new Set();
+      marqueeBase = new Set(selectedIds);
+      terapkanSeleksiVisual();
+      perbaruiOverlayGrup();
+
+      if (!marqueeEl) {
+        marqueeEl = document.createElement("div");
+        marqueeEl.style.position = "absolute";
+        marqueeEl.style.border = "1.5px dashed #2b6cff";
+        marqueeEl.style.background = "rgba(43,108,255,0.08)";
+        marqueeEl.style.pointerEvents = "none";
+        marqueeEl.style.zIndex = "60";
+      }
+      innerEl.appendChild(marqueeEl);
+      marqueeEl.style.left = marqueeStart.x + "px";
+      marqueeEl.style.top = marqueeStart.y + "px";
+      marqueeEl.style.width = "0px";
+      marqueeEl.style.height = "0px";
+      marqueeEl.style.display = "block";
+    });
+    innerEl.addEventListener("pointermove", function (e) {
+      if (!marqueeAktif) return;
+      const rect = innerEl.getBoundingClientRect();
+      const curX = (e.clientX - rect.left) / scale;
+      const curY = (e.clientY - rect.top) / scale;
+      const x = Math.min(marqueeStart.x, curX);
+      const y = Math.min(marqueeStart.y, curY);
+      const w = Math.abs(curX - marqueeStart.x);
+      const h = Math.abs(curY - marqueeStart.y);
+      marqueeEl.style.left = x + "px";
+      marqueeEl.style.top = y + "px";
+      marqueeEl.style.width = w + "px";
+      marqueeEl.style.height = h + "px";
+
+      const kotakSeleksi = { x: x, y: y, w: w, h: h };
+      const terkena = new Set(marqueeBase);
+      Object.keys(kotakElMap).forEach(function (id) {
+        const r = rectVirtual(id);
+        if (r && duaKotakBertumpuk(kotakSeleksi, r)) terkena.add(id);
+      });
+      selectedIds = terkena;
+      terapkanSeleksiVisual();
+      perbaruiOverlayGrup();
+    });
+    innerEl.addEventListener("pointerup", function (e) {
+      if (!marqueeAktif) return;
+      marqueeAktif = false;
+      if (marqueeEl) marqueeEl.style.display = "none";
     });
 
     terapkanSkala();
