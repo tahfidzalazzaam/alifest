@@ -27,11 +27,11 @@ const BAZAR_TEMPLATE = `
   <div class="notice" id="bazar-info-kuota" style="display:none;"></div>
 
   <div class="section__head">
-    <h2>Kategori/Ukuran Stand</h2>
-    <p>Pilihan kategori stand yang tersedia saat ini -- kategori dipilih saat mengisi form pendaftaran.</p>
+    <h2>Jenis & Lokasi Stand</h2>
+    <p>Tiga jenis stand yang tersedia, masing-masing punya area & kuota sendiri -- lokasi persisnya dipilih saat mengisi form pendaftaran.</p>
   </div>
-  <div class="chip-list" id="bazar-kategori-list">
-    <p class="hint">Memuat kategori stand...</p>
+  <div id="bazar-jenis-list">
+    <p class="hint">Memuat jenis stand...</p>
   </div>
 </section>
 
@@ -52,7 +52,7 @@ const BAZAR_TEMPLATE = `
       <span class="syarat-item__icon">💳</span>
       <div class="syarat-item__text">
         <strong>Bukti Pembayaran Sewa Stand</strong>
-        <p>Screenshot/foto bukti transfer biaya sewa stand sesuai kategori yang dipilih (lihat info biaya di atas). Format JPG/PNG/PDF, maksimal 4MB.</p>
+        <p>Screenshot/foto bukti transfer biaya sewa stand sesuai jenis & jumlah lokasi yang dipilih (lihat harga tiap jenis di atas). Format JPG/PNG/PDF, maksimal 4MB.</p>
       </div>
     </div>
   </div>
@@ -117,10 +117,17 @@ function tampilkanPesanBazarTutupTotal() {
     '</section>';
 }
 
+// Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
+const URUTAN_JENIS_STAND_INFO = ["A", "B", "C"];
+
+function formatRupiahBazarInfo(angka) {
+  return "Rp" + Number(angka || 0).toLocaleString("id-ID");
+}
+
 async function initBazar() {
-  const [{ data: settings }, { data: jumlahTerisi }, { data: sesi }] = await Promise.all([
-    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,tutup_total,kategori_list,kuota_total,info_biaya,info_rekening").eq("id", 1).single(),
-    supabaseClient.rpc("bazar_jumlah_terisi"),
+  const [{ data: settings }, { data: standData }, { data: sesi }] = await Promise.all([
+    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+    supabaseClient.from("bazar_stand").select("jenis,area,tenant_id"),
     supabaseClient.auth.getSession()
   ]);
 
@@ -150,17 +157,40 @@ async function initBazar() {
   if (deskripsiEl) deskripsiEl.textContent = (settings && settings.profil_deskripsi) || BAZAR_DESKRIPSI_DEFAULT;
 
   const pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
-  const kategoriList = (settings && Array.isArray(settings.kategori_list) && settings.kategori_list.length)
-    ? settings.kategori_list
-    : ["Kecil", "Sedang", "Besar"];
-  const kuotaTotal = settings ? settings.kuota_total : null;
-  const terisi = typeof jumlahTerisi === "number" ? jumlahTerisi : 0;
-  const kuotaPenuh = kuotaTotal !== null && kuotaTotal !== undefined && terisi >= kuotaTotal;
+  const jenisStandInfo = (settings && settings.jenis_stand_info) || {};
+  const standList = standData || [];
+  const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
 
-  const kategoriListEl = document.getElementById("bazar-kategori-list");
-  if (kategoriListEl) {
-    kategoriListEl.innerHTML = kategoriList.map(function (k) {
-      return '<span class="chip">🏪 ' + escapeHTMLBazarInfo(k) + '</span>';
+  // -------- Jenis & Lokasi Stand (migrasi 0037) -- satu kartu per jenis
+  // (A/B/C), menampilkan ukuran, harga, daftar area & sisa kuota TIAP area
+  // (bukan cuma total) -- supaya pengunjung sudah tahu area mana yang masih
+  // longgar sebelum masuk ke form pendaftaran untuk memilih lokasi persisnya.
+  const jenisListEl = document.getElementById("bazar-jenis-list");
+  if (jenisListEl) {
+    jenisListEl.innerHTML = URUTAN_JENIS_STAND_INFO.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
+      const info = jenisStandInfo[j];
+      const standJenisIni = standList.filter(function (s) { return s.jenis === j; });
+      const areaList = [];
+      standJenisIni.forEach(function (s) { if (areaList.indexOf(s.area) === -1) areaList.push(s.area); });
+      const rincianArea = areaList.map(function (area) {
+        const standArea = standJenisIni.filter(function (s) { return s.area === area; });
+        const sisaArea = standArea.filter(function (s) { return !s.tenant_id; }).length;
+        return area + " (sisa " + sisaArea + "/" + standArea.length + ")";
+      }).join(", ");
+      const sisaJenis = standJenisIni.filter(function (s) { return !s.tenant_id; }).length;
+      return (
+        '<div class="syarat-card" style="margin-bottom:14px;">' +
+          '<div class="syarat-item">' +
+            '<span class="syarat-item__icon">🏪</span>' +
+            '<div class="syarat-item__text">' +
+              '<strong>' + escapeHTMLBazarInfo(info.nama || ("Jenis " + j)) + ' — ' + escapeHTMLBazarInfo(info.ukuran || "-") + ' — ' + formatRupiahBazarInfo(info.harga) + '</strong>' +
+              '<p>Area: ' + escapeHTMLBazarInfo(rincianArea || "-") + '.' +
+              (sisaJenis === 0 ? ' <strong style="color:#9C2B30;">Sudah penuh.</strong>' : (' Total sisa ' + sisaJenis + ' dari ' + standJenisIni.length + ' stand.')) +
+              '</p>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
     }).join("");
   }
 
@@ -176,22 +206,14 @@ async function initBazar() {
     infoRekeningEl.style.display = "block";
   }
 
-  const infoKuotaEl = document.getElementById("bazar-info-kuota");
-  if (infoKuotaEl && kuotaTotal !== null && kuotaTotal !== undefined) {
-    infoKuotaEl.textContent = kuotaPenuh
-      ? "🚫 Kuota stand bazar sudah penuh (" + terisi + "/" + kuotaTotal + ")."
-      : "📊 Sisa kuota stand: " + Math.max(kuotaTotal - terisi, 0) + " dari " + kuotaTotal + ".";
-    infoKuotaEl.className = "notice" + (kuotaPenuh ? " notice--error" : "");
-    infoKuotaEl.style.display = "block";
-  }
-
   // -------- Tombol CTA "Daftar Stand Sekarang" -- tetap menuju #/daftar-bazar
   // apa pun statusnya (sama seperti pola CTA "Daftar Sekarang" di halaman
-  // Lomba): kalau sedang ditutup/penuh, tombolnya cuma diberi tanda gembok,
-  // halaman form itu sendiri yang menampilkan pesan tertutup/penuh lengkap
-  // (lihat muatPengaturanBazar() di view-daftarbazar.js).
+  // Lomba): kalau sedang ditutup/semua jenis penuh, tombolnya cuma diberi
+  // tanda gembok, halaman form itu sendiri yang menampilkan pesan
+  // tertutup/penuh lengkap (lihat muatPengaturanBazar() di
+  // view-daftarbazar.js).
   const cta = document.getElementById("bazar-cta-daftar");
-  if (cta && (!pendaftaranDibuka || kuotaPenuh)) {
+  if (cta && (!pendaftaranDibuka || semuaPenuh)) {
     cta.classList.add("is-locked");
     cta.innerHTML = !pendaftaranDibuka ? "🔒 Daftar Stand Sekarang" : "🚫 Daftar Stand Sekarang";
   }
