@@ -118,10 +118,10 @@ function pasangVideoProfil(videoUrl) {
 }
 
 async function initBeranda() {
-  const [{ data: site }, { data: bazarSettings }, { data: bazarTerisi }] = await Promise.all([
+  const [{ data: site }, { data: bazarSettings }, { data: bazarStandList }] = await Promise.all([
     supabaseClient.from("site_settings").select("profil_judul,profil_deskripsi,profil_video_url,pendaftaran_dibuka,tanggal_tutup_pendaftaran").eq("id", 1).single(),
-    supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,kuota_total").eq("id", 1).single(),
-    supabaseClient.rpc("bazar_jumlah_terisi")
+    supabaseClient.from("bazar_settings").select("pendaftaran_dibuka").eq("id", 1).single(),
+    supabaseClient.from("bazar_stand").select("tenant_id")
   ]);
 
   const judulEl = document.getElementById("beranda-judul");
@@ -138,14 +138,14 @@ async function initBeranda() {
     ctaLomba.textContent = "🔒 Pendaftaran lomba sedang ditutup";
   }
 
-  // -------- Badge kecil di kartu "Bazar" kalau pendaftaran/kuota bazar penuh --------
+  // -------- Badge kecil di kartu "Bazar" kalau pendaftaran bazar ditutup
+  // atau SEMUA stand (semua jenis -- Denah Stand, migrasi 0037) sudah penuh --------
   const bazarDibuka = !bazarSettings || bazarSettings.pendaftaran_dibuka !== false;
-  const kuotaTotal = bazarSettings ? bazarSettings.kuota_total : null;
-  const terisi = typeof bazarTerisi === "number" ? bazarTerisi : 0;
-  const bazarPenuh = kuotaTotal !== null && kuotaTotal !== undefined && terisi >= kuotaTotal;
+  const standList = bazarStandList || [];
+  const bazarPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
   const ctaBazar = document.getElementById("beranda-card-bazar-cta");
   if (ctaBazar && (!bazarDibuka || bazarPenuh)) {
-    ctaBazar.textContent = !bazarDibuka ? "🔒 Pendaftaran stand sedang ditutup" : "🚫 Kuota stand sudah penuh";
+    ctaBazar.textContent = !bazarDibuka ? "🔒 Pendaftaran stand sedang ditutup" : "🚫 Semua stand sudah penuh";
   }
 }
 
