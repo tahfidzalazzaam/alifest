@@ -1187,6 +1187,31 @@ const KONFETI_HEADER = [
   { x: 980, y: 525, e: "✨", s: 26, o: 0.65 },
 ];
 
+// Pita CTA "SEGERA DAFTAR! GRATIS" -- miring di pojok kanan atas poster
+// rekap, dipakai juga sebagai ajakan daftar (bukan cuma rekap statistik).
+function gambarPitaCTAPoster(ctx, W) {
+  ctx.save();
+  const cx = W - 150, cy = 150;
+  ctx.translate(cx, cy);
+  ctx.rotate(18 * Math.PI / 180);
+  ctx.shadowColor = "rgba(0,0,0,0.25)";
+  ctx.shadowBlur = 14;
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = "#ff5a5f";
+  kotakBulat(ctx, -175, -58, 350, 116, 16);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "800 34px 'Outfit', sans-serif";
+  ctx.fillText("SEGERA DAFTAR!", 0, -16);
+  ctx.font = "800 40px 'Outfit', sans-serif";
+  ctx.fillStyle = "#ffe14d";
+  ctx.fillText("GRATIS 🎉", 0, 30);
+  ctx.restore();
+}
+
 function gambarKonfetiHeader(ctx) {
   ctx.save();
   ctx.textAlign = "center";
@@ -1271,6 +1296,12 @@ function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
   ctx.fillText("ALIF 5.0", W / 2, 525);
   ctx.font = "600 28px 'Plus Jakarta Sans', sans-serif";
   ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", W / 2, 558);
+
+  // -------- Pita CTA "Segera Daftar! Gratis" -- ditaruh miring di pojok
+  // kanan atas, menimpa sebagian header hijau, supaya poster rekap ini juga
+  // sekaligus mengajak orang mendaftar (bukan cuma menampilkan statistik).
+  // Sudah disetujui lewat sampel sebelum diterapkan di sini.
+  gambarPitaCTAPoster(ctx, W);
 
   // -------- Kartu per cabang lomba --------
   const atasKartu = tinggiHeader + 16;
