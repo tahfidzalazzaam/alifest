@@ -229,7 +229,13 @@ function initDaftarBazar() {
       return (
         '<div class="lomba-choice' + (penuh ? " is-disabled" : "") + '">' +
           '<label>' +
-            '<input type="radio" name="bazarJenis" value="' + j + '"' + (penuh ? " disabled" : "") + ' />' +
+            // `checked` dicocokkan ke `jenisTerpilih` yang sudah ada (bukan
+            // cuma polos) -- supaya pilihan jenis TETAP kelihatan terpilih
+            // di radio-nya setelah `renderJenisChoices()` dipanggil ulang
+            // (mis. refresh denah setelah submit gagal karena bentrok,
+            // migrasi 0040), bukan cuma "radio-nya kosong lagi" padahal
+            // denah di bawahnya masih menampilkan jenis itu.
+            '<input type="radio" name="bazarJenis" value="' + j + '"' + (penuh ? " disabled" : "") + (jenisTerpilih === j ? " checked" : "") + ' />' +
             '<span class="lomba-choice__icon">🏪</span>' +
             '<span class="lomba-choice__text"><strong>' + escapeHTMLDaftarBazar(info.nama || ("Jenis " + j)) + '</strong>' +
               '<br/>' + escapeHTMLDaftarBazar(info.ukuran || "-") + ' · ' + formatRupiahDaftarBazar(info.harga) +
@@ -372,16 +378,28 @@ function initDaftarBazar() {
     return el;
   }
 
+  // kode stand -> elemen `<div>` kotaknya di DOM saat ini, diisi ulang tiap
+  // `renderLokasiPicker()` menggambar ulang kanvas -- dipakai
+  // `highlightKodeBentrok()` menunjuk LANGSUNG ke kotak yang bentrok setelah
+  // submit gagal (migrasi 0040), tanpa perlu mencari-cari lewat DOM query.
+  let kotakStandElMap = {};
+
   function renderLokasiPicker() {
     if (!jenisTerpilih) {
       lokasiFieldEl.style.display = "none";
       return;
     }
     lokasiFieldEl.style.display = "block";
-    // Reset pilihan tiap kali jenis diganti -- kode stand milik jenis lama
-    // sudah tidak relevan begitu jenisnya berubah (submit_bazar hanya
-    // menerima SATU jenis sekaligus per pengiriman, lihat migrasi 0037).
+    // Selalu reset total pilihan tiap kali fungsi ini dipanggil -- baik
+    // karena jenis diganti (klik radio jenis baru) MAUPUN karena submit
+    // gagal akibat bentrok (migrasi 0040). Sengaja TIDAK mempertahankan
+    // kode yang masih valid: kalau pendaftar pilih 2+ stand dan salah
+    // satunya ternyata baru diambil orang lain, semuanya diminta dipilih
+    // ULANG DARI AWAL (bukan membiarkan yang lain tetap tersisa terpilih),
+    // supaya pendaftar sadar betul kombinasi stand yang akhirnya dia kirim
+    // -- tidak ada sisa pilihan lama yang mungkin sudah tidak sesuai niatnya.
     kodeTerpilihSet = new Set();
+    kotakStandElMap = {};
 
     const warnaJenisAktif = WARNA_JENIS_DENAH_PUBLIK[jenisTerpilih] || "#777777";
     legendaEl.innerHTML =
@@ -407,13 +425,15 @@ function initDaftarBazar() {
       }));
     });
     standList.forEach(function (s) {
-      innerEl.appendChild(buatKotakLokasiPublik({
+      const el = buatKotakLokasiPublik({
         kode: s.kode, jenis: s.jenis,
         x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
         w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
         terisi: !!s.tenant_id,
         selectable: s.jenis === jenisTerpilih && !s.tenant_id
-      }));
+      });
+      innerEl.appendChild(el);
+      kotakStandElMap[s.kode] = el;
     });
 
     function terapkanSkalaDenahPublik() {
@@ -437,6 +457,38 @@ function initDaftarBazar() {
     lokasiTotalEl.textContent = dipilih === 0
       ? "Belum ada lokasi dipilih."
       : (dipilih + " stand dipilih (" + Array.from(kodeTerpilihSet).sort().join(", ") + ") × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
+  }
+
+  // Dipanggil setelah submit gagal karena bentrok (migrasi 0040, respons
+  // `submit_bazar` membawa array `kode_bentrok`) -- mengedip-kedipkan garis
+  // merah di kotak yang PERSIS bentrok itu (bukan cuma alert generik) & ikut
+  // menggulir kanvas supaya kotaknya kelihatan, sekali dipanggil SETELAH
+  // `renderLokasiPicker()` membangun ulang `kotakStandElMap` dengan data
+  // terbaru (jadi kotaknya sudah dalam gaya "Terisi" yang benar -- kedipan
+  // ini murni penekanan visual sementara di atasnya, bukan status baru).
+  // Catatan: seluruh pilihan sudah di-reset total oleh `renderLokasiPicker()`
+  // di atas -- kedipan ini HANYA menunjukkan kotak mana yang jadi sebab
+  // pendaftar diminta pilih ulang dari awal, bukan status "masih terpilih".
+  function highlightKodeBentrok(daftarKode) {
+    if (!daftarKode || daftarKode.length === 0) return;
+    let kotakPertama = null;
+    daftarKode.forEach(function (kode) {
+      const el = kotakStandElMap[kode];
+      if (!el) return;
+      if (!kotakPertama) kotakPertama = el;
+      let kedip = 0;
+      const interval = setInterval(function () {
+        kedip++;
+        el.style.boxShadow = (kedip % 2 === 1) ? "0 0 0 4px rgba(220,38,38,0.7)" : "none";
+        if (kedip >= 6) {
+          clearInterval(interval);
+          el.style.boxShadow = "none";
+        }
+      }, 280);
+    });
+    if (kotakPertama && kotakPertama.scrollIntoView) {
+      kotakPertama.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   }
 
   /* ---------------- Muat pengaturan bazar (buka/tutup, jenis & denah stand, info biaya/rekening) ---------------- */
@@ -676,7 +728,7 @@ function initDaftarBazar() {
           p_url_bukti_bayar: hasil[1]
         });
       })
-      .then(function (res) {
+      .then(async function (res) {
         if (res.error) throw new Error(res.error.message);
         const data = res.data;
         if (data.success) {
@@ -687,12 +739,26 @@ function initDaftarBazar() {
         } else {
           // Salah satu stand yang dipilih baru saja diambil pendaftar lain
           // (lihat gating "for update" di submit_bazar, migrasi 0037) --
-          // muat ulang daftar denah supaya status terisi/tersedia langsung
-          // sinkron, bukan cuma tampil alert generik.
+          // pesannya (migrasi 0040) sudah menyebut KODE STAND spesifik yang
+          // bentrok, dan respons membawa array `kode_bentrok` terpisah.
           alert("Pendaftaran gagal: " + (data.message || "Terjadi kesalahan, coba lagi."));
           btnSubmit.disabled = false;
           btnSubmit.textContent = "Kirim Pendaftaran Bazar";
-          muatPengaturanBazar();
+          // Muat ulang daftar denah supaya status terisi/tersedia langsung
+          // sinkron, LALU gambar ulang kanvas dari nol -- SELURUH pilihan
+          // sebelumnya (termasuk stand lain yang sebenarnya masih valid)
+          // sengaja DIHAPUS TOTAL, bukan dipertahankan, supaya pendaftar
+          // memilih ulang semua lokasi dari awal (sesuai permintaan: jangan
+          // biarkan stand yang tidak bentrok tetap tersisa terpilih). Kalau
+          // respons membawa `kode_bentrok`, kedipkan PERSIS kotak yang
+          // bentrok itu supaya pendaftar tahu sebabnya sebelum memilih ulang.
+          await muatPengaturanBazar();
+          if (jenisTerpilih) {
+            renderLokasiPicker();
+            if (Array.isArray(data.kode_bentrok) && data.kode_bentrok.length > 0) {
+              highlightKodeBentrok(data.kode_bentrok);
+            }
+          }
         }
       })
       .catch(function (err) {
