@@ -131,10 +131,18 @@ const DAFTAR_BAZAR_TEMPLATE = `
 
 // Pesan lucu bertema "lagi maintenance, ngumpulin cakra dulu" untuk saklar
 // "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) -- dipilih
-// acak tiap kali form ini dirender. Disalin apa adanya (duplikat, bukan
-// lewat window.xxx) juga di view-bazar.js -- kalau isinya mau diubah, ganti
-// di KEDUA tempat itu supaya tetap konsisten.
-const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
+// acak tiap kali form ini dirender. ISI-nya SAMA PERSIS dengan yang ada di
+// view-bazar.js (kalau mau diubah, ganti di KEDUA tempat itu supaya tetap
+// konsisten) -- tapi NAMA KONSTANTANYA SENGAJA DIBEDAKAN (diberi akhiran
+// `_DAFTAR` di sini, `_INFO` di view-bazar.js) karena kedua file ini sama-
+// sama dimuat sebagai <script> klasik di index.html dan berbagi SATU scope
+// global yang sama -- dua `const` dengan nama IDENTIK di dua file berbeda
+// akan membuat browser melempar `SyntaxError: Identifier '...' has already
+// been declared` saat file kedua dimuat, yang GAGAL TOTAL me-load seluruh
+// isi file itu (termasuk `window.ViewDaftarBazar` di baris paling akhir) --
+// inilah sebab nyata laporan "tombol Daftar Stand Sekarang tidak bisa
+// pindah halaman" (bukan soal file basi di GitHub seperti dugaan awal).
+const PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR = [
   "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
   "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
   "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
@@ -266,7 +274,7 @@ function initDaftarBazar() {
     if (settings && settings.tutup_total === true && !panitiaLogin) {
       const shell = document.querySelector(".form-shell");
       if (shell) {
-        const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL.length)];
+        const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR.length)];
         shell.innerHTML =
           '<div style="text-align:center;padding:20px 0;">' +
             '<div style="font-size:2.4rem;margin-bottom:12px;">🌀</div>' +
