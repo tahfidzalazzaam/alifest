@@ -1,23 +1,33 @@
-// View: Form Pendaftaran Bazar ("#/daftar-bazar") -- pindahan PERSIS dari
-// isi "#/bazar" versi lama (form pendaftaran stand/tenant lengkap dengan
-// validasi & upload berkas), TIDAK ADA perubahan logika/data. "#/bazar"
-// sendiri sekarang jadi halaman INFO Bazar terpisah (lihat view-bazar.js),
-// dengan tombol "Daftar Stand Sekarang" yang menuju ke sini.
+// View: Form Pendaftaran Bazar ("#/daftar-bazar") -- sejak migrasi 0042,
+// formulirnya WIZARD 4 LANGKAH yang digeser ke samping (bukan satu halaman
+// panjang lagi seperti sebelumnya):
+//   Langkah 1: Identitas Stand   -- nama usaha, jenis produk, logo usaha,
+//                                    foto poster promosi, bukti follow IG,
+//                                    nama & WhatsApp penanggung jawab.
+//   Langkah 2: Jenis Stand       -- pilih SATU jenis (A/B/C).
+//   Langkah 3: Penentuan Tempat  -- klik lokasi di denah (boleh lebih dari
+//                                    satu); begitu klik "Lanjut" ke Langkah
+//                                    4, lokasi yang dipilih DIKUNCI sementara
+//                                    (reservasi 15 menit, migrasi 0042) biar
+//                                    pendaftar lain tidak bisa ambil stand
+//                                    yang sama selagi Langkah 4 diisi.
+//   Langkah 4: Bukti Pembayaran  -- unggah bukti transfer, centang
+//                                    pernyataan, kirim. Nomor pendaftaran
+//                                    yang didapat = kode stand itu sendiri
+//                                    (migrasi 0042), bukan "BAZAR-XXX" lagi.
 //
 // Tetap TERPISAH TOTAL dari halaman pendaftaran lomba ("#/daftar"): tabel,
 // fungsi RPC, status buka/tutup, dan kuotanya sendiri-sendiri (lihat migrasi
-// 0030). Satu halaman form sederhana (tidak ada langkah/wizard seperti form
-// lomba, karena datanya lebih sedikit & seragam untuk semua tenant).
+// 0030, 0037, 0042).
 //
-// Sejak migrasi 0037: kategori stand teks bebas (Kecil/Sedang/Besar) DIGANTI
-// TOTAL oleh "Denah Stand" -- 3 JENIS baku (A/B/C, lihat
-// `bazar_settings.jenis_stand_info`) yang MASING-MASING punya AREA & KUOTA
-// PASTI (tabel `bazar_stand`, satu baris per petak stand fisik). Tenant
-// pilih SATU jenis dulu, lalu pilih SATU ATAU LEBIH lokasi/kode stand dari
-// jenis itu (boleh sewa lebih dari satu stand sekaligus, asal jenisnya
-// sama -- mau jenis lain, daftar lagi terpisah). Belum ada gambar denah
-// visualnya (menyusul kalau panitia sudah punya gambar kasarnya) -- untuk
-// sekarang dipilih lewat daftar/grid kode per area.
+// CATATAN PENTING soal "reservasi sementara" (migrasi 0042): itu CUMA
+// lapisan UX yang mengurangi peluang bentrok -- perlindungan SEBENARNYA
+// (supaya TIDAK PERNAH ada 2 tenant dobel-diterima untuk stand yang sama)
+// tetap di `submit_bazar()` lewat row-lock `for update` (migrasi 0037,
+// diperbaiki 0041). Jadi kalau pun reservasinya kedaluwarsa (15 menit) atau
+// race condition aneh terjadi, submit final tetap aman -- paling jelek
+// pendaftar diminta pilih ulang lokasi (lihat penanganan kode_bentrok di
+// bawah, pola yang sama seperti migrasi 0040).
 
 const DAFTAR_BAZAR_TEMPLATE = `
 <main class="form-page container">
@@ -32,100 +42,183 @@ const DAFTAR_BAZAR_TEMPLATE = `
 
     <form id="form-bazar" novalidate>
 
-      <fieldset>
-        <legend>Data Usaha/Stand</legend>
+      <div class="wizard-steps" id="bazar-wizard-steps">
+        <div class="wizard-step" data-step="1"><span class="wizard-step__dot">1</span><span class="wizard-step__label">Identitas Stand</span></div>
+        <div class="wizard-step" data-step="2"><span class="wizard-step__dot">2</span><span class="wizard-step__label">Jenis Stand</span></div>
+        <div class="wizard-step" data-step="3"><span class="wizard-step__dot">3</span><span class="wizard-step__label">Penentuan Tempat</span></div>
+        <div class="wizard-step" data-step="4"><span class="wizard-step__dot">4</span><span class="wizard-step__label">Pembayaran</span></div>
+      </div>
 
-        <div class="field">
-          <label for="bazarNamaUsaha">Nama Usaha/Stand</label>
-          <input type="text" id="bazarNamaUsaha" name="bazarNamaUsaha" placeholder="mis. Warung Kopi Berkah" />
-          <div class="form-error">Nama usaha/stand wajib diisi.</div>
-        </div>
+      <div class="wizard-viewport">
+        <div class="wizard-track" id="bazar-wizard-track">
 
-        <div class="field">
-          <label for="bazarJenisProduk">Jenis Produk/Dagangan</label>
-          <input type="text" id="bazarJenisProduk" name="bazarJenisProduk" placeholder="mis. Makanan ringan, minuman, pakaian, dll" />
-          <div class="form-error">Jenis produk/dagangan wajib diisi.</div>
-        </div>
+          <!-- ============ Langkah 1: Identitas Stand ============ -->
+          <div class="wizard-pane" data-pane="1">
+            <fieldset>
+              <legend>Data Usaha/Stand</legend>
 
-        <div class="field" id="bazar-jenis-field">
-          <label>Pilih Jenis Stand</label>
-          <div class="lomba-choices" id="bazar-jenis-choices"></div>
-          <div class="form-error" id="bazar-jenis-error" style="margin-top:10px;">Pilih salah satu jenis stand.</div>
-        </div>
+              <div class="field">
+                <label for="bazarNamaUsaha">Nama Usaha/Stand</label>
+                <input type="text" id="bazarNamaUsaha" name="bazarNamaUsaha" placeholder="mis. Warung Kopi Berkah" />
+                <div class="form-error">Nama usaha/stand wajib diisi.</div>
+              </div>
 
-        <div class="field" id="bazar-lokasi-field" style="display:none;">
-          <label>Pilih Lokasi Stand <span style="font-weight:400;">(klik langsung kotaknya di denah di bawah -- boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus)</span></label>
-          <div id="bazar-denah-legenda"></div>
-          <div id="bazar-denah-pad" style="padding:18px 14px 14px 14px;">
-            <div id="bazar-denah-outer" style="width:100%;max-width:900px;overflow:visible;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;margin:0 auto;">
-              <div id="bazar-denah-inner" style="position:relative;transform-origin:top left;"></div>
-            </div>
+              <div class="field">
+                <label for="bazarJenisProduk">Jenis Produk/Dagangan</label>
+                <input type="text" id="bazarJenisProduk" name="bazarJenisProduk" placeholder="mis. Makanan ringan, minuman, pakaian, dll" />
+                <div class="form-error">Jenis produk/dagangan wajib diisi.</div>
+              </div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label>Logo Usaha</label>
+                  <div class="upload-field" id="upload-bazar-logo">
+                    <label class="upload-trigger" for="bazarFileLogo">Pilih berkas (JPG/PNG, maks 4MB)</label>
+                    <input type="file" id="bazarFileLogo" name="bazarFileLogo" accept=".jpg,.jpeg,.png" />
+                    <div class="filename" id="filename-bazar-logo">Belum ada berkas dipilih.</div>
+                  </div>
+                  <div class="form-error">Logo usaha wajib diunggah.</div>
+                </div>
+                <div class="field">
+                  <label>Foto Poster Promosi</label>
+                  <div class="upload-field" id="upload-bazar-poster">
+                    <label class="upload-trigger" for="bazarFilePoster">Pilih berkas (JPG/PNG, maks 4MB)</label>
+                    <input type="file" id="bazarFilePoster" name="bazarFilePoster" accept=".jpg,.jpeg,.png" />
+                    <div class="filename" id="filename-bazar-poster">Belum ada berkas dipilih.</div>
+                  </div>
+                  <div class="form-error">Foto poster promosi wajib diunggah.</div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Screenshot Bukti Follow Instagram</label>
+                <p class="hint" style="margin-top:-4px;">Follow dulu 2 akun Instagram resmi: <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a>, lalu screenshot halaman profil MASING-MASING akun (terlihat tombol "Following"), satu screenshot per kotak di bawah ini.</p>
+                <div class="field-row">
+                  <div class="field" style="margin-bottom:0;">
+                    <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @al.azzaam.id</label>
+                    <div class="upload-field" id="upload-bazar-ig1">
+                      <label class="upload-trigger" for="bazarFileIg1">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+                      <input type="file" id="bazarFileIg1" name="bazarFileIg1" accept=".jpg,.jpeg,.png,.pdf" />
+                      <div class="filename" id="filename-bazar-ig1">Belum ada berkas dipilih.</div>
+                    </div>
+                    <div class="form-error">Screenshot follow @al.azzaam.id wajib diunggah.</div>
+                  </div>
+                  <div class="field" style="margin-bottom:0;">
+                    <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @alifest.26</label>
+                    <div class="upload-field" id="upload-bazar-ig2">
+                      <label class="upload-trigger" for="bazarFileIg2">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+                      <input type="file" id="bazarFileIg2" name="bazarFileIg2" accept=".jpg,.jpeg,.png,.pdf" />
+                      <div class="filename" id="filename-bazar-ig2">Belum ada berkas dipilih.</div>
+                    </div>
+                    <div class="form-error">Screenshot follow @alifest.26 wajib diunggah.</div>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Penanggung Jawab</legend>
+              <div class="field-row">
+                <div class="field">
+                  <label for="bazarPenanggungJawab">Nama Penanggung Jawab</label>
+                  <input type="text" id="bazarPenanggungJawab" name="bazarPenanggungJawab" />
+                  <div class="form-error">Nama penanggung jawab wajib diisi.</div>
+                </div>
+                <div class="field">
+                  <label for="bazarWhatsapp">No. WhatsApp Aktif</label>
+                  <input type="tel" id="bazarWhatsapp" name="bazarWhatsapp" placeholder="08xxxxxxxxxx" />
+                  <div class="form-error">Nomor WhatsApp wajib diisi.</div>
+                </div>
+              </div>
+            </fieldset>
           </div>
-          <p class="hint" id="bazar-lokasi-total" style="margin-top:8px;"></p>
-          <div class="form-error" id="bazar-lokasi-error" style="margin-top:10px;">Pilih minimal satu lokasi stand.</div>
-        </div>
-      </fieldset>
 
-      <fieldset>
-        <legend>Penanggung Jawab</legend>
-
-        <div class="field-row">
-          <div class="field">
-            <label for="bazarPenanggungJawab">Nama Penanggung Jawab</label>
-            <input type="text" id="bazarPenanggungJawab" name="bazarPenanggungJawab" />
-            <div class="form-error">Nama penanggung jawab wajib diisi.</div>
+          <!-- ============ Langkah 2: Jenis Stand ============ -->
+          <div class="wizard-pane" data-pane="2">
+            <fieldset>
+              <legend>Pilih Jenis Stand</legend>
+              <div class="lomba-choices" id="bazar-jenis-choices"></div>
+              <div class="form-error" id="bazar-jenis-error" style="margin-top:10px;">Pilih salah satu jenis stand.</div>
+            </fieldset>
           </div>
-          <div class="field">
-            <label for="bazarWhatsapp">No. WhatsApp Aktif</label>
-            <input type="tel" id="bazarWhatsapp" name="bazarWhatsapp" placeholder="08xxxxxxxxxx" />
-            <div class="form-error">Nomor WhatsApp wajib diisi.</div>
+
+          <!-- ============ Langkah 3: Penentuan Tempat ============ -->
+          <div class="wizard-pane" data-pane="3">
+            <fieldset>
+              <legend>Pilih Lokasi Stand</legend>
+              <p class="hint" style="margin-top:-10px;">Klik langsung kotaknya di denah di bawah -- boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus. Begitu Anda klik "Lanjut", lokasi yang dipilih dikunci sementara (15 menit) supaya tidak diambil pendaftar lain selagi Anda mengisi Langkah 4.</p>
+              <div id="bazar-denah-legenda"></div>
+              <!-- #bazar-denah-outer SENGAJA overflow:hidden & #bazar-denah-inner
+                   SENGAJA position:absolute (BUKAN "position:relative" seperti
+                   versi sebelum wizard) -- bug "nabrak" yang ditemukan sambil
+                   membangun wizard ini: kanvas virtualnya diberi lebar tetap
+                   760px lewat JS (DENAH_PUBLIK_CANVAS_W) SEBELUM di-scale-kecil-
+                   kan ke lebar kontainer sebenarnya (lihat terapkanSkalaDenahPublik()
+                   di bawah). Kalau #bazar-denah-inner masih "position:relative"
+                   (IKUT ALUR NORMAL dokumen), lebar 760px itu MEMBESARKAN kotak
+                   induknya sendiri (karena elemen in-flow yang lebih lebar dari
+                   kontainernya tetap mendorong ukuran kontainer tsb pada beberapa
+                   konteks layout, termasuk flex item ".wizard-pane" di sini) --
+                   akibatnya seluruh Langkah 3 (dan apa pun yang digeser
+                   bersebelahan dengannya di ".wizard-track") ikut melebar 760px,
+                   lalu BOCOR/TUMPANG TINDIH ke Langkah 4 di sebelahnya (tombol
+                   & checkbox Langkah 4 jadi tidak bisa diklik -- ketutup kanvas
+                   denah Langkah 3 yang bocor). Dengan "position:absolute", kanvas
+                   dikeluarkan dari alur dokumen (tidak lagi memengaruhi ukuran
+                   induknya sama sekali), dan "overflow:hidden" pada elemen
+                   pembungkusnya memastikan sisa bocoran visual apa pun (kalau
+                   pun ada) dipotong rapi, bukan menembus ke luar. -->
+              <div id="bazar-denah-pad" style="padding:18px 14px 14px 14px;">
+                <div id="bazar-denah-outer" style="width:100%;max-width:900px;overflow:hidden;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;margin:0 auto;">
+                  <div id="bazar-denah-inner" style="position:absolute;top:0;left:0;transform-origin:top left;"></div>
+                </div>
+              </div>
+              <p class="hint" id="bazar-lokasi-total" style="margin-top:8px;"></p>
+              <div class="form-error" id="bazar-lokasi-error" style="margin-top:10px;">Pilih minimal satu lokasi stand.</div>
+              <div class="form-error" id="bazar-reservasi-error" style="margin-top:10px;"></div>
+            </fieldset>
           </div>
-        </div>
-      </fieldset>
 
-      <fieldset>
-        <legend>Unggah Berkas</legend>
+          <!-- ============ Langkah 4: Bukti Pembayaran ============ -->
+          <div class="wizard-pane" data-pane="4">
+            <fieldset>
+              <legend>Bukti Pembayaran</legend>
+              <div class="wizard-ringkasan" id="bazar-ringkasan-akhir"></div>
 
-        <div class="field">
-          <label>Foto Produk/Logo Usaha</label>
-          <p class="hint" style="margin-top:-4px;">Unggah satu atau beberapa foto produk/logo usaha Anda (dipakai panitia untuk verifikasi & promosi bazar).</p>
-          <div class="upload-field" id="upload-bazar-foto">
-            <label class="upload-trigger" for="bazarFileFoto">Pilih berkas (boleh lebih dari satu, JPG/PNG, maks 4MB/file)</label>
-            <input type="file" id="bazarFileFoto" name="bazarFileFoto" accept=".jpg,.jpeg,.png" multiple />
-            <div class="filename" id="filename-bazar-foto">Belum ada berkas dipilih.</div>
+              <div class="field" id="bazar-bukti-bayar-wrap">
+                <label id="bazar-bukti-bayar-label">Bukti Pembayaran Sewa Stand</label>
+                <p class="hint" style="margin-top:-4px;" id="bazar-bukti-bayar-hint">Transfer biaya sewa stand sesuai jenis & jumlah lokasi yang dipilih, lalu unggah screenshot/foto bukti transfernya di sini.</p>
+                <div class="upload-field" id="upload-bazar-bukti">
+                  <label class="upload-trigger" for="bazarFileBukti">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
+                  <input type="file" id="bazarFileBukti" name="bazarFileBukti" accept=".jpg,.jpeg,.png,.pdf" />
+                  <div class="filename" id="filename-bazar-bukti">Belum ada berkas dipilih.</div>
+                </div>
+                <div class="form-error">Bukti pembayaran wajib diunggah.</div>
+              </div>
+
+              <label class="checkbox-field">
+                <input type="checkbox" id="bazarKonfirmasi" name="bazarKonfirmasi" required />
+                <span>Saya menyatakan data yang diisi sudah benar dan bersedia mematuhi ketentuan bazar ALIF 5.0.</span>
+              </label>
+              <div class="form-error" id="bazar-konfirmasi-error">Centang pernyataan ini sebelum mengirim.</div>
+            </fieldset>
           </div>
-          <div class="form-error">Foto produk/logo usaha wajib diunggah.</div>
+
         </div>
+      </div>
 
-        <div class="field" id="bazar-bukti-bayar-wrap">
-          <label id="bazar-bukti-bayar-label">Bukti Pembayaran Sewa Stand</label>
-          <p class="hint" style="margin-top:-4px;" id="bazar-bukti-bayar-hint">Transfer biaya sewa stand sesuai jenis & jumlah lokasi yang dipilih di atas, lalu unggah screenshot/foto bukti transfernya di sini.</p>
-          <div class="upload-field" id="upload-bazar-bukti">
-            <label class="upload-trigger" for="bazarFileBukti">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-            <input type="file" id="bazarFileBukti" name="bazarFileBukti" accept=".jpg,.jpeg,.png,.pdf" />
-            <div class="filename" id="filename-bazar-bukti">Belum ada berkas dipilih.</div>
-          </div>
-          <div class="form-error">Bukti pembayaran wajib diunggah.</div>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <label class="checkbox-field">
-          <input type="checkbox" id="bazarKonfirmasi" name="bazarKonfirmasi" required />
-          <span>Saya menyatakan data yang diisi sudah benar dan bersedia mematuhi ketentuan bazar ALIF 5.0.</span>
-        </label>
-        <div class="form-error" id="bazar-konfirmasi-error">Centang pernyataan ini sebelum mengirim.</div>
-      </fieldset>
-
-      <div class="submit-row">
-        <button type="submit" class="btn btn--primary" id="btn-submit-bazar">Kirim Pendaftaran Bazar</button>
+      <div class="wizard-nav">
+        <button type="button" class="btn btn--ghost" id="btn-wizard-kembali" style="display:none;">← Kembali</button>
+        <div class="wizard-nav__spacer"></div>
+        <button type="button" class="btn btn--primary" id="btn-wizard-lanjut">Lanjut →</button>
+        <button type="submit" class="btn btn--primary" id="btn-submit-bazar" style="display:none;">Kirim Pendaftaran Bazar</button>
       </div>
     </form>
 
     <div class="result-panel" id="result-panel-bazar">
       <div class="result-panel__icon">✅</div>
       <h2>Pendaftaran stand berhasil dikirim</h2>
-      <p>Simpan nomor pendaftaran berikut sebagai bukti:</p>
+      <p>Simpan nomor pendaftaran berikut sebagai bukti (nomor ini sama dengan kode stand Anda):</p>
       <div class="reg-number" id="reg-number-bazar">—</div>
       <p>Panitia bazar akan memverifikasi data & pembayaran, lalu menghubungi lewat WhatsApp.</p>
       <button type="button" class="btn btn--ghost" id="btn-daftar-bazar-lagi">Daftar Stand Lain</button>
@@ -159,22 +252,14 @@ const PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR = [
 // Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
 const URUTAN_JENIS_STAND = ["A", "B", "C"];
 
-// -------- Denah visual READ-ONLY untuk memilih lokasi stand (publik) --------
-// Dipakai menggantikan grid checkbox lama -- pengunjung klik LANGSUNG kotak
-// stand-nya di kanvas (bukan ketik/centang dari daftar teks) untuk memilih
-// lokasi, mirip tampilan "Edit Denah Visual" di `/adminbazar`
-// (`view-adminbazar.js`) tapi versi lihat-&-klik-saja: TIDAK ada drag,
-// resize, atau rotate-handle sama sekali di sini (posisi/ukuran/rotasi
-// kotak MURNI dibaca dari `pos_x`/`pos_y`/`lebar`/`tinggi`/`rotasi` yang
-// sudah diatur panitia lewat editor admin, bukan hasil interaksi
-// pengunjung). Konstanta kanvas & warna jenis SENGAJA diberi nama sendiri
-// yang BERBEDA dari `DENAH_CANVAS_W`/`DENAH_CANVAS_H`/`WARNA_JENIS_DENAH`
-// milik `view-adminbazar.js` -- kedua file itu sama-sama dimuat sebagai
-// <script> klasik berbagi satu scope global, jadi nama yang identik akan
-// tabrakan `SyntaxError: Identifier '...' has already been declared` persis
-// seperti bug `PESAN_LUCU_BAZAR_TUTUP_TOTAL` yang pernah terjadi (lihat
-// catatan di atas) -- ini bukan duplikasi ceroboh, tapi penghindaran
-// tabrakan nama yang disengaja.
+// -------- Denah visual READ-ONLY untuk memilih lokasi stand (Langkah 3) --
+// Konstanta kanvas & warna jenis SENGAJA diberi nama sendiri yang BERBEDA
+// dari `DENAH_CANVAS_W`/`DENAH_CANVAS_H`/`WARNA_JENIS_DENAH` milik
+// `view-adminbazar.js` dan `DENAH_INFO_CANVAS_W`/dst milik `view-bazar.js`
+// -- ketiga file itu sama-sama dimuat sebagai <script> klasik berbagi satu
+// scope global, jadi nama yang identik akan tabrakan `SyntaxError:
+// Identifier '...' has already been declared` (lihat catatan panjang soal
+// bug ini di atas).
 const DENAH_PUBLIK_CANVAS_W = 760;
 const DENAH_PUBLIK_CANVAS_H = 600;
 const WARNA_JENIS_DENAH_PUBLIK = { A: "#e08a2e", B: "#3f7fb0", C: "#d1588f" };
@@ -190,28 +275,51 @@ function formatRupiahDaftarBazar(angka) {
   return "Rp" + Number(angka || 0).toLocaleString("id-ID");
 }
 
+// Token sesi acak -- dibuat BARU setiap kali form ini dibuka (bukan
+// identitas pendaftar apa pun, murni label sementara di browser dia sendiri)
+// -- dipakai RPC `bazar_reservasi_stand`/`bazar_lepas_reservasi` (migrasi
+// 0042) supaya server tahu reservasi-reservasi mana yang "milik" sesi
+// pengisian form yang sama, tanpa perlu login/akun.
+function buatSesiTokenBazar() {
+  try {
+    if (window.crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch (e) { /* abaikan, pakai fallback di bawah */ }
+  return "sesi-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+}
+
 function initDaftarBazar() {
   const form = document.getElementById("form-bazar");
   const jenisChoicesEl = document.getElementById("bazar-jenis-choices");
   const jenisErrorEl = document.getElementById("bazar-jenis-error");
-  const lokasiFieldEl = document.getElementById("bazar-lokasi-field");
   const legendaEl = document.getElementById("bazar-denah-legenda");
   const lokasiTotalEl = document.getElementById("bazar-lokasi-total");
   const lokasiErrorEl = document.getElementById("bazar-lokasi-error");
+  const reservasiErrorEl = document.getElementById("bazar-reservasi-error");
   const btnSubmit = document.getElementById("btn-submit-bazar");
+  const btnLanjut = document.getElementById("btn-wizard-lanjut");
+  const btnKembali = document.getElementById("btn-wizard-kembali");
+  const trackEl = document.getElementById("bazar-wizard-track");
+  const stepsEl = document.getElementById("bazar-wizard-steps");
   const resultPanel = document.getElementById("result-panel-bazar");
   const regNumberEl = document.getElementById("reg-number-bazar");
+  const ringkasanAkhirEl = document.getElementById("bazar-ringkasan-akhir");
 
   let jenisStandInfo = {};
-  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, pos_x, pos_y, lebar, tinggi, rotasi}
+  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, direservasi_oleh, direservasi_sampai, pos_x, pos_y, lebar, tinggi, rotasi}
   let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
   let pendaftaranDibuka = true;
-  // Kode stand yang DIPILIH pengunjung lewat klik di denah -- pengganti
-  // langsung dari NodeList checkbox lama (`lokasiAreasEl.querySelectorAll
-  // ('input[name="bazarLokasi"]:checked')`), dibaca validateForm()/submit
-  // persis sama seperti sebelumnya, cuma sumbernya sekarang Set ini.
+  // Kode stand yang DIPILIH pengunjung lewat klik di denah.
   let kodeTerpilihSet = new Set();
+  const sesiToken = buatSesiTokenBazar();
+  let currentStep = 1;
+  const TOTAL_STEP = 4;
+  // Set true begitu reservasi Langkah 3 -> 4 berhasil, supaya kalau
+  // pendaftar mundur lagi ke Langkah 3 lalu maju TANPA mengubah apa pun,
+  // tidak perlu memanggil RPC reservasi ulang (biarkan reservasi lama yang
+  // masih berlaku dipakai apa adanya) -- cuma dipanggil ulang kalau
+  // pilihannya BERUBAH sejak reservasi terakhir.
+  let reservasiTerakhirUntuk = null; // string gabungan kode terpilih saat reservasi terakhir berhasil
 
   function escapeHTMLDaftarBazar(teks) {
     const div = document.createElement("div");
@@ -219,27 +327,35 @@ function initDaftarBazar() {
     return div.innerHTML;
   }
 
+  /* ---------------- Mekanisme wizard (geser antar langkah) ---------------- */
+  function perbaruiTampilanLangkah() {
+    trackEl.style.transform = "translateX(-" + ((currentStep - 1) * 100) + "%)";
+    stepsEl.querySelectorAll(".wizard-step").forEach(function (el) {
+      const n = parseInt(el.getAttribute("data-step"), 10);
+      el.classList.toggle("is-active", n === currentStep);
+      el.classList.toggle("is-done", n < currentStep);
+    });
+    btnKembali.style.display = currentStep === 1 ? "none" : "inline-block";
+    btnLanjut.style.display = currentStep === TOTAL_STEP ? "none" : "inline-block";
+    btnSubmit.style.display = currentStep === TOTAL_STEP ? "inline-block" : "none";
+    document.querySelector(".form-shell").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   /* ---------------- Pilihan Jenis Stand (A/B/C, dari bazar_settings.jenis_stand_info) ---------------- */
   function renderJenisChoices() {
     jenisChoicesEl.innerHTML = URUTAN_JENIS_STAND.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
       const info = jenisStandInfo[j];
       const standJenisIni = standList.filter(function (s) { return s.jenis === j; });
-      const sisa = standJenisIni.filter(function (s) { return !s.tenant_id; }).length;
-      const penuh = sisa === 0;
+      const terpakai = standJenisIni.filter(function (s) { return !!s.tenant_id; }).length;
+      const penuh = standJenisIni.length > 0 && terpakai === standJenisIni.length;
       return (
         '<div class="lomba-choice' + (penuh ? " is-disabled" : "") + '">' +
           '<label>' +
-            // `checked` dicocokkan ke `jenisTerpilih` yang sudah ada (bukan
-            // cuma polos) -- supaya pilihan jenis TETAP kelihatan terpilih
-            // di radio-nya setelah `renderJenisChoices()` dipanggil ulang
-            // (mis. refresh denah setelah submit gagal karena bentrok,
-            // migrasi 0040), bukan cuma "radio-nya kosong lagi" padahal
-            // denah di bawahnya masih menampilkan jenis itu.
             '<input type="radio" name="bazarJenis" value="' + j + '"' + (penuh ? " disabled" : "") + (jenisTerpilih === j ? " checked" : "") + ' />' +
             '<span class="lomba-choice__icon">🏪</span>' +
             '<span class="lomba-choice__text"><strong>' + escapeHTMLDaftarBazar(info.nama || ("Jenis " + j)) + '</strong>' +
               '<br/>' + escapeHTMLDaftarBazar(info.ukuran || "-") + ' · ' + formatRupiahDaftarBazar(info.harga) +
-              '<br/>' + (penuh ? '<span style="color:#b42318;">Penuh, tidak ada stand tersisa</span>' : ('Sisa ' + sisa + ' dari ' + standJenisIni.length + ' stand')) +
+              '<br/>' + (penuh ? '<span style="color:#b42318;">Penuh, tidak ada stand tersisa</span>' : ('Terpakai ' + terpakai + ' dari ' + standJenisIni.length + ' stand')) +
             '</span>' +
           '</label>' +
         '</div>'
@@ -248,53 +364,27 @@ function initDaftarBazar() {
 
     jenisChoicesEl.querySelectorAll('input[name="bazarJenis"]').forEach(function (radio) {
       radio.addEventListener("change", function () {
-        jenisTerpilih = radio.value;
-        renderLokasiPicker();
+        if (jenisTerpilih !== radio.value) {
+          jenisTerpilih = radio.value;
+          kodeTerpilihSet = new Set();
+          reservasiTerakhirUntuk = null;
+        }
       });
     });
   }
 
-  /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual ---------------- */
-  // Satu kotak kecil per stand (posisi/ukuran/rotasi dibaca dari
-  // `bazar_stand`, hasil pengaturan panitia lewat "Edit Denah Visual" di
-  // `/adminbazar`), digambar di atas kanvas virtual tetap
-  // `DENAH_PUBLIK_CANVAS_W × DENAH_PUBLIK_CANVAS_H`, discaling ke lebar
-  // kontainer sebenarnya persis pola `terapkanSkala()` di
-  // `view-adminbazar.js` -- BEDANYA di sini TIDAK ADA drag/resize/rotate,
-  // cuma satu `click` listener per kotak stand yang statusnya boleh dipilih
-  // (jenis-nya cocok DENGAN jenis yang sedang dipilih di atas, dan belum
-  // terisi tenant lain) untuk menambah/melepas kode stand itu dari
-  // `kodeTerpilihSet`. Kotak jenis LAIN & kotak yang sudah terisi tetap
-  // digambar (supaya denahnya terasa utuh, bukan bolong-bolong) tapi
-  // dibuat pudar/non-interaktif. Label konteks (`elemenList` -- Masjid,
-  // Sekretariat PSB, Asrama) digambar paling belakang, statis, cuma
-  // penanda arah di denah.
-  //
-  // Tulisan DI DALAM kotak sengaja diringkas jadi "<kode area>-<nomor>" (mis.
-  // "B-DA-07" -> "DA-7", "C-PSB-03" -- "PSB-3") -- kode LENGKAP (dengan
-  // awalan jenis A/B/C) tetap dipakai apa adanya untuk segala sesuatu yang
-  // BUKAN tulisan di kotak: `title` (tooltip saat kotaknya di-hover/ditahan),
-  // isi `kodeTerpilihSet` yang dikirim ke `submit_bazar`, dan ringkasan "X
-  // stand dipilih (...)" di bawah kanvas -- cuma TAMPILAN di dalam kotaknya
-  // saja yang dipendekkan, supaya tidak kepotong/kekecilan di kotak yang
-  // ukurannya kecil, terutama di layar HP.
+  /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual (Langkah 3) ---------------- */
   function labelRingkasKodeBazarPublik(kode) {
     const bagian = String(kode || "").split("-");
     if (bagian.length >= 3) {
-      // Format "B-DA-07"/"C-PSB-03" -- buang awalan jenis (A/B/C), gabung
-      // sisanya ("DA"/"PSB") dengan nomor urutnya TANPA angka nol di depan.
       const nomor = parseInt(bagian[bagian.length - 1], 10);
       return bagian.slice(1, -1).join("-") + "-" + (isNaN(nomor) ? bagian[bagian.length - 1] : nomor);
     }
     if (bagian.length === 2) {
-      // Format "A-01" (Jenis A cuma satu area "Depan Masjid", tidak ada
-      // kode area terpisah tertanam di `kode`-nya sendiri) -- pakai
-      // singkatan tetap "DM" (Depan Masjid) supaya gayanya tetap konsisten
-      // dengan Jenis B/C.
       const nomor = parseInt(bagian[1], 10);
       return "DM-" + (isNaN(nomor) ? bagian[1] : nomor);
     }
-    return kode; // format kode tak dikenal -- jatuh balik tampilkan apa adanya
+    return kode;
   }
 
   function buatKotakLokasiPublik(opsi) {
@@ -322,7 +412,6 @@ function initDaftarBazar() {
     el.style.touchAction = "manipulation";
 
     if (opsi.tipeLabel) {
-      // Label konteks (bangunan/area) -- statis & dipudarkan, bukan target klik.
       el.style.background = opsi.warnaBg || "#eef3ea";
       el.style.color = opsi.warnaTeks || "#4b5f4d";
       el.style.opacity = "0.6";
@@ -343,18 +432,23 @@ function initDaftarBazar() {
       return el;
     }
 
+    if (opsi.direservasiOrangLain) {
+      el.style.background = "#fff3d6";
+      el.style.color = "#92650a";
+      el.style.cursor = "not-allowed";
+      el.title = opsi.kode + " -- sedang dipegang sementara oleh pendaftar lain (reservasi 15 menit), coba lagi sebentar.";
+      return el;
+    }
+
     if (!opsi.selectable) {
-      // Jenis LAIN dari yang sedang dipilih -- tetap kelihatan bentuknya
-      // (supaya denah terasa utuh), tapi pudar & tidak bisa diklik.
       el.style.background = warnaDasar;
       el.style.color = "#ffffff";
       el.style.opacity = "0.28";
       el.style.cursor = "default";
-      el.title = opsi.kode + " (Jenis " + opsi.jenis + " -- pilih Jenis " + opsi.jenis + " dulu di atas untuk memilih lokasi ini).";
+      el.title = opsi.kode + " (Jenis " + opsi.jenis + " -- pilih Jenis " + opsi.jenis + " dulu di Langkah 2 untuk memilih lokasi ini).";
       return el;
     }
 
-    // Kotak yang BOLEH diklik (jenisnya cocok & belum terisi).
     el.style.background = warnaDasar;
     el.style.color = "#ffffff";
     el.style.cursor = "pointer";
@@ -378,28 +472,10 @@ function initDaftarBazar() {
     return el;
   }
 
-  // kode stand -> elemen `<div>` kotaknya di DOM saat ini, diisi ulang tiap
-  // `renderLokasiPicker()` menggambar ulang kanvas -- dipakai
-  // `highlightKodeBentrok()` menunjuk LANGSUNG ke kotak yang bentrok setelah
-  // submit gagal (migrasi 0040), tanpa perlu mencari-cari lewat DOM query.
   let kotakStandElMap = {};
 
   function renderLokasiPicker() {
-    if (!jenisTerpilih) {
-      lokasiFieldEl.style.display = "none";
-      return;
-    }
-    lokasiFieldEl.style.display = "block";
-    // Selalu reset total pilihan tiap kali fungsi ini dipanggil -- baik
-    // karena jenis diganti (klik radio jenis baru) MAUPUN karena submit
-    // gagal akibat bentrok (migrasi 0040). Sengaja TIDAK mempertahankan
-    // kode yang masih valid: kalau pendaftar pilih 2+ stand dan salah
-    // satunya ternyata baru diambil orang lain, semuanya diminta dipilih
-    // ULANG DARI AWAL (bukan membiarkan yang lain tetap tersisa terpilih),
-    // supaya pendaftar sadar betul kombinasi stand yang akhirnya dia kirim
-    // -- tidak ada sisa pilihan lama yang mungkin sudah tidak sesuai niatnya.
-    kodeTerpilihSet = new Set();
-    kotakStandElMap = {};
+    if (!jenisTerpilih) return;
 
     const warnaJenisAktif = WARNA_JENIS_DENAH_PUBLIK[jenisTerpilih] || "#777777";
     legendaEl.innerHTML =
@@ -407,6 +483,7 @@ function initDaftarBazar() {
         '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:' + warnaJenisAktif + ';display:inline-block;"></span>Tersedia (klik untuk pilih)</span>' +
         '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:' + warnaJenisAktif + ';outline:2.5px solid #1E7A4C;outline-offset:1px;display:inline-block;"></span>Dipilih</span>' +
         '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#fde8e8;border:1px solid #f3b4b4;display:inline-block;"></span>Terisi</span>' +
+        '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#fff3d6;border:1px solid #f0d090;display:inline-block;"></span>Dipegang sementara pendaftar lain</span>' +
         '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#999;opacity:0.28;display:inline-block;"></span>Jenis lain</span>' +
       '</div>';
 
@@ -416,6 +493,8 @@ function initDaftarBazar() {
     innerEl.style.height = DENAH_PUBLIK_CANVAS_H + "px";
 
     innerEl.innerHTML = "";
+    kotakStandElMap = {};
+    const sekarang = Date.now();
     elemenList.forEach(function (elm) {
       innerEl.appendChild(buatKotakLokasiPublik({
         tipeLabel: true,
@@ -425,12 +504,15 @@ function initDaftarBazar() {
       }));
     });
     standList.forEach(function (s) {
+      const direservasiOrangLain = !!s.direservasi_oleh && s.direservasi_oleh !== sesiToken &&
+        !!s.direservasi_sampai && new Date(s.direservasi_sampai).getTime() > sekarang;
       const el = buatKotakLokasiPublik({
         kode: s.kode, jenis: s.jenis,
         x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
         w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
         terisi: !!s.tenant_id,
-        selectable: s.jenis === jenisTerpilih && !s.tenant_id
+        direservasiOrangLain: direservasiOrangLain,
+        selectable: s.jenis === jenisTerpilih && !s.tenant_id && !direservasiOrangLain
       });
       innerEl.appendChild(el);
       kotakStandElMap[s.kode] = el;
@@ -459,16 +541,6 @@ function initDaftarBazar() {
       : (dipilih + " stand dipilih (" + Array.from(kodeTerpilihSet).sort().join(", ") + ") × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
   }
 
-  // Dipanggil setelah submit gagal karena bentrok (migrasi 0040, respons
-  // `submit_bazar` membawa array `kode_bentrok`) -- mengedip-kedipkan garis
-  // merah di kotak yang PERSIS bentrok itu (bukan cuma alert generik) & ikut
-  // menggulir kanvas supaya kotaknya kelihatan, sekali dipanggil SETELAH
-  // `renderLokasiPicker()` membangun ulang `kotakStandElMap` dengan data
-  // terbaru (jadi kotaknya sudah dalam gaya "Terisi" yang benar -- kedipan
-  // ini murni penekanan visual sementara di atasnya, bukan status baru).
-  // Catatan: seluruh pilihan sudah di-reset total oleh `renderLokasiPicker()`
-  // di atas -- kedipan ini HANYA menunjukkan kotak mana yang jadi sebab
-  // pendaftar diminta pilih ulang dari awal, bukan status "masih terpilih".
   function highlightKodeBentrok(daftarKode) {
     if (!daftarKode || daftarKode.length === 0) return;
     let kotakPertama = null;
@@ -495,15 +567,11 @@ function initDaftarBazar() {
   async function muatPengaturanBazar() {
     const [{ data: settings }, { data: standData }, { data: elemenData }, { data: sesi }] = await Promise.all([
       supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
-      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
+      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,direservasi_oleh,direservasi_sampai,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
       supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
       supabaseClient.auth.getSession()
     ]);
 
-    // "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) --
-    // sama seperti di view-bazar.js: form ini juga ikut disembunyikan dari
-    // pengunjung biasa (bukan cuma pesan "pendaftaran ditutup" seperti
-    // pendaftaran_dibuka=false), kecuali panitia yang sedang login.
     const panitiaLogin = !!(sesi && sesi.session);
     if (settings && settings.tutup_total === true && !panitiaLogin) {
       const shell = document.querySelector(".form-shell");
@@ -516,11 +584,9 @@ function initDaftarBazar() {
             '<p>' + escapeHTMLDaftarBazar(pesan) + '</p>' +
           '</div>';
       }
-      return;
+      return false;
     }
 
-    // Panitia yang login tetap melihat form ini seperti biasa walau
-    // tutup_total aktif (supaya bisa pratinjau) -- banner pengingat di atas.
     if (settings && settings.tutup_total === true && panitiaLogin) {
       const shell = document.querySelector(".form-shell");
       if (shell) {
@@ -536,10 +602,6 @@ function initDaftarBazar() {
     jenisStandInfo = (settings && settings.jenis_stand_info) || {};
     standList = standData || [];
     elemenList = elemenData || [];
-    // Kuota sekarang per jenis/area, otomatis dibatasi oleh jumlah fisik
-    // baris `bazar_stand` (migrasi 0037) -- "penuh total" cuma kalau SEMUA
-    // jenis sudah tidak ada sisa sama sekali (dicek lewat renderJenisChoices,
-    // yang menonaktifkan radio tiap jenis yang sudah penuh satu per satu).
     const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
 
     renderJenisChoices();
@@ -570,7 +632,9 @@ function initDaftarBazar() {
             '<p><a href="#/bazar" class="btn btn--ghost">Kembali ke halaman Bazar</a></p>' +
           '</div>';
       }
+      return false;
     }
+    return true;
   }
 
   /* ---------------- Upload berkas (pola sama dengan view-daftar.js, bucket & prefix "bazar/" supaya terpisah rapi) ---------------- */
@@ -591,38 +655,6 @@ function initDaftarBazar() {
     }
     const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
     return data.publicUrl;
-  }
-
-  function setupUploadMulti(inputId, boxId, filenameId) {
-    const input = document.getElementById(inputId);
-    const box = document.getElementById(boxId);
-    const filenameEl = document.getElementById(filenameId);
-
-    input.addEventListener("change", function () {
-      const files = Array.from(input.files || []);
-      if (files.length === 0) {
-        box.classList.remove("has-file");
-        filenameEl.textContent = "Belum ada berkas dipilih.";
-        return;
-      }
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
-        const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
-        if (!sizeOk || !typeOk) {
-          filenameEl.textContent = !sizeOk
-            ? ('Berkas "' + file.name + '" melebihi ' + MAX_FILE_SIZE_MB + 'MB. Pilih ulang berkas.')
-            : ('Format "' + file.name + '" tidak didukung.');
-          box.classList.remove("has-file");
-          input.value = "";
-          return;
-        }
-      }
-      filenameEl.textContent = files.length === 1
-        ? files[0].name
-        : (files.length + " berkas dipilih: " + files.map(function (f) { return f.name; }).join(", "));
-      box.classList.add("has-file");
-    });
   }
 
   function setupUploadSingle(inputId, boxId, filenameId) {
@@ -652,17 +684,19 @@ function initDaftarBazar() {
     });
   }
 
-  setupUploadMulti("bazarFileFoto", "upload-bazar-foto", "filename-bazar-foto");
+  setupUploadSingle("bazarFileLogo", "upload-bazar-logo", "filename-bazar-logo");
+  setupUploadSingle("bazarFilePoster", "upload-bazar-poster", "filename-bazar-poster");
+  setupUploadSingle("bazarFileIg1", "upload-bazar-ig1", "filename-bazar-ig1");
+  setupUploadSingle("bazarFileIg2", "upload-bazar-ig2", "filename-bazar-ig2");
   setupUploadSingle("bazarFileBukti", "upload-bazar-bukti", "filename-bazar-bukti");
 
-  /* ---------------- Validasi & kirim ---------------- */
+  /* ---------------- Validasi tiap langkah ---------------- */
   function setFieldError(fieldEl, hasError) {
     fieldEl.classList.toggle("has-error", hasError);
   }
 
-  function validateForm() {
+  function validasiLangkah1() {
     let valid = true;
-
     ["bazarNamaUsaha", "bazarJenisProduk", "bazarPenanggungJawab", "bazarWhatsapp"].forEach(function (id) {
       const input = document.getElementById(id);
       const fieldEl = input.closest(".field");
@@ -670,20 +704,34 @@ function initDaftarBazar() {
       setFieldError(fieldEl, !ok);
       if (!ok) valid = false;
     });
+    [
+      ["bazarFileLogo", "upload-bazar-logo"],
+      ["bazarFilePoster", "upload-bazar-poster"],
+      ["bazarFileIg1", "upload-bazar-ig1"],
+      ["bazarFileIg2", "upload-bazar-ig2"]
+    ].forEach(function (pair) {
+      const input = document.getElementById(pair[0]);
+      const ok = !!(input.files && input.files[0]) && document.getElementById(pair[1]).classList.contains("has-file");
+      setFieldError(input.closest(".field"), !ok);
+      if (!ok) valid = false;
+    });
+    return valid;
+  }
 
+  function validasiLangkah2() {
     const jenisChecked = jenisChoicesEl.querySelector('input[name="bazarJenis"]:checked');
     jenisErrorEl.style.display = jenisChecked ? "none" : "block";
-    if (!jenisChecked) valid = false;
+    return !!jenisChecked;
+  }
 
-    const lokasiKosong = kodeTerpilihSet.size === 0;
-    lokasiErrorEl.style.display = (jenisChecked && lokasiKosong) ? "block" : "none";
-    if (jenisChecked && lokasiKosong) valid = false;
+  function validasiLangkah3Lokal() {
+    const kosong = kodeTerpilihSet.size === 0;
+    lokasiErrorEl.style.display = kosong ? "block" : "none";
+    return !kosong;
+  }
 
-    const fotoInput = document.getElementById("bazarFileFoto");
-    const fotoOk = fotoInput.files && fotoInput.files.length > 0;
-    setFieldError(fotoInput.closest(".field"), !fotoOk);
-    if (!fotoOk) valid = false;
-
+  function validasiLangkah4() {
+    let valid = true;
     const buktiInput = document.getElementById("bazarFileBukti");
     const buktiOk = !!(buktiInput.files && buktiInput.files[0]);
     setFieldError(buktiInput.closest(".field"), !buktiOk);
@@ -696,24 +744,156 @@ function initDaftarBazar() {
     return valid;
   }
 
+  /* ---------------- Navigasi wizard ---------------- */
+  async function lanjutDariLangkah3() {
+    if (!validasiLangkah3Lokal()) return false;
+    reservasiErrorEl.style.display = "none";
+
+    const kodeDipilih = Array.from(kodeTerpilihSet).sort();
+    const kunciSeleksi = jenisTerpilih + "|" + kodeDipilih.join(",");
+    if (reservasiTerakhirUntuk === kunciSeleksi) {
+      // Seleksinya tidak berubah sejak reservasi terakhir yang berhasil --
+      // tidak perlu panggil RPC lagi, reservasi lama masih berlaku (atau
+      // akan diperpanjang otomatis begitu submit_bazar final dijalankan).
+      return true;
+    }
+
+    const labelAsli = btnLanjut.textContent;
+    btnLanjut.disabled = true;
+    btnLanjut.textContent = "Mengunci lokasi...";
+    try {
+      const { data, error } = await supabaseClient.rpc("bazar_reservasi_stand", {
+        p_jenis_stand: jenisTerpilih,
+        p_kode_stand: kodeDipilih,
+        p_sesi_token: sesiToken
+      });
+      if (error) throw new Error(error.message);
+      if (!data.success) {
+        reservasiErrorEl.textContent = data.message || "Gagal mengunci lokasi, coba lagi.";
+        reservasiErrorEl.style.display = "block";
+        // Kalau pendaftaran ternyata baru saja ditutup panitia DI TENGAH
+        // pengisian (sangat jarang, tapi mungkin), muatPengaturanBazar()
+        // sudah mengganti seluruh ".form-shell" dengan pesan tertutup --
+        // elemen denah (#bazar-denah-outer dkk) jadi tidak ada lagi di DOM,
+        // jadi JANGAN panggil renderLokasiPicker() kalau itu terjadi
+        // (akan error null reference kalau dipaksa).
+        const masihBuka = await muatPengaturanBazar();
+        if (!masihBuka) return false;
+        renderLokasiPicker();
+        if (Array.isArray(data.kode_bentrok) && data.kode_bentrok.length > 0) {
+          // Lokasi yang bentrok otomatis lepas dari pilihan, sisanya tetap
+          // ada (BEDA dari penanganan bentrok saat submit final migrasi
+          // 0040/0041 yang mereset total) -- di Langkah 3 ini pendaftar
+          // masih bisa lihat & pilih lokasi PENGGANTI langsung di tempat
+          // tanpa kehilangan pilihan lain yang sudah benar.
+          data.kode_bentrok.forEach(function (k) { kodeTerpilihSet.delete(k); });
+          perbaruiTotalLokasi();
+          highlightKodeBentrok(data.kode_bentrok);
+        }
+        return false;
+      }
+      reservasiTerakhirUntuk = kunciSeleksi;
+      return true;
+    } catch (err) {
+      reservasiErrorEl.textContent = "Gagal mengunci lokasi: " + err.message;
+      reservasiErrorEl.style.display = "block";
+      return false;
+    } finally {
+      btnLanjut.disabled = false;
+      btnLanjut.textContent = labelAsli;
+    }
+  }
+
+  function perbaruiRingkasanAkhir() {
+    const harga = jenisTerpilih && jenisStandInfo[jenisTerpilih] ? (jenisStandInfo[jenisTerpilih].harga || 0) : 0;
+    const jumlah = kodeTerpilihSet.size;
+    const kodeList = Array.from(kodeTerpilihSet).sort().join(", ");
+    ringkasanAkhirEl.innerHTML =
+      '<strong>' + escapeHTMLDaftarBazar(document.getElementById("bazarNamaUsaha").value.trim() || "-") + '</strong>' +
+      'Jenis ' + escapeHTMLDaftarBazar(jenisTerpilih || "-") + ' · ' + jumlah + ' stand (' + escapeHTMLDaftarBazar(kodeList) + ')<br/>' +
+      'Total sewa: ' + formatRupiahDaftarBazar(jumlah * harga);
+  }
+
+  async function lepasReservasiSekarang() {
+    if (!reservasiTerakhirUntuk) return;
+    reservasiTerakhirUntuk = null;
+    try {
+      await supabaseClient.rpc("bazar_lepas_reservasi", { p_sesi_token: sesiToken });
+    } catch (e) {
+      console.error("Gagal melepas reservasi:", e);
+    }
+  }
+
+  btnLanjut.addEventListener("click", async function () {
+    if (currentStep === 1) {
+      if (!validasiLangkah1()) {
+        const err = form.querySelector(".field.has-error");
+        if (err) err.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      currentStep = 2;
+      perbaruiTampilanLangkah();
+    } else if (currentStep === 2) {
+      if (!validasiLangkah2()) return;
+      currentStep = 3;
+      renderLokasiPicker();
+      perbaruiTampilanLangkah();
+    } else if (currentStep === 3) {
+      const ok = await lanjutDariLangkah3();
+      if (!ok) return;
+      perbaruiRingkasanAkhir();
+      currentStep = 4;
+      perbaruiTampilanLangkah();
+    }
+  });
+
+  btnKembali.addEventListener("click", async function () {
+    if (currentStep === 2) {
+      currentStep = 1;
+    } else if (currentStep === 3) {
+      currentStep = 2;
+    } else if (currentStep === 4) {
+      currentStep = 3;
+      renderLokasiPicker();
+    }
+    perbaruiTampilanLangkah();
+  });
+
+  // Kalau pendaftar mundur dari Langkah 3 balik ke Langkah 2 (berarti
+  // berpotensi ganti jenis stand), lepas reservasi yang sedang dipegang --
+  // dipasang terpisah dari listener "Kembali" di atas karena harus async
+  // dan tidak boleh menunda pindah langkahnya (lepas reservasi jalan di
+  // belakang layar, tidak perlu ditunggu pendaftar).
+  btnKembali.addEventListener("click", function () {
+    if (currentStep === 2) lepasReservasiSekarang();
+  });
+
+  /* ---------------- Submit akhir (Langkah 4) ---------------- */
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    if (!validateForm()) {
-      const firstError = form.querySelector(".has-error, #bazar-jenis-error[style*='block'], #bazar-lokasi-error[style*='block']");
-      if (firstError) firstError.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (currentStep !== TOTAL_STEP) return;
+    if (!validasiLangkah4()) {
+      const err = form.querySelector(".field.has-error, #bazar-konfirmasi-error[style*='block']");
+      if (err) err.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
     btnSubmit.disabled = true;
     btnSubmit.textContent = "Mengirim...";
+    btnKembali.disabled = true;
 
-    const fotoList = Array.from(document.getElementById("bazarFileFoto").files || []);
+    const fileLogo = document.getElementById("bazarFileLogo").files[0];
+    const filePoster = document.getElementById("bazarFilePoster").files[0];
+    const fileIg1 = document.getElementById("bazarFileIg1").files[0];
+    const fileIg2 = document.getElementById("bazarFileIg2").files[0];
     const fileBukti = document.getElementById("bazarFileBukti").files[0];
-    const jenisChecked = jenisChoicesEl.querySelector('input[name="bazarJenis"]:checked');
     const kodeDipilih = Array.from(kodeTerpilihSet);
 
     Promise.all([
-      Promise.all(fotoList.map(function (f, i) { return uploadKeStorageBazar(f, "foto-produk-" + (i + 1)); })),
+      uploadKeStorageBazar(fileLogo, "logo-usaha"),
+      uploadKeStorageBazar(filePoster, "poster-promosi"),
+      uploadKeStorageBazar(fileIg1, "bukti-follow-ig-1"),
+      uploadKeStorageBazar(fileIg2, "bukti-follow-ig-2"),
       uploadKeStorageBazar(fileBukti, "bukti-bayar")
     ])
       .then(function (hasil) {
@@ -722,42 +902,45 @@ function initDaftarBazar() {
           p_jenis_produk: document.getElementById("bazarJenisProduk").value.trim(),
           p_nama_penanggung_jawab: document.getElementById("bazarPenanggungJawab").value.trim(),
           p_whatsapp: document.getElementById("bazarWhatsapp").value.trim(),
-          p_jenis_stand: jenisChecked ? jenisChecked.value : "",
+          p_jenis_stand: jenisTerpilih || "",
           p_kode_stand: kodeDipilih,
-          p_url_foto_produk: hasil[0],
-          p_url_bukti_bayar: hasil[1]
+          p_url_foto_produk: [hasil[0], hasil[1]],
+          p_url_bukti_follow_ig: [hasil[2], hasil[3]],
+          p_url_bukti_bayar: hasil[4]
         });
       })
       .then(async function (res) {
         if (res.error) throw new Error(res.error.message);
         const data = res.data;
         if (data.success) {
+          reservasiTerakhirUntuk = null; // sudah final, tidak perlu dilepas lagi (submit_bazar sendiri yang membersihkan kolom reservasinya)
           form.style.display = "none";
           regNumberEl.textContent = data.nomor_pendaftaran || "-";
           resultPanel.classList.add("is-visible");
           resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           // Salah satu stand yang dipilih baru saja diambil pendaftar lain
-          // (lihat gating "for update" di submit_bazar, migrasi 0037) --
-          // pesannya (migrasi 0040) sudah menyebut KODE STAND spesifik yang
-          // bentrok, dan respons membawa array `kode_bentrok` terpisah.
+          // meski sudah sempat direservasi (kedaluwarsa, atau race
+          // condition) -- pesannya (migrasi 0040/0041) sudah menyebut KODE
+          // STAND spesifik yang bentrok. Sesuai permintaan: pendaftar
+          // diminta pilih ulang SEMUA lokasi dari awal (bukan dipertahankan
+          // sebagian), jadi dibawa balik ke Langkah 3 dengan seleksi kosong.
           alert("Pendaftaran gagal: " + (data.message || "Terjadi kesalahan, coba lagi."));
           btnSubmit.disabled = false;
           btnSubmit.textContent = "Kirim Pendaftaran Bazar";
-          // Muat ulang daftar denah supaya status terisi/tersedia langsung
-          // sinkron, LALU gambar ulang kanvas dari nol -- SELURUH pilihan
-          // sebelumnya (termasuk stand lain yang sebenarnya masih valid)
-          // sengaja DIHAPUS TOTAL, bukan dipertahankan, supaya pendaftar
-          // memilih ulang semua lokasi dari awal (sesuai permintaan: jangan
-          // biarkan stand yang tidak bentrok tetap tersisa terpilih). Kalau
-          // respons membawa `kode_bentrok`, kedipkan PERSIS kotak yang
-          // bentrok itu supaya pendaftar tahu sebabnya sebelum memilih ulang.
-          await muatPengaturanBazar();
-          if (jenisTerpilih) {
-            renderLokasiPicker();
-            if (Array.isArray(data.kode_bentrok) && data.kode_bentrok.length > 0) {
-              highlightKodeBentrok(data.kode_bentrok);
-            }
+          btnKembali.disabled = false;
+          kodeTerpilihSet = new Set();
+          reservasiTerakhirUntuk = null;
+          // Sama seperti di lanjutDariLangkah3() -- kalau pendaftaran ternyata
+          // baru saja ditutup panitia, ".form-shell" sudah diganti total oleh
+          // muatPengaturanBazar(), jadi jangan paksa render denah/langkah lagi.
+          const masihBuka = await muatPengaturanBazar();
+          if (!masihBuka) return;
+          currentStep = 3;
+          renderLokasiPicker();
+          perbaruiTampilanLangkah();
+          if (Array.isArray(data.kode_bentrok) && data.kode_bentrok.length > 0) {
+            highlightKodeBentrok(data.kode_bentrok);
           }
         }
       })
@@ -766,14 +949,32 @@ function initDaftarBazar() {
         alert("Gagal mengirim data: " + err.message);
         btnSubmit.disabled = false;
         btnSubmit.textContent = "Kirim Pendaftaran Bazar";
+        btnKembali.disabled = false;
       });
   });
 
   document.getElementById("btn-daftar-bazar-lagi").addEventListener("click", function () {
+    lepasReservasiSekarang();
     window.gotoRoute("#/daftar-bazar");
   });
 
-  muatPengaturanBazar();
+  // Best-effort: kalau pendaftar menutup/meninggalkan tab di tengah jalan
+  // (sudah sempat reservasi di Langkah 3->4 tapi belum submit), coba lepas
+  // reservasinya supaya stand itu tidak nyangkut dipegang sia-sia sampai 15
+  // menit kedaluwarsa sendiri. BUKAN jaminan mutlak (browser boleh saja
+  // menutup koneksi sebelum request ini sempat terkirim) -- makanya
+  // kedaluwarsa otomatis di server (migrasi 0042) tetap jadi jaring
+  // pengaman utama, ini cuma percepatan kalau sempat.
+  window.addEventListener("beforeunload", function () {
+    if (!reservasiTerakhirUntuk) return;
+    try {
+      supabaseClient.rpc("bazar_lepas_reservasi", { p_sesi_token: sesiToken });
+    } catch (e) { /* abaikan -- murni best-effort */ }
+  });
+
+  muatPengaturanBazar().then(function (berhasilDibuka) {
+    if (berhasilDibuka) perbaruiTampilanLangkah();
+  });
 }
 
 window.ViewDaftarBazar = { template: DAFTAR_BAZAR_TEMPLATE, init: initDaftarBazar };
