@@ -28,10 +28,23 @@ const BAZAR_TEMPLATE = `
 
   <div class="section__head">
     <h2>Jenis & Lokasi Stand</h2>
-    <p>Tiga jenis stand yang tersedia, masing-masing punya area & kuota sendiri -- lokasi persisnya dipilih saat mengisi form pendaftaran.</p>
+    <p>Tiga jenis stand yang tersedia, masing-masing punya area & kuota sendiri -- klik salah satu kartu untuk lihat denah & stand yang sudah terisi, atau pilih lokasi persisnya saat mengisi form pendaftaran.</p>
   </div>
   <div id="bazar-jenis-list">
     <p class="hint">Memuat jenis stand...</p>
+  </div>
+
+  <div id="bazar-denah-info-wrap" style="display:none;margin-top:18px;" class="syarat-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+      <strong id="bazar-denah-info-judul">Denah Jenis</strong>
+      <button type="button" class="btn btn--ghost" id="bazar-denah-info-tutup" style="padding:4px 12px;font-size:0.82rem;">Tutup denah ✕</button>
+    </div>
+    <div id="bazar-denah-info-legenda"></div>
+    <div style="padding:14px 10px 6px;">
+      <div id="bazar-denah-info-outer" style="width:100%;max-width:900px;overflow:hidden;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;margin:0 auto;">
+        <div id="bazar-denah-info-inner" style="position:absolute;top:0;left:0;transform-origin:top left;"></div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -42,10 +55,17 @@ const BAZAR_TEMPLATE = `
   </div>
   <div class="syarat-card">
     <div class="syarat-item">
-      <span class="syarat-item__icon">📸</span>
+      <span class="syarat-item__icon">🏷️</span>
       <div class="syarat-item__text">
-        <strong>Foto Produk/Logo Usaha</strong>
-        <p>Satu atau beberapa foto produk/logo usaha Anda, dipakai panitia untuk verifikasi & promosi bazar. Format JPG/PNG, maksimal 4MB per file.</p>
+        <strong>Logo Usaha & Foto Poster Promosi</strong>
+        <p>Logo usaha/stand Anda, dan satu foto/poster promosi produk -- dipakai panitia untuk verifikasi & promosi bazar. Format JPG/PNG, maksimal 4MB per file.</p>
+      </div>
+    </div>
+    <div class="syarat-item">
+      <span class="syarat-item__icon">📱</span>
+      <div class="syarat-item__text">
+        <strong>Bukti Follow Instagram</strong>
+        <p>Screenshot halaman profil <a href="https://instagram.com/al.azzaam.id" target="_blank" rel="noopener">@al.azzaam.id</a> dan <a href="https://instagram.com/alifest.26" target="_blank" rel="noopener">@alifest.26</a> (terlihat tombol "Following"), satu screenshot per akun.</p>
       </div>
     </div>
     <div class="syarat-item">
@@ -132,12 +152,150 @@ function formatRupiahBazarInfo(angka) {
   return "Rp" + Number(angka || 0).toLocaleString("id-ID");
 }
 
+// -------- Denah READ-ONLY murni informatif, dibuka saat pengunjung klik
+// salah satu kartu jenis stand (lihat renderDenahInfo() di bawah) -- MIRIP
+// picker di view-daftarbazar.js (kanvas virtual discaling ke lebar
+// kontainer), tapi di sini TIDAK ADA apa pun yang bisa diklik/dipilih
+// (murni lihat-lihat), dan kotak yang SUDAH TERISI menampilkan nama usaha
+// tenant-nya (dari RPC publik `bazar_denah_publik()`, migrasi 0042 -- CUMA
+// nama usaha yang diekspos, bukan WhatsApp/penanggung jawab). Konstanta
+// kanvas & warna SENGAJA diberi nama sendiri (akhiran `_INFO`) -- file ini
+// dimuat sebagai <script> klasik berbagi satu scope global dengan
+// view-daftarbazar.js & view-adminbazar.js, jadi nama identik akan tabrakan
+// `SyntaxError: Identifier '...' has already been declared` (lihat catatan
+// panjang soal bug ini di bagian atas file ini & view-daftarbazar.js).
+const DENAH_INFO_CANVAS_W = 760;
+const DENAH_INFO_CANVAS_H = 600;
+const WARNA_JENIS_DENAH_INFO = { A: "#e08a2e", B: "#3f7fb0", C: "#d1588f" };
+let _denahInfoResizeHandler = null;
+
+function labelRingkasKodeBazarInfo(kode) {
+  const bagian = String(kode || "").split("-");
+  if (bagian.length >= 3) {
+    const nomor = parseInt(bagian[bagian.length - 1], 10);
+    return bagian.slice(1, -1).join("-") + "-" + (isNaN(nomor) ? bagian[bagian.length - 1] : nomor);
+  }
+  if (bagian.length === 2) {
+    const nomor = parseInt(bagian[1], 10);
+    return "DM-" + (isNaN(nomor) ? bagian[1] : nomor);
+  }
+  return kode;
+}
+
+function buatKotakDenahInfo(opsi) {
+  const el = document.createElement("div");
+  el.style.position = "absolute";
+  el.style.left = opsi.x + "px";
+  el.style.top = opsi.y + "px";
+  el.style.width = opsi.w + "px";
+  el.style.height = opsi.h + "px";
+  el.style.transformOrigin = "50% 50%";
+  el.style.transform = "rotate(" + (opsi.rotasi || 0) + "deg)";
+  el.style.borderRadius = "6px";
+  el.style.display = "flex";
+  el.style.flexDirection = "column";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.textAlign = "center";
+  el.style.fontWeight = "700";
+  el.style.lineHeight = "1.15";
+  el.style.padding = "2px";
+  el.style.boxSizing = "border-box";
+  el.style.fontSize = Math.max(8, Math.min(26, Math.min(opsi.w, opsi.h) / 3.2)) + "px";
+  el.style.border = "1.5px solid rgba(0,0,0,0.15)";
+  el.style.userSelect = "none";
+
+  if (opsi.tipeLabel) {
+    el.style.background = opsi.warnaBg || "#eef3ea";
+    el.style.color = opsi.warnaTeks || "#4b5f4d";
+    el.style.opacity = "0.6";
+    el.innerHTML =
+      (opsi.sublabel ? ('<span style="display:block;font-size:1.3em;">' + escapeHTMLBazarInfo(opsi.sublabel) + '</span>') : "") +
+      '<span>' + escapeHTMLBazarInfo(opsi.label) + '</span>';
+    return el;
+  }
+
+  const warnaDasar = WARNA_JENIS_DENAH_INFO[opsi.jenis] || "#777777";
+  el.textContent = labelRingkasKodeBazarInfo(opsi.kode);
+
+  if (opsi.terisi) {
+    el.style.background = "#fde8e8";
+    el.style.color = "#b91c1c";
+    el.title = opsi.kode + (opsi.namaUsaha ? (" -- sudah terisi: " + opsi.namaUsaha) : " -- sudah terisi.");
+  } else {
+    el.style.background = warnaDasar;
+    el.style.color = "#ffffff";
+    el.title = opsi.kode + " -- masih tersedia.";
+  }
+  return el;
+}
+
+// Dipanggil sekali di awal (bersamaan dengan data lain) supaya saat kartu
+// jenis diklik, denahnya langsung tampil tanpa nunggu fetch lagi.
+async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
+  const wrap = document.getElementById("bazar-denah-info-wrap");
+  const judulEl = document.getElementById("bazar-denah-info-judul");
+  const legendaEl = document.getElementById("bazar-denah-info-legenda");
+  const outerEl = document.getElementById("bazar-denah-info-outer");
+  const innerEl = document.getElementById("bazar-denah-info-inner");
+  if (!wrap) return;
+
+  judulEl.textContent = "Denah Jenis " + jenis;
+  const warnaJenisAktif = WARNA_JENIS_DENAH_INFO[jenis] || "#777777";
+  legendaEl.innerHTML =
+    '<div style="display:flex;flex-wrap:wrap;gap:14px;margin:8px 0 2px;font-size:12.5px;color:#4b5563;">' +
+      '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:' + warnaJenisAktif + ';display:inline-block;"></span>Tersedia</span>' +
+      '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#fde8e8;border:1px solid #f3b4b4;display:inline-block;"></span>Sudah terisi (arahkan kursor/tahan kotaknya untuk lihat nama usahanya)</span>' +
+    '</div>';
+
+  innerEl.style.width = DENAH_INFO_CANVAS_W + "px";
+  innerEl.style.height = DENAH_INFO_CANVAS_H + "px";
+  innerEl.innerHTML = "";
+
+  elemenList.forEach(function (elm) {
+    innerEl.appendChild(buatKotakDenahInfo({
+      tipeLabel: true,
+      x: elm.pos_x, y: elm.pos_y, w: elm.lebar, h: elm.tinggi, rotasi: elm.rotasi,
+      warnaBg: elm.warna_bg, warnaTeks: elm.warna_teks,
+      label: elm.teks, sublabel: elm.emoji
+    }));
+  });
+  standList.filter(function (s) { return s.jenis === jenis; }).forEach(function (s) {
+    innerEl.appendChild(buatKotakDenahInfo({
+      kode: s.kode, jenis: s.jenis,
+      x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
+      w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
+      terisi: !!s.tenant_id,
+      namaUsaha: namaTenantByKode[s.kode] || null
+    }));
+  });
+
+  function terapkanSkalaDenahInfo() {
+    if (!outerEl.clientWidth) return;
+    const scale = outerEl.clientWidth / DENAH_INFO_CANVAS_W;
+    innerEl.style.transform = "scale(" + scale + ")";
+    outerEl.style.height = (DENAH_INFO_CANVAS_H * scale) + "px";
+  }
+  terapkanSkalaDenahInfo();
+  if (_denahInfoResizeHandler) window.removeEventListener("resize", _denahInfoResizeHandler);
+  _denahInfoResizeHandler = terapkanSkalaDenahInfo;
+  window.addEventListener("resize", _denahInfoResizeHandler);
+
+  wrap.style.display = "block";
+  wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 async function initBazar() {
-  const [{ data: settings }, { data: standData }, { data: sesi }] = await Promise.all([
+  const [{ data: settings }, { data: standData }, { data: elemenData }, { data: tenantPublik }, { data: sesi }] = await Promise.all([
     supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
-    supabaseClient.from("bazar_stand").select("jenis,area,tenant_id"),
+    supabaseClient.from("bazar_stand").select("jenis,area,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi"),
+    supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
+    supabaseClient.rpc("bazar_denah_publik"),
     supabaseClient.auth.getSession()
   ]);
+  const elemenList = elemenData || [];
+  const namaTenantByKode = {};
+  (tenantPublik || []).forEach(function (r) { namaTenantByKode[r.kode] = r.nama_usaha; });
 
   const panitiaLogin = !!(sesi && sesi.session);
   if (settings && settings.tutup_total === true && !panitiaLogin) {
@@ -170,9 +328,11 @@ async function initBazar() {
   const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
 
   // -------- Jenis & Lokasi Stand (migrasi 0037) -- satu kartu per jenis
-  // (A/B/C), menampilkan ukuran, harga, daftar area & sisa kuota TIAP area
-  // (bukan cuma total) -- supaya pengunjung sudah tahu area mana yang masih
-  // longgar sebelum masuk ke form pendaftaran untuk memilih lokasi persisnya.
+  // (A/B/C), menampilkan ukuran, harga, daftar area & jumlah TERPAKAI tiap
+  // area (bukan "sisa" lagi -- permintaan: tampilkan yang sudah terpakai,
+  // bukan yang masih tersisa). Kartunya juga BISA DIKLIK (lihat listener di
+  // bawah) untuk membuka denah jenis itu lengkap dengan status tiap stand +
+  // nama tenant yang sudah menempatinya (renderDenahInfo() di atas).
   const jenisListEl = document.getElementById("bazar-jenis-list");
   if (jenisListEl) {
     jenisListEl.innerHTML = URUTAN_JENIS_STAND_INFO.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
@@ -182,24 +342,39 @@ async function initBazar() {
       standJenisIni.forEach(function (s) { if (areaList.indexOf(s.area) === -1) areaList.push(s.area); });
       const rincianArea = areaList.map(function (area) {
         const standArea = standJenisIni.filter(function (s) { return s.area === area; });
-        const sisaArea = standArea.filter(function (s) { return !s.tenant_id; }).length;
-        return area + " (sisa " + sisaArea + "/" + standArea.length + ")";
+        const terpakaiArea = standArea.filter(function (s) { return !!s.tenant_id; }).length;
+        return area + " (terpakai " + terpakaiArea + "/" + standArea.length + ")";
       }).join(", ");
-      const sisaJenis = standJenisIni.filter(function (s) { return !s.tenant_id; }).length;
+      const terpakaiJenis = standJenisIni.filter(function (s) { return !!s.tenant_id; }).length;
+      const semuaPenuhJenis = standJenisIni.length > 0 && terpakaiJenis === standJenisIni.length;
       return (
-        '<div class="syarat-card" style="margin-bottom:14px;">' +
+        '<div class="syarat-card jenis-stand-card" data-jenis="' + j + '" style="margin-bottom:14px;cursor:pointer;" role="button" tabindex="0">' +
           '<div class="syarat-item">' +
             '<span class="syarat-item__icon">🏪</span>' +
             '<div class="syarat-item__text">' +
               '<strong>' + escapeHTMLBazarInfo(info.nama || ("Jenis " + j)) + ' — ' + escapeHTMLBazarInfo(info.ukuran || "-") + ' — ' + formatRupiahBazarInfo(info.harga) + '</strong>' +
               '<p>Area: ' + escapeHTMLBazarInfo(rincianArea || "-") + '.' +
-              (sisaJenis === 0 ? ' <strong style="color:#9C2B30;">Sudah penuh.</strong>' : (' Total sisa ' + sisaJenis + ' dari ' + standJenisIni.length + ' stand.')) +
+              (semuaPenuhJenis ? ' <strong style="color:#9C2B30;">Sudah penuh.</strong>' : (' Total terpakai ' + terpakaiJenis + ' dari ' + standJenisIni.length + ' stand.')) +
+              ' <span style="color:#1E7A4C;font-weight:600;">Klik untuk lihat denah ↓</span>' +
               '</p>' +
             '</div>' +
           '</div>' +
         '</div>'
       );
     }).join("");
+
+    jenisListEl.querySelectorAll(".jenis-stand-card").forEach(function (card) {
+      function bukaDenahKartu() { renderDenahInfo(card.getAttribute("data-jenis"), standList, elemenList, namaTenantByKode); }
+      card.addEventListener("click", bukaDenahKartu);
+      card.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); bukaDenahKartu(); } });
+    });
+  }
+
+  const tutupDenahInfoBtn = document.getElementById("bazar-denah-info-tutup");
+  if (tutupDenahInfoBtn) {
+    tutupDenahInfoBtn.addEventListener("click", function () {
+      document.getElementById("bazar-denah-info-wrap").style.display = "none";
+    });
   }
 
   const infoBiayaEl = document.getElementById("bazar-info-biaya");
