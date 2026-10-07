@@ -86,10 +86,18 @@ function escapeHTMLBazarInfo(teks) {
 // seperti PESAN_LUCU_TUTUP di router.js (gerbang pendaftaran lomba), tapi
 // isinya khusus dibuat berbeda/lebih "ninja-bertema-cakra" sesuai
 // permintaan supaya pesan tutup Bazar juga terasa lucu, bukan cuma pesan
-// error polos. Disalin apa adanya (duplikat, bukan dipakai bersama lewat
-// window.xxx) juga di view-daftarbazar.js -- kalau isinya mau diubah,
-// ganti di KEDUA tempat itu supaya tetap konsisten.
-const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
+// error polos. ISI-nya SAMA PERSIS dengan yang ada di view-daftarbazar.js
+// (kalau mau diubah, ganti di KEDUA tempat itu supaya tetap konsisten) --
+// tapi NAMA KONSTANTANYA beda (`_INFO` di sini, `_DAFTAR` di
+// view-daftarbazar.js) SENGAJA, bukan lupa disamakan: kedua file ini
+// sama-sama <script> klasik di index.html yang berbagi satu scope global,
+// jadi dua `const` bernama identik di file berbeda akan membuat browser
+// melempar `SyntaxError: Identifier '...' has already been declared` saat
+// file kedua dimuat -- yang menggagalkan TOTAL seluruh isi file itu
+// (termasuk `window.ViewXxx` di baris paling akhirnya). Ini sumber bug
+// nyata yang sempat bikin tombol "Daftar Stand Sekarang" gagal berpindah
+// halaman (console menunjukkan error ini persis).
+const PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO = [
   "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
   "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
   "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
@@ -108,7 +116,7 @@ const PESAN_LUCU_BAZAR_TUTUP_TOTAL = [
 function tampilkanPesanBazarTutupTotal() {
   const app = document.getElementById("app");
   if (!app) return;
-  const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL.length)];
+  const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO.length)];
   app.innerHTML =
     '<section class="hero container">' +
       '<span class="hero__eyebrow">Al Azzaam Islamic Fair</span>' +
