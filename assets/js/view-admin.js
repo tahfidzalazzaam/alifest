@@ -305,6 +305,9 @@ async function bukaModalTim(row, rule) {
     (row.status === "Perlu Tambah Nomor Punggung"
       ? '<p class="hint modal-status-hint">Link "Lengkapi Nomor Punggung" sudah/akan dikirim ke pendamping lewat WA -- status otomatis balik ke "Menunggu Verifikasi" begitu mereka selesai mengisi semua nomor punggung lewat link itu.</p>'
       : "") +
+    (row.status === "Ditolak" && row.alasan_penolakan
+      ? '<p class="hint modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
+      : "") +
     '<div class="modal-tim-berkas">' +
       '<strong>Berkas:</strong> ' +
       (row.url_surat_delegasi ? '<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">Surat Delegasi</a>' : '<span class="hint">Delegasi -</span>') +
@@ -390,6 +393,9 @@ function bukaModalIndividu(row) {
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="hint modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
+      : "") +
+    (row.status === "Ditolak" && row.alasan_penolakan
+      ? '<p class="hint modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
       : "") +
     '<div class="modal-tim-berkas">' +
       '<strong>Berkas:</strong> ' +
@@ -638,45 +644,142 @@ async function loadTabPendaftar() {
       });
     });
 
+    // Fungsi bersama yang benar-benar MENYIMPAN perubahan status ke database
+    // -- dipakai baik untuk status biasa (langsung) maupun status "Ditolak"
+    // (baru dipanggil SETELAH panitia memilih alasan penolakan lewat modal,
+    // lihat bukaModalAlasanPenolakan di bawah). `alasanPenolakan` cuma
+    // dikirim kalau statusBaru === "Ditolak"; untuk status lain selalu null
+    // (mis. tidak menimpa alasan lama kalau panitia pernah menolak lalu
+    // mengubah lagi ke status lain, biar riwayatnya tetap ada kalau nanti
+    // ditolak ulang -- lihat bukaModalAlasanPenolakan, alasan lama dipakai
+    // sebagai nilai awal dropdown-nya).
+    async function commitPerubahanStatus(id, sel, statusBaru, alasanPenolakan) {
+      // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
+      // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
+      // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
+      // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
+      // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
+      if (statusBaru === "Perlu Tambah Nomor Punggung") {
+        const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: id });
+        if (tokenError) {
+          alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
+          sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
+          return;
+        }
+      }
+
+      const payload = { status: statusBaru };
+      if (statusBaru === "Ditolak") payload.alasan_penolakan = alasanPenolakan;
+
+      const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", id);
+      if (error) {
+        alert("Gagal mengubah status: " + error.message);
+        sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
+        return;
+      }
+      const row = rows.find(function (r) { return r.id === id; });
+      if (row) {
+        row.status = statusBaru;
+        if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
+      }
+      renderRekap();
+
+      // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga
+      // mengirim notifikasi WA (sama seperti Diterima/Ditolak) begitu panitia
+      // MEMILIH status ini di dropdown -- untuk lomba tim (Futsal), pesannya
+      // otomatis menyebut nama anggota yang usianya di luar syarat lewat
+      // placeholder {anggota_usia}, atau link lengkapi nomor punggung lewat
+      // placeholder {link_lengkapi}, atau (khusus "Ditolak") alasan
+      // penolakan lewat placeholder {alasan} (dihitung di Edge Function
+      // kirim-notifikasi-wa, lihat file itu). Ini cuma perubahan kode
+      // (frontend + Edge Function), tidak perlu migrasi SQL baru lagi.
+      if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
+        kirimNotifikasiWA(id, sel);
+      }
+    }
+
+    // Modal wajib pilih alasan penolakan, dibuka saat panitia memilih
+    // "Ditolak" di dropdown status -- daftar pilihannya diambil dari
+    // site_settings.alasan_penolakan_list (diedit panitia sendiri lewat tab
+    // "Notifikasi WA", lihat loadTabNotifWa), ditambah satu opsi tetap
+    // "Lainnya (tulis sendiri)" untuk kasus yang tidak ada di daftar.
+    async function bukaModalAlasanPenolakan(id, sel, statusLama) {
+      const row = rows.find(function (r) { return r.id === id; });
+      const { data: settingsRow } = await supabaseClient
+        .from("site_settings").select("alasan_penolakan_list").eq("id", 1).single();
+      const daftarAlasan = (settingsRow && Array.isArray(settingsRow.alasan_penolakan_list))
+        ? settingsRow.alasan_penolakan_list
+        : [];
+      const alasanLama = row ? row.alasan_penolakan : null;
+
+      const optionsHTML = daftarAlasan.map(function (a) {
+        const selected = a === alasanLama ? " selected" : "";
+        return '<option value="' + escapeHTML(a) + '"' + selected + '>' + escapeHTML(a) + '</option>';
+      }).join("") + '<option value="__lainnya__"' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? " selected" : "") + '>Lainnya (tulis sendiri)</option>';
+
+      const isiHTML =
+        '<p class="hint">Pilih alasan penolakan -- wajib diisi, akan ikut dikirim ke pendaftar lewat WA lewat placeholder <code>{alasan}</code>.</p>' +
+        '<div class="field">' +
+          '<label for="alasan-penolakan-select">Alasan</label>' +
+          '<select id="alasan-penolakan-select">' + optionsHTML + '</select>' +
+        '</div>' +
+        '<div class="field" id="alasan-penolakan-lainnya-wrap" style="margin-top:12px;display:none;">' +
+          '<label for="alasan-penolakan-lainnya">Tulis alasan sendiri</label>' +
+          '<input id="alasan-penolakan-lainnya" type="text" placeholder="mis. Berkas tidak lengkap" value="' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? escapeHTML(alasanLama) : "") + '">' +
+        '</div>' +
+        '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">' +
+          '<button type="button" class="btn btn--ghost" id="btn-batal-alasan-penolakan">Batal</button>' +
+          '<button type="button" class="btn btn--primary" id="btn-simpan-alasan-penolakan">Tandai Ditolak</button>' +
+        '</div>';
+
+      bukaModal("Alasan Penolakan — " + (row ? (row.nama_tim || row.nama_lengkap) : ""), isiHTML);
+
+      const selectEl = document.getElementById("alasan-penolakan-select");
+      const lainnyaWrap = document.getElementById("alasan-penolakan-lainnya-wrap");
+      const lainnyaInput = document.getElementById("alasan-penolakan-lainnya");
+
+      function syncLainnyaVisibility() {
+        lainnyaWrap.style.display = selectEl.value === "__lainnya__" ? "block" : "none";
+      }
+      syncLainnyaVisibility();
+      selectEl.addEventListener("change", syncLainnyaVisibility);
+
+      document.getElementById("btn-batal-alasan-penolakan").addEventListener("click", function () {
+        sel.value = statusLama || sel.value;
+        tutupModal();
+      });
+
+      document.getElementById("btn-simpan-alasan-penolakan").addEventListener("click", function () {
+        const alasanDipilih = selectEl.value === "__lainnya__"
+          ? lainnyaInput.value.trim()
+          : selectEl.value;
+        if (!alasanDipilih) {
+          alert("Alasan penolakan wajib diisi.");
+          return;
+        }
+        tutupModal();
+        commitPerubahanStatus(id, sel, "Ditolak", alasanDipilih);
+      });
+    }
+
     tbody.querySelectorAll(".status-select").forEach(function (sel) {
       sel.addEventListener("change", async function () {
         const id = sel.getAttribute("data-id");
         const statusBaru = sel.value;
+        const statusLama = (rows.find(function (r) { return r.id === id; }) || {}).status;
 
-        // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
-        // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
-        // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
-        // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
-        // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
-        if (statusBaru === "Perlu Tambah Nomor Punggung") {
-          const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: id });
-          if (tokenError) {
-            alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
-            sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
-            return;
-          }
-        }
-
-        const { error } = await supabaseClient.from("pendaftaran").update({ status: statusBaru }).eq("id", id);
-        if (error) {
-          alert("Gagal mengubah status: " + error.message);
+        // Status "Ditolak" WAJIB menyertakan alasan -- panitia harus pilih
+        // dulu lewat modal (dropdown + opsi tulis sendiri) sebelum status-nya
+        // benar-benar tersimpan. Modal ini juga yang memanggil
+        // commitPerubahanStatus begitu panitia menekan "Tandai Ditolak", dan
+        // yang mengembalikan dropdown ke status lama kalau panitia menekan
+        // "Batal".
+        if (statusBaru === "Ditolak") {
+          bukaModalAlasanPenolakan(id, sel, statusLama);
           return;
         }
-        const row = rows.find(function (r) { return r.id === id; });
-        if (row) row.status = statusBaru;
-        renderRekap();
 
-        // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga
-        // mengirim notifikasi WA (sama seperti Diterima/Ditolak) begitu panitia
-        // MEMILIH status ini di dropdown -- untuk lomba tim (Futsal), pesannya
-        // otomatis menyebut nama anggota yang usianya di luar syarat lewat
-        // placeholder {anggota_usia}, atau link lengkapi nomor punggung lewat
-        // placeholder {link_lengkapi} (dihitung di Edge Function
-        // kirim-notifikasi-wa, lihat file itu). Ini cuma perubahan kode
-        // (frontend + Edge Function), tidak perlu migrasi SQL baru lagi.
-        if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
-          kirimNotifikasiWA(id, sel);
-        }
+        commitPerubahanStatus(id, sel, statusBaru, null);
       });
     });
 
@@ -2308,41 +2411,66 @@ function escapeHTML(teks) {
   return div.innerHTML;
 }
 
-// Placeholder yang bisa dipakai di Pesan Default. Sejak migrasi 0028, pesan
-// & link grup WA SUDAH TIDAK dibedakan per lomba lagi -- SATU pesan dan SATU
-// link grup berlaku untuk SEMUA lomba & semua status (fitur "Pesan per
-// Lomba" dari migrasi 0019 dihapus, karena semua pendaftar memang diarahkan
-// ke grup WA yang sama). {grup} diganti link grup WA dari kotak "Link Grup
-// WA" di bawah, TAPI HANYA kalau status pendaftaran itu "Diterima" (untuk
-// status lain selalu kosong, dicek otomatis di Edge Function, lihat migrasi
-// sebelumnya). {anggota_usia} -- khusus lomba tim (Futsal), diganti dengan
-// nama-nama anggota yang usianya di luar syarat jenjang (dipisah koma);
-// kosong untuk pendaftar individu atau kalau semua anggota tim usianya
-// sesuai syarat.
+// Keempat status yang memicu pengiriman WA -- sejak migrasi 0036, MASING-
+// MASING punya pesan sendiri yang bisa diedit panitia sendiri (sebelumnya
+// cuma satu pesan global untuk semuanya). Urutan di sini menentukan urutan
+// tampil kotak teksnya di tab "Notifikasi WA".
+const STATUS_WA_LIST = ["Diterima", "Ditolak", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung"];
+
+// Placeholder yang bisa dipakai di tiap pesan status. Sejak migrasi 0028,
+// link grup WA SUDAH TIDAK dibedakan per lomba lagi -- SATU link berlaku
+// untuk SEMUA lomba (fitur "Pesan per Lomba" dari migrasi 0019 dihapus,
+// karena semua pendaftar memang diarahkan ke grup WA yang sama). {grup}
+// diganti link grup WA dari kotak "Link Grup WA" di bawah, TAPI HANYA kalau
+// status pendaftaran itu "Diterima" (untuk status lain selalu kosong,
+// dicek otomatis di Edge Function). {anggota_usia} -- khusus lomba tim
+// (Futsal), diganti dengan nama-nama anggota yang usianya di luar syarat
+// jenjang (dipisah koma); kosong untuk pendaftar individu atau kalau semua
+// anggota tim usianya sesuai syarat. {alasan} -- sejak migrasi 0036, diganti
+// alasan penolakan yang dipilih panitia lewat dropdown wajib, TAPI HANYA
+// kalau statusnya "Ditolak" (kosong untuk status lain).
 const WA_PLACEHOLDER_HINT =
-  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu), <code>{link_lengkapi}</code> (link khusus buat pendamping tim melengkapi nomor punggung — cuma terisi kalau statusnya "Perlu Tambah Nomor Punggung", kosong untuk status lain, butuh "URL Situs" di bawah sudah diisi).';
+  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu), <code>{link_lengkapi}</code> (link khusus buat pendamping tim melengkapi nomor punggung — cuma terisi kalau statusnya "Perlu Tambah Nomor Punggung", kosong untuk status lain, butuh "URL Situs" di bawah sudah diisi), <code>{alasan}</code> (alasan penolakan yang dipilih panitia — cuma terisi kalau statusnya "Ditolak", kosong untuk status lain).';
 
 async function loadTabNotifWa() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat pengaturan notifikasi WA...</p>';
 
   const { data: settingsData } = await supabaseClient
-    .from("site_settings").select("wa_notif_template, link_grup_wa, site_url").eq("id", 1).single();
+    .from("site_settings")
+    .select("wa_notif_template, wa_template_per_status, link_grup_wa, site_url, alasan_penolakan_list")
+    .eq("id", 1).single();
 
-  const templateDefault = (settingsData && settingsData.wa_notif_template) || "";
+  const templateLama = (settingsData && settingsData.wa_notif_template) || "";
+  const templatePerStatus = (settingsData && settingsData.wa_template_per_status) || {};
   const linkGrupDefault = (settingsData && settingsData.link_grup_wa) || "";
   const siteUrlDefault = (settingsData && settingsData.site_url) || "";
+  const alasanList = Array.isArray(settingsData && settingsData.alasan_penolakan_list)
+    ? settingsData.alasan_penolakan_list
+    : [];
+
+  // Tiap status dapat kotak teksnya sendiri -- diisi dari templatePerStatus
+  // kalau sudah pernah disimpan panitia, kalau belum jatuh ke templateLama
+  // (pesan global dari sebelum migrasi 0036) supaya tidak kosong begitu
+  // tab ini pertama kali dibuka setelah migrasi.
+  const kotakStatusHTML = STATUS_WA_LIST.map(function (status, i) {
+    const isi = (templatePerStatus && templatePerStatus[status]) || templateLama;
+    const inputId = "wa-template-status-" + i;
+    return (
+      '<div class="field" style="margin-top:' + (i === 0 ? "0" : "22") + 'px;">' +
+        '<label for="' + inputId + '">Pesan untuk status "' + status + '"</label>' +
+        '<textarea id="' + inputId + '" data-status="' + escapeHTML(status) + '" rows="7">' + escapeHTML(isi) + '</textarea>' +
+      '</div>'
+    );
+  }).join("");
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
       '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
-      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, <strong>Perlu Verifikasi Usia</strong>, atau <strong>Perlu Tambah Nomor Punggung</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim, dengan pesan &amp; link grup WA yang SAMA (satu grup WA untuk semua pendaftar, tidak dibedakan per lomba). Untuk lomba tim (Futsal) yang statusnya "Perlu Verifikasi Usia", pesannya bisa otomatis menyebut nama anggota yang perlu dicek lewat placeholder <code>{anggota_usia}</code>; yang statusnya "Perlu Tambah Nomor Punggung" otomatis menerima link khusus lewat <code>{link_lengkapi}</code>.</p>' +
-      '<div class="field">' +
-        '<label for="wa-template">Pesan Notifikasi</label>' +
-        '<textarea id="wa-template" rows="9">' + escapeHTML(templateDefault) + '</textarea>' +
-        '<div class="hint">' + WA_PLACEHOLDER_HINT + '</div>' +
-      '</div>' +
-      '<div class="field">' +
+      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, <strong>Perlu Verifikasi Usia</strong>, atau <strong>Perlu Tambah Nomor Punggung</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Sejak pembaruan ini, pesan tiap status bisa diedit terpisah di bawah.</p>' +
+      kotakStatusHTML +
+      '<div class="hint" style="margin-top:14px;">' + WA_PLACEHOLDER_HINT + '</div>' +
+      '<div class="field" style="margin-top:22px;">' +
         '<label for="wa-link-grup">Link Grup WA</label>' +
         '<input type="text" id="wa-link-grup" value="' + escapeHTML(linkGrupDefault) + '" placeholder="https://chat.whatsapp.com/..." />' +
         '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, tapi HANYA untuk pendaftar yang statusnya diubah jadi "Diterima" — pendaftar yang Ditolak (atau status lain) tidak pernah menerima link ini.</div>' +
@@ -2359,6 +2487,19 @@ async function loadTabNotifWa() {
       '<p class="hint" id="wa-template-status" style="margin-top:10px;"></p>' +
     '</div>' +
     '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
+      '<h3>🚫 Alasan Penolakan</h3>' +
+      '<p>Daftar pilihan yang muncul di dropdown wajib saat panitia mengubah status pendaftaran jadi <strong>Ditolak</strong> (tab "Data Pendaftar") — satu per baris. Selain pilihan di bawah, panitia juga selalu bisa memilih "Lainnya (tulis sendiri)" untuk kasus yang tidak ada di daftar.</p>' +
+      '<div class="field">' +
+        '<label for="alasan-penolakan-list-text">Daftar Alasan <span style="font-weight:400;">(satu per baris)</span></label>' +
+        '<textarea id="alasan-penolakan-list-text" rows="6">' + escapeHTML(alasanList.join("\n")) + '</textarea>' +
+      '</div>' +
+      '<div class="form-error" id="alasan-penolakan-list-error" style="display:none;"></div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-alasan-penolakan-list">Simpan Daftar Alasan</button>' +
+      '</div>' +
+      '<p class="hint" id="alasan-penolakan-list-status" style="margin-top:10px;"></p>' +
+    '</div>' +
+    '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
       '<h3>⚙️ Setup Fonnte</h3>' +
       '<p class="hint">Notifikasi dikirim lewat layanan Fonnte. Pastikan token Fonnte sudah diisi sebagai secret Edge Function <code>FONNTE_TOKEN</code> lewat dashboard Supabase (Project Settings → Edge Functions → Secrets), dan Edge Function <code>kirim-notifikasi-wa</code> sudah di-deploy. Lihat README.md bagian "Setup Notifikasi WhatsApp (Fonnte)" untuk langkah lengkapnya.</p>' +
     '</div>';
@@ -2369,11 +2510,52 @@ async function loadTabNotifWa() {
     const statusEl = document.getElementById("wa-template-status");
     errEl.style.display = "none";
 
-    const teks = document.getElementById("wa-template").value;
+    const templateBaruPerStatus = {};
+    let adaKosong = false;
+    STATUS_WA_LIST.forEach(function (status, i) {
+      const teks = document.getElementById("wa-template-status-" + i).value;
+      if (!teks.trim()) adaKosong = true;
+      templateBaruPerStatus[status] = teks;
+    });
+    if (adaKosong) {
+      errEl.textContent = "Pesan untuk setiap status tidak boleh kosong.";
+      errEl.style.display = "block";
+      return;
+    }
+
     const linkGrup = document.getElementById("wa-link-grup").value.trim();
     const siteUrl = document.getElementById("wa-site-url").value.trim().replace(/\/+$/, "");
-    if (!teks.trim()) {
-      errEl.textContent = "Pesan tidak boleh kosong.";
+
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
+    const { error } = await supabaseClient
+      .from("site_settings")
+      .update({ wa_template_per_status: templateBaruPerStatus, link_grup_wa: linkGrup || null, site_url: siteUrl || null })
+      .eq("id", 1);
+    btn.disabled = false;
+    btn.textContent = "Simpan";
+
+    if (error) {
+      errEl.textContent = "Gagal menyimpan: " + error.message;
+      errEl.style.display = "block";
+      return;
+    }
+    statusEl.textContent = "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+
+  document.getElementById("btn-simpan-alasan-penolakan-list").addEventListener("click", async function () {
+    const btn = this;
+    const errEl = document.getElementById("alasan-penolakan-list-error");
+    const statusEl = document.getElementById("alasan-penolakan-list-status");
+    errEl.style.display = "none";
+
+    const daftarBaru = document.getElementById("alasan-penolakan-list-text").value
+      .split("\n")
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    if (daftarBaru.length === 0) {
+      errEl.textContent = "Isi minimal satu alasan penolakan.";
       errEl.style.display = "block";
       return;
     }
@@ -2382,10 +2564,10 @@ async function loadTabNotifWa() {
     btn.textContent = "Menyimpan...";
     const { error } = await supabaseClient
       .from("site_settings")
-      .update({ wa_notif_template: teks, link_grup_wa: linkGrup || null, site_url: siteUrl || null })
+      .update({ alasan_penolakan_list: daftarBaru })
       .eq("id", 1);
     btn.disabled = false;
-    btn.textContent = "Simpan";
+    btn.textContent = "Simpan Daftar Alasan";
 
     if (error) {
       errEl.textContent = "Gagal menyimpan: " + error.message;
