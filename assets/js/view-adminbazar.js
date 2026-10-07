@@ -89,6 +89,7 @@ async function renderDashboardBazar(root, session) {
     '</div>' +
     '<div class="admin-tabs">' +
       '<button type="button" class="admin-tab is-active" data-tab="tenant">Data Tenant</button>' +
+      '<button type="button" class="admin-tab" data-tab="denah">Denah Stand</button>' +
       '<button type="button" class="admin-tab" data-tab="pengaturan">Pengaturan Bazar</button>' +
     '</div>' +
     '<div id="adminbazar-content"></div>';
@@ -105,6 +106,7 @@ async function renderDashboardBazar(root, session) {
       tab.classList.add("is-active");
       const nama = tab.getAttribute("data-tab");
       if (nama === "tenant") loadTabTenant();
+      if (nama === "denah") loadTabDenahBazar();
       if (nama === "pengaturan") loadTabPengaturanBazar();
     });
   });
@@ -129,13 +131,25 @@ async function loadTabTenant() {
   const content = document.getElementById("adminbazar-content");
   content.innerHTML = '<p class="hint">Memuat data tenant...</p>';
 
-  const { data, error } = await supabaseClient.from("bazar_tenant").select("*").order("created_at", { ascending: false });
+  const [{ data, error }, { data: standData }] = await Promise.all([
+    supabaseClient.from("bazar_tenant").select("*").order("created_at", { ascending: false }),
+    supabaseClient.from("bazar_stand").select("kode,tenant_id").not("tenant_id", "is", null)
+  ]);
   if (error) {
     content.innerHTML = "<p>Gagal memuat data tenant: " + error.message + "</p>";
     return;
   }
 
   let rows = data || [];
+
+  // Kode stand yang ditempati tiap tenant (migrasi 0037) -- satu tenant bisa
+  // punya LEBIH DARI SATU kode kalau menyewa beberapa stand sekaligus,
+  // dikumpulkan di sini supaya tabel di bawah tidak perlu query berulang.
+  const kodeStandPerTenant = {};
+  (standData || []).forEach(function (s) {
+    if (!kodeStandPerTenant[s.tenant_id]) kodeStandPerTenant[s.tenant_id] = [];
+    kodeStandPerTenant[s.tenant_id].push(s.kode);
+  });
 
   content.innerHTML =
     '<div class="rekap-grid" id="bazar-rekap-grid"></div>' +
@@ -144,7 +158,7 @@ async function loadTabTenant() {
     '</div>' +
     '<p class="hint" id="jumlah-hint-bazar"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-tenant"><thead><tr>' +
-      '<th>Nomor</th><th>Nama Usaha</th><th>Jenis Produk</th><th>Kategori</th><th>PJ / WA</th><th>Berkas</th><th>Pembayaran</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama Usaha</th><th>Jenis Produk</th><th>Jenis/Lokasi Stand</th><th>PJ / WA</th><th>Berkas</th><th>Pembayaran</th><th>Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   function renderRekapBazar() {
@@ -184,12 +198,13 @@ async function loadTabTenant() {
         fotoList.map(function (u, i) { return '<a href="' + u + '" target="_blank" rel="noopener">Foto #' + (i + 1) + '</a>'; }).join(" · ") +
         (r.url_bukti_bayar ? ((fotoList.length ? " · " : "") + '<a href="' + r.url_bukti_bayar + '" target="_blank" rel="noopener">Bukti Bayar</a>') : "");
 
+      const kodeList = kodeStandPerTenant[r.id] || [];
       return (
         '<tr>' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.nama_usaha) + '">' + escapeHTMLBazarAdmin(r.nama_usaha) + '</td>' +
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.jenis_produk) + '">' + escapeHTMLBazarAdmin(r.jenis_produk) + '</td>' +
-          '<td>' + escapeHTMLBazarAdmin(r.kategori_stand) + '</td>' +
+          '<td>' + escapeHTMLBazarAdmin(r.jenis_stand || r.kategori_stand || "-") + (kodeList.length ? ('<br/><span class="hint">' + kodeList.join(", ") + '</span>') : '') + '</td>' +
           '<td>' + escapeHTMLBazarAdmin(r.nama_penanggung_jawab) + '<br/>' + escapeHTMLBazarAdmin(r.whatsapp) + '</td>' +
           '<td>' + (berkasCell || "-") + '</td>' +
           '<td><select class="status-select" data-field="status_pembayaran" data-id="' + r.id + '">' +
@@ -280,6 +295,460 @@ async function loadTabTenant() {
   });
 }
 
+/* ==================== TAB BARU: DENAH STAND (migrasi 0037 + 0038) ==================== */
+// Dua sub-tampilan, dipilih lewat tombol kecil di atas:
+//   "📋 Tampilan Daftar" -- grid/list per area (seperti sebelum migrasi 0038),
+//                           dengan tombol "Kosongkan" untuk membebaskan stand
+//                           secara manual (mis. kalau ada kekeliruan input) --
+//                           normalnya stand dibebaskan OTOMATIS lewat trigger
+//                           database begitu status tenant diubah jadi
+//                           "Ditolak" (migrasi 0037), tombol ini jalan pintas
+//                           manual untuk kasus di luar itu.
+//   "🖼️ Edit Denah Visual" -- editor drag & drop ala Canva (migrasi 0038):
+//                           tiap kotak stand & tiap label bangunan/area bisa
+//                           digeser/diubah ukuran langsung di kanvas, lalu
+//                           disimpan lewat tombol "Simpan Tata Letak".
+const DENAH_CANVAS_W = 760;
+const DENAH_CANVAS_H = 600;
+const WARNA_JENIS_DENAH = { A: "#e08a2e", B: "#3f7fb0", C: "#d1588f" };
+
+// Dipegang di scope modul (bukan di dalam loadTabDenahBazar) supaya listener
+// "resize" window dari render sebelumnya selalu bisa dicopot sebelum render
+// berikutnya menambah yang baru -- mencegah listener menumpuk tiap kali tab
+// "Denah Stand" dibuka berulang kali (window tidak ikut hilang/dibuang
+// seperti elemen DOM lain saat `content.innerHTML` diganti).
+let _denahResizeHandler = null;
+
+async function loadTabDenahBazar() {
+  const content = document.getElementById("adminbazar-content");
+  content.innerHTML = '<p class="hint">Memuat denah stand...</p>';
+
+  if (_denahResizeHandler) {
+    window.removeEventListener("resize", _denahResizeHandler);
+    _denahResizeHandler = null;
+  }
+
+  const [{ data: standData, error }, { data: tenantData }, { data: elemenData, error: errorElemen }] = await Promise.all([
+    supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi").order("jenis").order("area").order("nomor"),
+    supabaseClient.from("bazar_tenant").select("id,nama_usaha,nomor_pendaftaran,status"),
+    supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
+  ]);
+  if (error) {
+    content.innerHTML = "<p>Gagal memuat denah stand: " + error.message + "</p>";
+    return;
+  }
+  if (errorElemen) {
+    content.innerHTML = "<p>Gagal memuat label denah: " + errorElemen.message + "</p>";
+    return;
+  }
+
+  const standList = standData || [];
+  let elemenList = elemenData || [];
+  const tenantById = {};
+  (tenantData || []).forEach(function (t) { tenantById[t.id] = t; });
+
+  const totalTerisi = standList.filter(function (s) { return !!s.tenant_id; }).length;
+
+  content.innerHTML =
+    '<div class="admin-tabs" style="margin-bottom:16px;">' +
+      '<button type="button" class="admin-tab is-active" data-subtab="daftar" style="font-size:14px;">📋 Tampilan Daftar</button>' +
+      '<button type="button" class="admin-tab" data-subtab="visual" style="font-size:14px;">🖼️ Edit Denah Visual</button>' +
+    '</div>' +
+    '<p class="hint">' + totalTerisi + ' dari ' + standList.length + ' stand terisi. Stand otomatis dibebaskan lagi begitu status tenant penyewanya diubah jadi "Ditolak".</p>' +
+    '<div id="denah-bazar-subcontent"></div>';
+
+  const subEl = document.getElementById("denah-bazar-subcontent");
+
+  /* -------- Sub-tampilan 1: Daftar/grid (sama seperti sebelum migrasi 0038) -------- */
+  function renderDaftar() {
+    const jenisUrut = [];
+    standList.forEach(function (s) { if (jenisUrut.indexOf(s.jenis) === -1) jenisUrut.push(s.jenis); });
+
+    subEl.innerHTML = '<div id="denah-bazar-groups"></div>';
+    const groupsEl = document.getElementById("denah-bazar-groups");
+
+    function render() {
+      groupsEl.innerHTML = jenisUrut.map(function (jenis) {
+        const standJenis = standList.filter(function (s) { return s.jenis === jenis; });
+        const areaUrut = [];
+        standJenis.forEach(function (s) { if (areaUrut.indexOf(s.area) === -1) areaUrut.push(s.area); });
+
+        const areaHTML = areaUrut.map(function (area) {
+          const standArea = standJenis.filter(function (s) { return s.area === area; });
+          const sisa = standArea.filter(function (s) { return !s.tenant_id; }).length;
+          return (
+            '<div style="margin-bottom:14px;">' +
+              '<p class="hint" style="margin:0 0 6px;font-weight:700;color:#1C2541;">' + escapeHTMLBazarAdmin(area) + ' <span style="font-weight:400;">(sisa ' + sisa + '/' + standArea.length + ')</span></p>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+                standArea.map(function (s) {
+                  const tenant = s.tenant_id ? tenantById[s.tenant_id] : null;
+                  const terisi = !!s.tenant_id;
+                  return (
+                    '<div style="padding:8px 12px;border:1.5px solid ' + (terisi ? "#FBD9DA" : "#F6E3A8") + ';border-radius:8px;background:' + (terisi ? "#FDF3F3" : "#FFFFFF") + ';font-size:13px;min-width:120px;">' +
+                      '<div style="font-weight:700;color:#1C2541;">' + escapeHTMLBazarAdmin(s.kode) + '</div>' +
+                      (terisi
+                        ? ('<div class="hint" style="margin:2px 0;">' + escapeHTMLBazarAdmin(tenant ? tenant.nama_usaha : "-") + '</div>' +
+                           '<button type="button" class="btn-kosongkan-stand" data-id="' + s.id + '" style="font-size:12px;padding:4px 8px;margin-top:4px;">Kosongkan</button>')
+                        : '<div class="hint" style="margin:2px 0;color:#1E7A4C;">Tersedia</div>') +
+                    '</div>'
+                  );
+                }).join("") +
+              '</div>' +
+            '</div>'
+          );
+        }).join("");
+
+        return (
+          '<div class="form-shell" style="margin-bottom:20px;">' +
+            '<h3>Jenis ' + escapeHTMLBazarAdmin(jenis) + '</h3>' +
+            areaHTML +
+          '</div>'
+        );
+      }).join("");
+
+      groupsEl.querySelectorAll(".btn-kosongkan-stand").forEach(function (btn) {
+        btn.addEventListener("click", async function () {
+          const id = btn.getAttribute("data-id");
+          const stand = standList.find(function (s) { return s.id === id; });
+          if (!stand) return;
+          if (!confirm('Bebaskan stand "' + stand.kode + '" ini? Tenant yang sebelumnya menempatinya TIDAK ikut terhapus/berubah statusnya -- cuma lokasinya yang dibebaskan supaya bisa dipesan pendaftar lain.')) return;
+
+          btn.disabled = true;
+          btn.textContent = "Membebaskan...";
+          const { error: errLepas } = await supabaseClient.from("bazar_stand").update({ tenant_id: null }).eq("id", id);
+          if (errLepas) {
+            alert("Gagal membebaskan stand: " + errLepas.message);
+            btn.disabled = false;
+            btn.textContent = "Kosongkan";
+            return;
+          }
+          stand.tenant_id = null;
+          render();
+        });
+      });
+    }
+
+    render();
+  }
+
+  /* -------- Sub-tampilan 2: Editor visual drag & drop ala Canva (migrasi 0038) -------- */
+  function renderVisual() {
+    let scale = 1;
+    // Perubahan yang BELUM disimpan ke server -- dikumpulkan dulu di memori
+    // (bukan langsung `update` tiap kali kotak digeser, supaya tidak membuat
+    // satu request tiap piksel gerakan mouse) -- baru benar-benar ditulis ke
+    // database saat tombol "Simpan Tata Letak" diklik.
+    let perubahan = { stand: {}, elemen: {} };
+
+    subEl.innerHTML =
+      '<p class="hint">Geser kotak untuk memindahkan lokasinya, tarik pojok kanan-bawah kotak untuk membesarkan/mengecilkan ukurannya (berlaku untuk kotak STAND maupun LABEL). Kode stand sendiri tetap tidak bisa diubah teksnya di sini -- klik sebuah LABEL bangunan/area (bukan menariknya) untuk mengedit teks, emoji, warna, atau menghapusnya.</p>' +
+      '<div class="submit-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-denah-visual">💾 Simpan Tata Letak</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-tambah-label-denah">➕ Tambah Kotak/Label</button>' +
+        '<span class="hint" id="denah-visual-status" style="margin-left:6px;"></span>' +
+      '</div>' +
+      '<div id="denah-visual-outer" style="width:100%;max-width:900px;overflow:hidden;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;">' +
+        '<div id="denah-visual-inner" style="position:relative;width:' + DENAH_CANVAS_W + 'px;height:' + DENAH_CANVAS_H + 'px;transform-origin:top left;"></div>' +
+      '</div>' +
+      '<div id="denah-visual-panel"></div>';
+
+    const outerEl = document.getElementById("denah-visual-outer");
+    const innerEl = document.getElementById("denah-visual-inner");
+    const statusEl = document.getElementById("denah-visual-status");
+    const panelEl = document.getElementById("denah-visual-panel");
+
+    function terapkanSkala() {
+      if (!outerEl.clientWidth) return;
+      scale = outerEl.clientWidth / DENAH_CANVAS_W;
+      innerEl.style.transform = "scale(" + scale + ")";
+      outerEl.style.height = (DENAH_CANVAS_H * scale) + "px";
+    }
+
+    function tandaiBerubah() {
+      statusEl.textContent = "Ada perubahan belum disimpan.";
+      statusEl.style.color = "#b45309";
+    }
+
+    // Ukuran tulisan di dalam kotak ikut membesar/mengecil mengikuti ukuran
+    // kotaknya sendiri (gaya Canva: resize kotak = resize tulisannya juga,
+    // bukan kotak & tulisan yang terasa lepas satu sama lain) -- dihitung dari
+    // sisi TERKECIL (lebar ATAU tinggi, mana yang lebih kecil) supaya teks
+    // tidak pernah meluber keluar kotak yang sempit, dibatasi [8px, 40px]
+    // supaya tetap terbaca di kotak sekecil apa pun & tidak raksasa di kotak
+    // sebesar apa pun.
+    function skalaFontKotak(w, h) {
+      return Math.max(8, Math.min(40, Math.min(w, h) / 3.4));
+    }
+
+    function buatKotak(opsi) {
+      const el = document.createElement("div");
+      el.setAttribute("data-id", opsi.id);
+      el.style.position = "absolute";
+      el.style.left = opsi.x + "px";
+      el.style.top = opsi.y + "px";
+      el.style.width = opsi.w + "px";
+      el.style.height = opsi.h + "px";
+      el.style.background = opsi.warnaBg;
+      el.style.color = opsi.warnaTeks;
+      el.style.border = "1.5px solid rgba(0,0,0,0.15)";
+      el.style.borderRadius = "6px";
+      el.style.display = "flex";
+      el.style.flexDirection = "column";
+      el.style.alignItems = "center";
+      el.style.justifyContent = "center";
+      el.style.fontSize = skalaFontKotak(opsi.w, opsi.h) + "px";
+      el.style.fontWeight = "700";
+      el.style.textAlign = "center";
+      el.style.cursor = "grab";
+      el.style.userSelect = "none";
+      el.style.touchAction = "none";
+      el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.15)";
+      el.style.lineHeight = "1.15";
+      el.style.overflow = "hidden";
+      el.style.padding = "2px";
+      // `pointer-events:none` di label teks di dalamnya -- supaya elemen yang
+      // sebenarnya menerima klik/pointerdown SELALU `el` itu sendiri (bukan
+      // <span> teks di dalamnya), karena logika drag di bawah membedakan
+      // drag-kotak vs drag-handle-resize dengan membandingkan `e.target`.
+      // Sublabel (emoji) sengaja dalam satuan `em` (bukan px tetap) supaya
+      // ukurannya ikut skala `el.style.fontSize` otomatis -- tidak perlu
+      // dihitung ulang terpisah tiap kali kotak di-resize.
+      el.innerHTML =
+        (opsi.sublabel ? ('<span style="font-size:1.4em;pointer-events:none;">' + escapeHTMLBazarAdmin(opsi.sublabel) + '</span>') : "") +
+        '<span style="pointer-events:none;">' + escapeHTMLBazarAdmin(opsi.label) + '</span>';
+
+      let dragging = false, startX = 0, startY = 0, startPosX = opsi.x, startPosY = opsi.y;
+
+      el.addEventListener("pointerdown", function (e) {
+        if (e.target !== el) return; // bukan drag kotak kalau yang diklik adalah handle resize anaknya
+        e.preventDefault();
+        dragging = true;
+        el.setPointerCapture(e.pointerId);
+        startX = e.clientX; startY = e.clientY;
+        startPosX = parseFloat(el.style.left); startPosY = parseFloat(el.style.top);
+        el.style.cursor = "grabbing";
+        el.style.zIndex = "50";
+      });
+      el.addEventListener("pointermove", function (e) {
+        if (!dragging) return;
+        const dx = (e.clientX - startX) / scale;
+        const dy = (e.clientY - startY) / scale;
+        const baruX = Math.max(0, Math.min(DENAH_CANVAS_W - parseFloat(el.style.width), startPosX + dx));
+        const baruY = Math.max(0, Math.min(DENAH_CANVAS_H - parseFloat(el.style.height), startPosY + dy));
+        el.style.left = baruX + "px";
+        el.style.top = baruY + "px";
+      });
+      el.addEventListener("pointerup", function (e) {
+        if (!dragging) return;
+        dragging = false;
+        el.style.cursor = "grab";
+        el.style.zIndex = "";
+        const bucket = opsi.tipe === "stand" ? perubahan.stand : perubahan.elemen;
+        bucket[opsi.id] = Object.assign({}, bucket[opsi.id], { pos_x: Math.round(parseFloat(el.style.left)), pos_y: Math.round(parseFloat(el.style.top)) });
+        tandaiBerubah();
+      });
+
+      if (opsi.bisaResize) {
+        const handle = document.createElement("div");
+        handle.style.position = "absolute";
+        handle.style.right = "0";
+        handle.style.bottom = "0";
+        handle.style.width = "14px";
+        handle.style.height = "14px";
+        handle.style.background = "rgba(0,0,0,0.3)";
+        handle.style.cursor = "nwse-resize";
+        handle.style.borderTopLeftRadius = "4px";
+        handle.style.touchAction = "none";
+        el.appendChild(handle);
+
+        let resizing = false, startW = opsi.w, startH = opsi.h;
+        handle.addEventListener("pointerdown", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          resizing = true;
+          handle.setPointerCapture(e.pointerId);
+          startX = e.clientX; startY = e.clientY;
+          startW = parseFloat(el.style.width); startH = parseFloat(el.style.height);
+        });
+        handle.addEventListener("pointermove", function (e) {
+          if (!resizing) return;
+          const dx = (e.clientX - startX) / scale;
+          const dy = (e.clientY - startY) / scale;
+          const baruW = Math.max(30, startW + dx);
+          const baruH = Math.max(24, startH + dy);
+          el.style.width = baruW + "px";
+          el.style.height = baruH + "px";
+          // Tulisan di dalamnya ikut membesar/mengecil SAAT resize berlangsung
+          // (bukan cuma setelah dilepas) supaya terasa langsung seperti Canva.
+          el.style.fontSize = skalaFontKotak(baruW, baruH) + "px";
+        });
+        handle.addEventListener("pointerup", function (e) {
+          if (!resizing) return;
+          resizing = false;
+          const bucketResize = opsi.tipe === "stand" ? perubahan.stand : perubahan.elemen;
+          bucketResize[opsi.id] = Object.assign({}, bucketResize[opsi.id], { lebar: Math.round(parseFloat(el.style.width)), tinggi: Math.round(parseFloat(el.style.height)) });
+          tandaiBerubah();
+        });
+      }
+
+      if (opsi.tipe === "elemen") {
+        el.addEventListener("click", function (e) {
+          if (e.target !== el) return;
+          bukaPanelEditLabel(opsi.id);
+        });
+      }
+
+      return el;
+    }
+
+    function gambarSemua() {
+      innerEl.innerHTML = "";
+      elemenList.forEach(function (elm) {
+        innerEl.appendChild(buatKotak({
+          id: elm.id, tipe: "elemen",
+          x: elm.pos_x, y: elm.pos_y, w: elm.lebar, h: elm.tinggi,
+          warnaBg: elm.warna_bg, warnaTeks: elm.warna_teks,
+          label: elm.teks, sublabel: elm.emoji, bisaResize: true
+        }));
+      });
+      standList.forEach(function (s) {
+        const warna = WARNA_JENIS_DENAH[s.jenis] || "#777777";
+        innerEl.appendChild(buatKotak({
+          id: s.id, tipe: "stand",
+          x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
+          w: s.lebar || 54, h: s.tinggi || 40,
+          warnaBg: s.tenant_id ? "#fde8e8" : warna,
+          warnaTeks: s.tenant_id ? "#b91c1c" : "#ffffff",
+          label: s.kode, bisaResize: true
+        }));
+      });
+    }
+
+    function bukaPanelEditLabel(id) {
+      const data = elemenList.find(function (e) { return e.id === id; });
+      if (!data) return;
+      panelEl.innerHTML =
+        '<div class="form-shell" style="max-width:420px;margin-top:14px;">' +
+          '<h3>Edit Label</h3>' +
+          '<div class="field"><label for="edit-label-emoji">Emoji</label><input type="text" id="edit-label-emoji" maxlength="4" value="' + escapeHTMLBazarAdmin(data.emoji || "") + '" style="width:70px;" /></div>' +
+          '<div class="field"><label for="edit-label-teks">Teks</label><input type="text" id="edit-label-teks" value="' + escapeHTMLBazarAdmin(data.teks) + '" /></div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label for="edit-label-bg">Warna Latar</label><input type="color" id="edit-label-bg" value="' + (data.warna_bg || "#dcecd7") + '" /></div>' +
+            '<div class="field"><label for="edit-label-teks-warna">Warna Teks</label><input type="color" id="edit-label-teks-warna" value="' + (data.warna_teks || "#2b5c3b") + '" /></div>' +
+          '</div>' +
+          '<div class="submit-row">' +
+            '<button type="button" class="btn btn--primary" id="btn-terapkan-label">Terapkan</button>' +
+            '<button type="button" class="btn-remove" id="btn-hapus-label">Hapus Label</button>' +
+            '<button type="button" class="btn btn--ghost" id="btn-tutup-panel-label">Tutup</button>' +
+          '</div>' +
+        '</div>';
+
+      document.getElementById("btn-terapkan-label").addEventListener("click", function () {
+        data.emoji = document.getElementById("edit-label-emoji").value.trim();
+        data.teks = document.getElementById("edit-label-teks").value.trim() || "Label";
+        data.warna_bg = document.getElementById("edit-label-bg").value;
+        data.warna_teks = document.getElementById("edit-label-teks-warna").value;
+        perubahan.elemen[id] = Object.assign({}, perubahan.elemen[id], {
+          emoji: data.emoji, teks: data.teks, warna_bg: data.warna_bg, warna_teks: data.warna_teks
+        });
+        tandaiBerubah();
+        gambarSemua();
+        panelEl.innerHTML = "";
+      });
+      document.getElementById("btn-hapus-label").addEventListener("click", async function () {
+        if (!confirm('Hapus label "' + data.teks + '"? Tindakan ini langsung permanen (TIDAK lewat tombol "Simpan Tata Letak" -- label terhapus seketika diklik "Hapus").')) return;
+        const { error: errHapus } = await supabaseClient.from("bazar_denah_elemen").delete().eq("id", id);
+        if (errHapus) {
+          alert("Gagal menghapus label: " + errHapus.message);
+          return;
+        }
+        elemenList = elemenList.filter(function (e) { return e.id !== id; });
+        delete perubahan.elemen[id];
+        gambarSemua();
+        panelEl.innerHTML = "";
+      });
+      document.getElementById("btn-tutup-panel-label").addEventListener("click", function () {
+        panelEl.innerHTML = "";
+      });
+    }
+
+    document.getElementById("btn-tambah-label-denah").addEventListener("click", async function () {
+      // Posisi awal kotak baru digeser sedikit tiap kali tombol ini diklik
+      // berturut-turut (bukan selalu pas di (20,20)) -- supaya beberapa
+      // kotak baru yang ditambah berurutan tidak numpuk persis di titik yang
+      // sama, lebih enak langsung dilihat & dipisah manual oleh panitia.
+      const geser = (elemenList.length % 6) * 25;
+      const { data: baru, error: errBaru } = await supabaseClient.from("bazar_denah_elemen").insert({
+        teks: "Kotak Baru", emoji: "📍", pos_x: 20 + geser, pos_y: 20 + geser, lebar: 120, tinggi: 60,
+        warna_bg: "#dcecd7", warna_teks: "#2b5c3b", urutan: elemenList.length + 1
+      }).select().single();
+      if (errBaru) {
+        alert("Gagal menambah kotak: " + errBaru.message);
+        return;
+      }
+      elemenList.push(baru);
+      gambarSemua();
+    });
+
+    document.getElementById("btn-simpan-denah-visual").addEventListener("click", async function () {
+      const btn = this;
+      const idStand = Object.keys(perubahan.stand);
+      const idElemen = Object.keys(perubahan.elemen);
+      if (idStand.length === 0 && idElemen.length === 0) {
+        statusEl.textContent = "Tidak ada perubahan untuk disimpan.";
+        statusEl.style.color = "";
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Menyimpan...";
+
+      const tugas = idStand.map(function (id) {
+        return supabaseClient.from("bazar_stand").update(perubahan.stand[id]).eq("id", id);
+      }).concat(idElemen.map(function (id) {
+        return supabaseClient.from("bazar_denah_elemen").update(perubahan.elemen[id]).eq("id", id);
+      }));
+
+      const hasil = await Promise.all(tugas);
+      const gagal = hasil.filter(function (h) { return h.error; });
+
+      btn.disabled = false;
+      btn.textContent = "💾 Simpan Tata Letak";
+
+      if (gagal.length > 0) {
+        statusEl.textContent = "Sebagian gagal disimpan: " + gagal[0].error.message;
+        statusEl.style.color = "#b91c1c";
+        return;
+      }
+
+      perubahan = { stand: {}, elemen: {} };
+      statusEl.textContent = "✓ Tata letak tersimpan.";
+      statusEl.style.color = "#0f7b3e";
+      setTimeout(function () { statusEl.textContent = ""; }, 2500);
+    });
+
+    terapkanSkala();
+    gambarSemua();
+    _denahResizeHandler = terapkanSkala;
+    window.addEventListener("resize", _denahResizeHandler);
+  }
+
+  document.querySelectorAll('[data-subtab]').forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (_denahResizeHandler) {
+        window.removeEventListener("resize", _denahResizeHandler);
+        _denahResizeHandler = null;
+      }
+      document.querySelectorAll('[data-subtab]').forEach(function (b) { b.classList.remove("is-active"); });
+      btn.classList.add("is-active");
+      const t = btn.getAttribute("data-subtab");
+      if (t === "daftar") renderDaftar();
+      if (t === "visual") renderVisual();
+    });
+  });
+
+  renderDaftar();
+}
+
 /* ==================== TAB 2: PENGATURAN BAZAR ==================== */
 
 async function loadTabPengaturanBazar() {
@@ -292,7 +761,8 @@ async function loadTabPengaturanBazar() {
     return;
   }
 
-  const kategoriList = Array.isArray(settings.kategori_list) ? settings.kategori_list : [];
+  const jenisStandInfo = (settings.jenis_stand_info && typeof settings.jenis_stand_info === "object") ? settings.jenis_stand_info : {};
+  const URUTAN_JENIS_PENGATURAN = ["A", "B", "C"];
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
@@ -327,16 +797,19 @@ async function loadTabPengaturanBazar() {
         '<p class="hint" style="margin-top:4px;">Kalau dinyalakan, halaman "/bazar" (info) DAN "/daftar-bazar" (form) sama-sama disembunyikan dari pengunjung biasa -- diganti pesan "Bazar belum dibuka". Hanya panitia yang sudah login di browser ini (akun yang sama dengan "/admin"/"/adminbazar") yang tetap bisa melihat kedua halaman itu apa adanya, untuk keperluan pratinjau/pengecekan. Saklar "Pendaftaran bazar dibuka" di atas jadi tidak relevan selama ini aktif (semuanya sudah tertutup).</p>' +
       '</div>' +
 
-      '<div class="field">' +
-        '<label for="bazar-kuota-total">Kuota Total Stand <span style="font-weight:400;">(kosongkan = tidak dibatasi)</span></label>' +
-        '<input type="number" id="bazar-kuota-total" min="0" value="' + (settings.kuota_total != null ? settings.kuota_total : "") + '" />' +
-      '</div>' +
-
-      '<div class="field">' +
-        '<label for="bazar-kategori-text">Daftar Kategori/Ukuran Stand <span style="font-weight:400;">(satu per baris)</span></label>' +
-        '<textarea id="bazar-kategori-text" rows="4">' + escapeHTMLBazarAdmin(kategoriList.join("\n")) + '</textarea>' +
-        '<p class="hint" style="margin-top:4px;">Ini pilihan yang akan muncul di halaman info "/bazar" dan formulir pendaftaran publik "/daftar-bazar". Ubah kapan saja, langsung berlaku untuk pendaftar berikutnya (data tenant yang sudah daftar tidak ikut berubah).</p>' +
-      '</div>' +
+      '<h3 style="margin-top:28px;">Jenis & Harga Stand</h3>' +
+      '<p class="hint">Area & kuota tiap jenis sudah BAKU (lihat tab "Denah Stand" untuk daftar lengkapnya, tidak diedit di sini) -- yang bisa diubah di sini cuma nama, ukuran, dan harga tiap jenis. Berlaku langsung untuk pendaftar berikutnya (harga tenant yang sudah daftar tidak ikut berubah).</p>' +
+      URUTAN_JENIS_PENGATURAN.map(function (j) {
+        const info = jenisStandInfo[j] || {};
+        return (
+          '<div class="field-row" style="align-items:flex-start;">' +
+            '<div class="field" style="flex:0 0 70px;"><label>Jenis</label><input type="text" value="' + j + '" disabled /></div>' +
+            '<div class="field"><label for="bazar-jenis-' + j + '-nama">Nama</label><input type="text" id="bazar-jenis-' + j + '-nama" value="' + escapeHTMLBazarAdmin(info.nama || ("Jenis " + j)) + '" /></div>' +
+            '<div class="field"><label for="bazar-jenis-' + j + '-ukuran">Ukuran</label><input type="text" id="bazar-jenis-' + j + '-ukuran" value="' + escapeHTMLBazarAdmin(info.ukuran || "") + '" placeholder="mis. 3x3 m" /></div>' +
+            '<div class="field" style="flex:0 0 160px;"><label for="bazar-jenis-' + j + '-harga">Harga (Rp)</label><input type="number" id="bazar-jenis-' + j + '-harga" min="0" value="' + (info.harga != null ? info.harga : "") + '" /></div>' +
+          '</div>'
+        );
+      }).join("") +
 
       '<div class="field">' +
         '<label for="bazar-info-biaya-text">Info Biaya Sewa <span style="font-weight:400;">(opsional, tampil di halaman pendaftaran)</span></label>' +
@@ -359,22 +832,19 @@ async function loadTabPengaturanBazar() {
     const errorEl = document.getElementById("bazar-pengaturan-error");
     errorEl.style.display = "none";
 
-    const kuotaRaw = document.getElementById("bazar-kuota-total").value.trim();
-    const kuotaTotal = kuotaRaw === "" ? null : parseInt(kuotaRaw, 10);
-    if (kuotaRaw !== "" && (isNaN(kuotaTotal) || kuotaTotal < 0)) {
-      errorEl.textContent = "Kuota total harus angka 0 atau lebih (atau dikosongkan).";
-      errorEl.style.display = "block";
-      return;
-    }
-
-    const kategoriBaru = document.getElementById("bazar-kategori-text").value
-      .split("\n")
-      .map(function (s) { return s.trim(); })
-      .filter(Boolean);
-    if (kategoriBaru.length === 0) {
-      errorEl.textContent = "Isi minimal satu kategori/ukuran stand.";
-      errorEl.style.display = "block";
-      return;
+    const jenisStandBaru = {};
+    for (let i = 0; i < URUTAN_JENIS_PENGATURAN.length; i++) {
+      const j = URUTAN_JENIS_PENGATURAN[i];
+      const nama = document.getElementById("bazar-jenis-" + j + "-nama").value.trim();
+      const ukuran = document.getElementById("bazar-jenis-" + j + "-ukuran").value.trim();
+      const hargaRaw = document.getElementById("bazar-jenis-" + j + "-harga").value.trim();
+      const harga = hargaRaw === "" ? 0 : parseInt(hargaRaw, 10);
+      if (!nama || !ukuran || hargaRaw === "" || isNaN(harga) || harga < 0) {
+        errorEl.textContent = "Nama, ukuran, dan harga Jenis " + j + " wajib diisi dengan benar (harga angka 0 atau lebih).";
+        errorEl.style.display = "block";
+        return;
+      }
+      jenisStandBaru[j] = { nama: nama, ukuran: ukuran, harga: harga };
     }
 
     btn.disabled = true;
@@ -385,8 +855,7 @@ async function loadTabPengaturanBazar() {
       profil_deskripsi: document.getElementById("bazar-deskripsi-text").value.trim() || null,
       pendaftaran_dibuka: document.getElementById("bazar-toggle-dibuka").checked,
       tutup_total: document.getElementById("bazar-toggle-tutup-total").checked,
-      kuota_total: kuotaTotal,
-      kategori_list: kategoriBaru,
+      jenis_stand_info: jenisStandBaru,
       info_biaya: document.getElementById("bazar-info-biaya-text").value.trim() || null,
       info_rekening: document.getElementById("bazar-info-rekening-text").value.trim() || null
     }).eq("id", 1);
