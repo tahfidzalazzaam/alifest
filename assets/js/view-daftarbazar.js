@@ -54,8 +54,13 @@ const DAFTAR_BAZAR_TEMPLATE = `
         </div>
 
         <div class="field" id="bazar-lokasi-field" style="display:none;">
-          <label>Pilih Lokasi Stand <span style="font-weight:400;">(boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus)</span></label>
-          <div id="bazar-lokasi-areas"></div>
+          <label>Pilih Lokasi Stand <span style="font-weight:400;">(klik langsung kotaknya di denah di bawah -- boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus)</span></label>
+          <div id="bazar-denah-legenda"></div>
+          <div id="bazar-denah-pad" style="padding:18px 14px 14px 14px;">
+            <div id="bazar-denah-outer" style="width:100%;max-width:900px;overflow:visible;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;margin:0 auto;">
+              <div id="bazar-denah-inner" style="position:relative;transform-origin:top left;"></div>
+            </div>
+          </div>
           <p class="hint" id="bazar-lokasi-total" style="margin-top:8px;"></p>
           <div class="form-error" id="bazar-lokasi-error" style="margin-top:10px;">Pilih minimal satu lokasi stand.</div>
         </div>
@@ -154,6 +159,33 @@ const PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR = [
 // Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
 const URUTAN_JENIS_STAND = ["A", "B", "C"];
 
+// -------- Denah visual READ-ONLY untuk memilih lokasi stand (publik) --------
+// Dipakai menggantikan grid checkbox lama -- pengunjung klik LANGSUNG kotak
+// stand-nya di kanvas (bukan ketik/centang dari daftar teks) untuk memilih
+// lokasi, mirip tampilan "Edit Denah Visual" di `/adminbazar`
+// (`view-adminbazar.js`) tapi versi lihat-&-klik-saja: TIDAK ada drag,
+// resize, atau rotate-handle sama sekali di sini (posisi/ukuran/rotasi
+// kotak MURNI dibaca dari `pos_x`/`pos_y`/`lebar`/`tinggi`/`rotasi` yang
+// sudah diatur panitia lewat editor admin, bukan hasil interaksi
+// pengunjung). Konstanta kanvas & warna jenis SENGAJA diberi nama sendiri
+// yang BERBEDA dari `DENAH_CANVAS_W`/`DENAH_CANVAS_H`/`WARNA_JENIS_DENAH`
+// milik `view-adminbazar.js` -- kedua file itu sama-sama dimuat sebagai
+// <script> klasik berbagi satu scope global, jadi nama yang identik akan
+// tabrakan `SyntaxError: Identifier '...' has already been declared` persis
+// seperti bug `PESAN_LUCU_BAZAR_TUTUP_TOTAL` yang pernah terjadi (lihat
+// catatan di atas) -- ini bukan duplikasi ceroboh, tapi penghindaran
+// tabrakan nama yang disengaja.
+const DENAH_PUBLIK_CANVAS_W = 760;
+const DENAH_PUBLIK_CANVAS_H = 600;
+const WARNA_JENIS_DENAH_PUBLIK = { A: "#e08a2e", B: "#3f7fb0", C: "#d1588f" };
+
+// Sama seperti `_denahResizeHandler` di `view-adminbazar.js` -- dipegang di
+// scope modul (bukan di dalam `initDaftarBazar`) supaya listener "resize"
+// window dari render sebelumnya SELALU bisa dicopot sebelum render
+// berikutnya menambah yang baru (mis. pengunjung klik "Daftar Stand Lain"
+// lalu kembali ke form ini, me-render ulang `initDaftarBazar()` dari awal).
+let _denahPublikResizeHandler = null;
+
 function formatRupiahDaftarBazar(angka) {
   return "Rp" + Number(angka || 0).toLocaleString("id-ID");
 }
@@ -163,7 +195,7 @@ function initDaftarBazar() {
   const jenisChoicesEl = document.getElementById("bazar-jenis-choices");
   const jenisErrorEl = document.getElementById("bazar-jenis-error");
   const lokasiFieldEl = document.getElementById("bazar-lokasi-field");
-  const lokasiAreasEl = document.getElementById("bazar-lokasi-areas");
+  const legendaEl = document.getElementById("bazar-denah-legenda");
   const lokasiTotalEl = document.getElementById("bazar-lokasi-total");
   const lokasiErrorEl = document.getElementById("bazar-lokasi-error");
   const btnSubmit = document.getElementById("btn-submit-bazar");
@@ -171,9 +203,15 @@ function initDaftarBazar() {
   const regNumberEl = document.getElementById("reg-number-bazar");
 
   let jenisStandInfo = {};
-  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id}
+  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, pos_x, pos_y, lebar, tinggi, rotasi}
+  let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
   let pendaftaranDibuka = true;
+  // Kode stand yang DIPILIH pengunjung lewat klik di denah -- pengganti
+  // langsung dari NodeList checkbox lama (`lokasiAreasEl.querySelectorAll
+  // ('input[name="bazarLokasi"]:checked')`), dibaca validateForm()/submit
+  // persis sama seperti sebelumnya, cuma sumbernya sekarang Set ini.
+  let kodeTerpilihSet = new Set();
 
   function escapeHTMLDaftarBazar(teks) {
     const div = document.createElement("div");
@@ -210,59 +248,203 @@ function initDaftarBazar() {
     });
   }
 
-  /* ---------------- Pilihan Lokasi Stand (checkbox per kode, dikelompokkan per area) ---------------- */
+  /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual ---------------- */
+  // Satu kotak kecil per stand (posisi/ukuran/rotasi dibaca dari
+  // `bazar_stand`, hasil pengaturan panitia lewat "Edit Denah Visual" di
+  // `/adminbazar`), digambar di atas kanvas virtual tetap
+  // `DENAH_PUBLIK_CANVAS_W × DENAH_PUBLIK_CANVAS_H`, discaling ke lebar
+  // kontainer sebenarnya persis pola `terapkanSkala()` di
+  // `view-adminbazar.js` -- BEDANYA di sini TIDAK ADA drag/resize/rotate,
+  // cuma satu `click` listener per kotak stand yang statusnya boleh dipilih
+  // (jenis-nya cocok DENGAN jenis yang sedang dipilih di atas, dan belum
+  // terisi tenant lain) untuk menambah/melepas kode stand itu dari
+  // `kodeTerpilihSet`. Kotak jenis LAIN & kotak yang sudah terisi tetap
+  // digambar (supaya denahnya terasa utuh, bukan bolong-bolong) tapi
+  // dibuat pudar/non-interaktif. Label konteks (`elemenList` -- Masjid,
+  // Sekretariat PSB, Asrama) digambar paling belakang, statis, cuma
+  // penanda arah di denah.
+  //
+  // Tulisan DI DALAM kotak sengaja diringkas jadi "<kode area>-<nomor>" (mis.
+  // "B-DA-07" -> "DA-7", "C-PSB-03" -- "PSB-3") -- kode LENGKAP (dengan
+  // awalan jenis A/B/C) tetap dipakai apa adanya untuk segala sesuatu yang
+  // BUKAN tulisan di kotak: `title` (tooltip saat kotaknya di-hover/ditahan),
+  // isi `kodeTerpilihSet` yang dikirim ke `submit_bazar`, dan ringkasan "X
+  // stand dipilih (...)" di bawah kanvas -- cuma TAMPILAN di dalam kotaknya
+  // saja yang dipendekkan, supaya tidak kepotong/kekecilan di kotak yang
+  // ukurannya kecil, terutama di layar HP.
+  function labelRingkasKodeBazarPublik(kode) {
+    const bagian = String(kode || "").split("-");
+    if (bagian.length >= 3) {
+      // Format "B-DA-07"/"C-PSB-03" -- buang awalan jenis (A/B/C), gabung
+      // sisanya ("DA"/"PSB") dengan nomor urutnya TANPA angka nol di depan.
+      const nomor = parseInt(bagian[bagian.length - 1], 10);
+      return bagian.slice(1, -1).join("-") + "-" + (isNaN(nomor) ? bagian[bagian.length - 1] : nomor);
+    }
+    if (bagian.length === 2) {
+      // Format "A-01" (Jenis A cuma satu area "Depan Masjid", tidak ada
+      // kode area terpisah tertanam di `kode`-nya sendiri) -- pakai
+      // singkatan tetap "DM" (Depan Masjid) supaya gayanya tetap konsisten
+      // dengan Jenis B/C.
+      const nomor = parseInt(bagian[1], 10);
+      return "DM-" + (isNaN(nomor) ? bagian[1] : nomor);
+    }
+    return kode; // format kode tak dikenal -- jatuh balik tampilkan apa adanya
+  }
+
+  function buatKotakLokasiPublik(opsi) {
+    const el = document.createElement("div");
+    el.style.position = "absolute";
+    el.style.left = opsi.x + "px";
+    el.style.top = opsi.y + "px";
+    el.style.width = opsi.w + "px";
+    el.style.height = opsi.h + "px";
+    el.style.transformOrigin = "50% 50%";
+    el.style.transform = "rotate(" + (opsi.rotasi || 0) + "deg)";
+    el.style.borderRadius = "6px";
+    el.style.display = "flex";
+    el.style.flexDirection = "column";
+    el.style.alignItems = "center";
+    el.style.justifyContent = "center";
+    el.style.textAlign = "center";
+    el.style.fontWeight = "700";
+    el.style.lineHeight = "1.15";
+    el.style.padding = "2px";
+    el.style.boxSizing = "border-box";
+    el.style.fontSize = Math.max(8, Math.min(26, Math.min(opsi.w, opsi.h) / 3.2)) + "px";
+    el.style.border = "1.5px solid rgba(0,0,0,0.15)";
+    el.style.userSelect = "none";
+    el.style.touchAction = "manipulation";
+
+    if (opsi.tipeLabel) {
+      // Label konteks (bangunan/area) -- statis & dipudarkan, bukan target klik.
+      el.style.background = opsi.warnaBg || "#eef3ea";
+      el.style.color = opsi.warnaTeks || "#4b5f4d";
+      el.style.opacity = "0.6";
+      el.innerHTML =
+        (opsi.sublabel ? ('<span style="display:block;font-size:1.3em;">' + escapeHTMLDaftarBazar(opsi.sublabel) + '</span>') : "") +
+        '<span>' + escapeHTMLDaftarBazar(opsi.label) + '</span>';
+      return el;
+    }
+
+    const warnaDasar = WARNA_JENIS_DENAH_PUBLIK[opsi.jenis] || "#777777";
+    el.textContent = labelRingkasKodeBazarPublik(opsi.kode);
+
+    if (opsi.terisi) {
+      el.style.background = "#fde8e8";
+      el.style.color = "#b91c1c";
+      el.style.cursor = "not-allowed";
+      el.title = opsi.kode + " -- sudah terisi tenant lain.";
+      return el;
+    }
+
+    if (!opsi.selectable) {
+      // Jenis LAIN dari yang sedang dipilih -- tetap kelihatan bentuknya
+      // (supaya denah terasa utuh), tapi pudar & tidak bisa diklik.
+      el.style.background = warnaDasar;
+      el.style.color = "#ffffff";
+      el.style.opacity = "0.28";
+      el.style.cursor = "default";
+      el.title = opsi.kode + " (Jenis " + opsi.jenis + " -- pilih Jenis " + opsi.jenis + " dulu di atas untuk memilih lokasi ini).";
+      return el;
+    }
+
+    // Kotak yang BOLEH diklik (jenisnya cocok & belum terisi).
+    el.style.background = warnaDasar;
+    el.style.color = "#ffffff";
+    el.style.cursor = "pointer";
+    el.title = "Klik untuk pilih/batalkan stand " + opsi.kode + ".";
+
+    function terapkanGayaTerpilih() {
+      const dipilih = kodeTerpilihSet.has(opsi.kode);
+      el.style.outline = dipilih ? "3px solid #1E7A4C" : "none";
+      el.style.outlineOffset = dipilih ? "1px" : "0";
+      el.style.boxShadow = dipilih ? "0 2px 6px rgba(0,0,0,0.3)" : "none";
+    }
+    terapkanGayaTerpilih();
+
+    el.addEventListener("click", function () {
+      if (kodeTerpilihSet.has(opsi.kode)) kodeTerpilihSet.delete(opsi.kode);
+      else kodeTerpilihSet.add(opsi.kode);
+      terapkanGayaTerpilih();
+      perbaruiTotalLokasi();
+    });
+
+    return el;
+  }
+
   function renderLokasiPicker() {
     if (!jenisTerpilih) {
       lokasiFieldEl.style.display = "none";
       return;
     }
     lokasiFieldEl.style.display = "block";
+    // Reset pilihan tiap kali jenis diganti -- kode stand milik jenis lama
+    // sudah tidak relevan begitu jenisnya berubah (submit_bazar hanya
+    // menerima SATU jenis sekaligus per pengiriman, lihat migrasi 0037).
+    kodeTerpilihSet = new Set();
 
-    const standJenisIni = standList.filter(function (s) { return s.jenis === jenisTerpilih; });
-    const areaList = [];
-    standJenisIni.forEach(function (s) {
-      if (areaList.indexOf(s.area) === -1) areaList.push(s.area);
+    const warnaJenisAktif = WARNA_JENIS_DENAH_PUBLIK[jenisTerpilih] || "#777777";
+    legendaEl.innerHTML =
+      '<div style="display:flex;flex-wrap:wrap;gap:14px;margin:8px 0 2px;font-size:12.5px;color:#4b5563;">' +
+        '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:' + warnaJenisAktif + ';display:inline-block;"></span>Tersedia (klik untuk pilih)</span>' +
+        '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:' + warnaJenisAktif + ';outline:2.5px solid #1E7A4C;outline-offset:1px;display:inline-block;"></span>Dipilih</span>' +
+        '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#fde8e8;border:1px solid #f3b4b4;display:inline-block;"></span>Terisi</span>' +
+        '<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:14px;height:14px;border-radius:3px;background:#999;opacity:0.28;display:inline-block;"></span>Jenis lain</span>' +
+      '</div>';
+
+    const outerEl = document.getElementById("bazar-denah-outer");
+    const innerEl = document.getElementById("bazar-denah-inner");
+    innerEl.style.width = DENAH_PUBLIK_CANVAS_W + "px";
+    innerEl.style.height = DENAH_PUBLIK_CANVAS_H + "px";
+
+    innerEl.innerHTML = "";
+    elemenList.forEach(function (elm) {
+      innerEl.appendChild(buatKotakLokasiPublik({
+        tipeLabel: true,
+        x: elm.pos_x, y: elm.pos_y, w: elm.lebar, h: elm.tinggi, rotasi: elm.rotasi,
+        warnaBg: elm.warna_bg, warnaTeks: elm.warna_teks,
+        label: elm.teks, sublabel: elm.emoji
+      }));
+    });
+    standList.forEach(function (s) {
+      innerEl.appendChild(buatKotakLokasiPublik({
+        kode: s.kode, jenis: s.jenis,
+        x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
+        w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
+        terisi: !!s.tenant_id,
+        selectable: s.jenis === jenisTerpilih && !s.tenant_id
+      }));
     });
 
-    lokasiAreasEl.innerHTML = areaList.map(function (area) {
-      const standArea = standJenisIni.filter(function (s) { return s.area === area; }).sort(function (a, b) { return a.nomor - b.nomor; });
-      return (
-        '<div class="bazar-lokasi-area" style="margin-bottom:14px;">' +
-          '<p class="hint" style="margin:0 0 6px;font-weight:700;color:#1C2541;">' + escapeHTMLDaftarBazar(area) + '</p>' +
-          '<div class="bazar-lokasi-grid" style="display:flex;flex-wrap:wrap;gap:8px;">' +
-            standArea.map(function (s) {
-              const terisi = !!s.tenant_id;
-              return (
-                '<label class="bazar-lokasi-chip' + (terisi ? " is-taken" : "") + '" style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1.5px solid ' + (terisi ? "#F3E9CE" : "#F6E3A8") + ';border-radius:8px;cursor:' + (terisi ? "not-allowed" : "pointer") + ';background:' + (terisi ? "#F6F3EA" : "#FFFFFF") + ';color:' + (terisi ? "#A9A38C" : "#1C2541") + ';font-size:13.5px;font-weight:600;">' +
-                  '<input type="checkbox" name="bazarLokasi" value="' + escapeHTMLDaftarBazar(s.kode) + '"' + (terisi ? " disabled" : "") + ' style="margin:0;" />' +
-                  escapeHTMLDaftarBazar(s.kode) + (terisi ? " (Terisi)" : "") +
-                '</label>'
-              );
-            }).join("") +
-          '</div>' +
-        '</div>'
-      );
-    }).join("");
+    function terapkanSkalaDenahPublik() {
+      if (!outerEl.clientWidth) return;
+      const scale = outerEl.clientWidth / DENAH_PUBLIK_CANVAS_W;
+      innerEl.style.transform = "scale(" + scale + ")";
+      outerEl.style.height = (DENAH_PUBLIK_CANVAS_H * scale) + "px";
+    }
+    terapkanSkalaDenahPublik();
 
-    lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]').forEach(function (cb) {
-      cb.addEventListener("change", perbaruiTotalLokasi);
-    });
+    if (_denahPublikResizeHandler) window.removeEventListener("resize", _denahPublikResizeHandler);
+    _denahPublikResizeHandler = terapkanSkalaDenahPublik;
+    window.addEventListener("resize", _denahPublikResizeHandler);
+
     perbaruiTotalLokasi();
   }
 
   function perbaruiTotalLokasi() {
-    const dipilih = lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked').length;
+    const dipilih = kodeTerpilihSet.size;
     const harga = jenisTerpilih && jenisStandInfo[jenisTerpilih] ? (jenisStandInfo[jenisTerpilih].harga || 0) : 0;
     lokasiTotalEl.textContent = dipilih === 0
       ? "Belum ada lokasi dipilih."
-      : (dipilih + " stand dipilih × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
+      : (dipilih + " stand dipilih (" + Array.from(kodeTerpilihSet).sort().join(", ") + ") × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
   }
 
   /* ---------------- Muat pengaturan bazar (buka/tutup, jenis & denah stand, info biaya/rekening) ---------------- */
   async function muatPengaturanBazar() {
-    const [{ data: settings }, { data: standData }, { data: sesi }] = await Promise.all([
+    const [{ data: settings }, { data: standData }, { data: elemenData }, { data: sesi }] = await Promise.all([
       supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
-      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id").order("jenis").order("nomor"),
+      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
+      supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
       supabaseClient.auth.getSession()
     ]);
 
@@ -301,6 +483,7 @@ function initDaftarBazar() {
     pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
     jenisStandInfo = (settings && settings.jenis_stand_info) || {};
     standList = standData || [];
+    elemenList = elemenData || [];
     // Kuota sekarang per jenis/area, otomatis dibatasi oleh jumlah fisik
     // baris `bazar_stand` (migrasi 0037) -- "penuh total" cuma kalau SEMUA
     // jenis sudah tidak ada sisa sama sekali (dicek lewat renderJenisChoices,
@@ -440,9 +623,9 @@ function initDaftarBazar() {
     jenisErrorEl.style.display = jenisChecked ? "none" : "block";
     if (!jenisChecked) valid = false;
 
-    const lokasiChecked = jenisChecked ? lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked') : [];
-    lokasiErrorEl.style.display = (jenisChecked && lokasiChecked.length === 0) ? "block" : "none";
-    if (jenisChecked && lokasiChecked.length === 0) valid = false;
+    const lokasiKosong = kodeTerpilihSet.size === 0;
+    lokasiErrorEl.style.display = (jenisChecked && lokasiKosong) ? "block" : "none";
+    if (jenisChecked && lokasiKosong) valid = false;
 
     const fotoInput = document.getElementById("bazarFileFoto");
     const fotoOk = fotoInput.files && fotoInput.files.length > 0;
@@ -475,7 +658,7 @@ function initDaftarBazar() {
     const fotoList = Array.from(document.getElementById("bazarFileFoto").files || []);
     const fileBukti = document.getElementById("bazarFileBukti").files[0];
     const jenisChecked = jenisChoicesEl.querySelector('input[name="bazarJenis"]:checked');
-    const kodeDipilih = Array.from(lokasiAreasEl.querySelectorAll('input[name="bazarLokasi"]:checked')).map(function (cb) { return cb.value; });
+    const kodeDipilih = Array.from(kodeTerpilihSet);
 
     Promise.all([
       Promise.all(fotoList.map(function (f, i) { return uploadKeStorageBazar(f, "foto-produk-" + (i + 1)); })),
