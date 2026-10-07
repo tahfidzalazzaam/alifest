@@ -668,6 +668,89 @@ textarea { resize: vertical; min-height: 80px; }
 .field.has-error .form-error { display: block; }
 
 .submit-row { text-align: center; margin-top: 8px; }
+
+/* ---------- Wizard bertahap (form Daftar Bazar, migrasi 0042) --------------
+   4 "kartu geser": tiap langkah adalah satu panel selebar penuh di dalam
+   ".wizard-viewport" (overflow:hidden), semuanya diletakkan sejajar di
+   dalam ".wizard-track" (display:flex) yang digeser lewat `transform:
+   translateX(-N * 100%)` oleh JS (view-daftarbazar.js) -- itulah "geser ke
+   samping" antar langkah yang diminta, bukan cuma show/hide fieldset biasa.
+   Indikator langkah di atas (".wizard-steps") pakai lingkaran bernomor,
+   BUKAN posisi absolute (sumber umum masalah "nabrak"/tumpang-tindih di
+   layar sempit) -- murni flexbox dengan `min-width:0` di tiap langkah
+   supaya teksnya boleh terpotong/mengecil di HP tanpa mendorong ke luar. */
+.wizard-steps {
+  display: flex;
+  margin-bottom: 30px;
+  gap: 4px;
+}
+.wizard-step {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--ink-400);
+}
+.wizard-step__dot {
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  border-radius: 50%;
+  background: #e3e0d3;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin: 0 auto 6px;
+  transition: background 0.2s ease;
+}
+.wizard-step__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+.wizard-step.is-active { color: var(--green-700); }
+.wizard-step.is-active .wizard-step__dot { background: var(--green-600); }
+.wizard-step.is-done .wizard-step__dot { background: var(--green-500); }
+
+.wizard-viewport { overflow: hidden; }
+.wizard-track {
+  display: flex;
+  transition: transform 0.32s ease;
+}
+.wizard-pane {
+  flex: 0 0 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+.wizard-nav__spacer { flex: 1 1 auto; }
+
+.wizard-ringkasan {
+  background: var(--green-100);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  color: var(--green-900);
+  margin-bottom: 18px;
+}
+.wizard-ringkasan strong { display: block; margin-bottom: 2px; }
+
+@media (max-width: 560px) {
+  .wizard-step__dot { width: 24px; height: 24px; line-height: 24px; font-size: 0.76rem; }
+  .wizard-step__label { font-size: 0.66rem; }
+  .wizard-nav .btn { flex: 1 1 auto; }
+}
 .submit-row .btn { width: 100%; justify-content: center; }
 
 /* Hasil kirim */
