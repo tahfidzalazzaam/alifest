@@ -16,6 +16,20 @@ function escapeHTMLBazarAdmin(teks) {
   return div.innerHTML;
 }
 
+// Migrasi 0043: status buka/tutup pendaftaran Bazar, disamakan PERSIS dengan
+// pola satu-tombol di Panel Panitia Lomba (lihat `statusDibukaManual` di
+// view-admin.js) -- hanya mengunci /daftar-bazar, TIDAK pernah menyembunyikan
+// halaman info publik /bazar (yang kini selalu terbuka, lihat view-bazar.js).
+let statusDibukaManualBazar = true; // bazar_settings.pendaftaran_dibuka
+
+function perbaruiTombolToggleBazar() {
+  const btnToggle = document.getElementById("btn-toggle-pendaftaran-bazar");
+  if (!btnToggle) return;
+  btnToggle.className = "btn " + (statusDibukaManualBazar ? "btn--primary" : "btn--ghost");
+  btnToggle.textContent = statusDibukaManualBazar ? "🟢 Pendaftaran Dibuka" : "🔒 Pendaftaran Ditutup";
+  btnToggle.title = statusDibukaManualBazar ? "Ketuk untuk menutup pendaftaran bazar" : "Ketuk untuk membuka pendaftaran bazar";
+}
+
 async function initAdminBazar() {
   const root = document.getElementById("adminbazar-root");
   root.innerHTML = '<p class="hint">Memeriksa sesi masuk...</p>';
@@ -80,10 +94,18 @@ function renderLoginBazar(root) {
 /* ==================== DASHBOARD SHELL ==================== */
 
 async function renderDashboardBazar(root, session) {
+  const { data: settingsAwal } = await supabaseClient
+    .from("bazar_settings")
+    .select("pendaftaran_dibuka")
+    .eq("id", 1)
+    .maybeSingle();
+  statusDibukaManualBazar = !settingsAwal || settingsAwal.pendaftaran_dibuka !== false;
+
   root.innerHTML =
     '<div class="admin-header">' +
       '<div><h1>Panel Panitia Bazar</h1><p>Masuk sebagai ' + session.user.email + '</p></div>' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<button type="button" id="btn-toggle-pendaftaran-bazar"></button>' +
         '<button type="button" class="btn btn--ghost" id="btn-logout-bazar">Keluar</button>' +
       '</div>' +
     '</div>' +
@@ -93,6 +115,19 @@ async function renderDashboardBazar(root, session) {
       '<button type="button" class="admin-tab" data-tab="pengaturan">Pengaturan Bazar</button>' +
     '</div>' +
     '<div id="adminbazar-content"></div>';
+
+  const btnToggleBazar = document.getElementById("btn-toggle-pendaftaran-bazar");
+  perbaruiTombolToggleBazar();
+  btnToggleBazar.addEventListener("click", async function () {
+    const aksi = statusDibukaManualBazar ? "menutup" : "membuka";
+    if (!confirm('Yakin ingin ' + aksi + ' pendaftaran bazar? Perubahan langsung berlaku di situs publik.')) return;
+    btnToggleBazar.disabled = true;
+    const { error } = await supabaseClient.from("bazar_settings").update({ pendaftaran_dibuka: !statusDibukaManualBazar }).eq("id", 1);
+    btnToggleBazar.disabled = false;
+    if (error) { alert("Gagal mengubah status: " + error.message); return; }
+    statusDibukaManualBazar = !statusDibukaManualBazar;
+    perbaruiTombolToggleBazar();
+  });
 
   document.getElementById("btn-logout-bazar").addEventListener("click", async function () {
     await supabaseClient.auth.signOut();
@@ -1245,23 +1280,7 @@ async function loadTabPengaturanBazar() {
         '<textarea id="bazar-deskripsi-text" rows="4" placeholder="Satu-dua kalimat singkat mengajak orang buka stand di Bazar ALIF 5.0...">' + escapeHTMLBazarAdmin(settings.profil_deskripsi || "") + '</textarea>' +
       '</div>' +
 
-      '<h3 style="margin-top:28px;">Pengaturan Pendaftaran</h3>' +
-
-      '<div class="field">' +
-        '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;">' +
-          '<input type="checkbox" id="bazar-toggle-dibuka" ' + (settings.pendaftaran_dibuka !== false ? "checked" : "") + ' />' +
-          '<span>Pendaftaran bazar dibuka untuk publik</span>' +
-        '</label>' +
-        '<p class="hint" style="margin-top:4px;">Kalau dimatikan, halaman form "/daftar-bazar" menampilkan pesan tertutup -- tapi halaman info "/bazar" TETAP bisa dibuka siapa saja (cuma tombol "Daftar Stand"-nya yang dikunci). Untuk menutup KEDUANYA sekaligus, pakai saklar di bawah.</p>' +
-      '</div>' +
-
-      '<div class="field">' +
-        '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;">' +
-          '<input type="checkbox" id="bazar-toggle-tutup-total" ' + (settings.tutup_total === true ? "checked" : "") + ' />' +
-          '<span>🔒 Tutup TOTAL Bazar (termasuk halaman info publik)</span>' +
-        '</label>' +
-        '<p class="hint" style="margin-top:4px;">Kalau dinyalakan, halaman "/bazar" (info) DAN "/daftar-bazar" (form) sama-sama disembunyikan dari pengunjung biasa -- diganti pesan "Bazar belum dibuka". Hanya panitia yang sudah login di browser ini (akun yang sama dengan "/admin"/"/adminbazar") yang tetap bisa melihat kedua halaman itu apa adanya, untuk keperluan pratinjau/pengecekan. Saklar "Pendaftaran bazar dibuka" di atas jadi tidak relevan selama ini aktif (semuanya sudah tertutup).</p>' +
-      '</div>' +
+      '<p class="hint" style="margin-top:28px;">Buka/tutup pendaftaran bazar sekarang pakai tombol besar "🟢 Pendaftaran Dibuka"/"🔒 Pendaftaran Ditutup" di pojok kanan atas halaman ini (sekali klik, langsung berlaku) -- tidak perlu lagi dicentang di sini. Halaman info "/bazar" selalu bisa dibuka siapa saja; status ini hanya mengunci form "/daftar-bazar".</p>' +
 
       '<h3 style="margin-top:28px;">Jenis & Harga Stand</h3>' +
       '<p class="hint">Area & kuota tiap jenis sudah BAKU (lihat tab "Denah Stand" untuk daftar lengkapnya, tidak diedit di sini) -- yang bisa diubah di sini cuma nama, ukuran, dan harga tiap jenis. Berlaku langsung untuk pendaftar berikutnya (harga tenant yang sudah daftar tidak ikut berubah).</p>' +
@@ -1319,8 +1338,6 @@ async function loadTabPengaturanBazar() {
     const { error: errSimpan } = await supabaseClient.from("bazar_settings").update({
       profil_judul: document.getElementById("bazar-judul-text").value.trim() || null,
       profil_deskripsi: document.getElementById("bazar-deskripsi-text").value.trim() || null,
-      pendaftaran_dibuka: document.getElementById("bazar-toggle-dibuka").checked,
-      tutup_total: document.getElementById("bazar-toggle-tutup-total").checked,
       jenis_stand_info: jenisStandBaru,
       info_biaya: document.getElementById("bazar-info-biaya-text").value.trim() || null,
       info_rekening: document.getElementById("bazar-info-rekening-text").value.trim() || null
