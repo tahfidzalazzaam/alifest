@@ -117,12 +117,17 @@ const DAFTAR_BAZAR_TEMPLATE = `
             </fieldset>
 
             <fieldset>
-              <legend>Penanggung Jawab</legend>
+              <legend>Penyewa</legend>
               <div class="field-row">
                 <div class="field">
-                  <label for="bazarPenanggungJawab">Nama Penanggung Jawab</label>
+                  <!-- Label tampilan "Nama Penyewa" (permintaan user) -- id/name
+                       elemen & nama kolom/parameter RPC di database SENGAJA
+                       TETAP "bazarPenanggungJawab"/"nama_penanggung_jawab"
+                       (tidak diubah) supaya tidak perlu migrasi, murni ganti
+                       teks yang tampil ke pendaftar. -->
+                  <label for="bazarPenanggungJawab">Nama Penyewa</label>
                   <input type="text" id="bazarPenanggungJawab" name="bazarPenanggungJawab" />
-                  <div class="form-error">Nama penanggung jawab wajib diisi.</div>
+                  <div class="form-error">Nama penyewa wajib diisi.</div>
                 </div>
                 <div class="field">
                   <label for="bazarWhatsapp">No. WhatsApp Aktif</label>
@@ -136,9 +141,20 @@ const DAFTAR_BAZAR_TEMPLATE = `
           <!-- ============ Langkah 2: Jenis Stand ============ -->
           <div class="wizard-pane" data-pane="2">
             <fieldset>
-              <legend>Pilih Jenis Stand</legend>
+              <legend>Pilih Jenis &amp; Jumlah Stand</legend>
               <div class="lomba-choices" id="bazar-jenis-choices"></div>
               <div class="form-error" id="bazar-jenis-error" style="margin-top:10px;">Pilih salah satu jenis stand.</div>
+
+              <!-- Penentuan jumlah stand dipindah ke sini (bukan di Langkah 3
+                   lagi) -- begitu jenis dipilih, pendaftar sekalian menentukan
+                   MAU PESAN BERAPA stand jenis itu. Jumlah ini yang nanti
+                   membatasi persis berapa kotak yang boleh diklik di denah
+                   Langkah 3 (lihat renderJumlahSelector()/validasiLangkah3Lokal()). -->
+              <div class="field" id="bazar-jumlah-wrap" style="display:none;margin-top:18px;max-width:280px;">
+                <label for="bazarJumlahStand">Jumlah Stand yang Dipesan</label>
+                <select id="bazarJumlahStand"></select>
+                <p class="hint" style="margin-top:6px;">Jumlah ini menentukan berapa lokasi yang bisa dipilih di Langkah 3 (Penentuan Tempat).</p>
+              </div>
             </fieldset>
           </div>
 
@@ -146,7 +162,10 @@ const DAFTAR_BAZAR_TEMPLATE = `
           <div class="wizard-pane" data-pane="3">
             <fieldset>
               <legend>Pilih Lokasi Stand</legend>
-              <p class="hint" style="margin-top:-10px;">Klik langsung kotaknya di denah di bawah -- boleh pilih lebih dari satu kalau mau sewa beberapa stand sekaligus. Begitu Anda klik "Lanjut", lokasi yang dipilih dikunci sementara (15 menit) supaya tidak diambil pendaftar lain selagi Anda mengisi Langkah 4.</p>
+              <!-- Teks ini diisi ulang secara dinamis oleh renderLokasiPicker()
+                   sesuai jumlah yang dipesan di Langkah 2 -- teks di bawah ini
+                   cuma placeholder sebelum JS jalan. -->
+              <p class="hint" id="bazar-lokasi-hint" style="margin-top:-10px;">Klik langsung kotaknya di denah di bawah. Begitu Anda klik "Lanjut", lokasi yang dipilih dikunci sementara (15 menit) supaya tidak diambil pendaftar lain selagi Anda mengisi Langkah 4.</p>
               <div id="bazar-denah-legenda"></div>
               <!-- #bazar-denah-outer SENGAJA overflow:hidden & #bazar-denah-inner
                    SENGAJA position:absolute (BUKAN "position:relative" seperti
@@ -174,6 +193,7 @@ const DAFTAR_BAZAR_TEMPLATE = `
                 </div>
               </div>
               <p class="hint" id="bazar-lokasi-total" style="margin-top:8px;"></p>
+              <p class="hint" id="bazar-lokasi-batas-pesan" style="display:none;margin-top:4px;color:#92650a;font-weight:600;">Jumlah stand yang dipilih sudah sesuai pesanan Anda -- batalkan salah satu pilihan dulu (klik lagi kotaknya) kalau mau mengganti lokasi.</p>
               <div class="form-error" id="bazar-lokasi-error" style="margin-top:10px;">Pilih minimal satu lokasi stand.</div>
               <div class="form-error" id="bazar-reservasi-error" style="margin-top:10px;"></div>
             </fieldset>
@@ -296,6 +316,11 @@ function initDaftarBazar() {
   let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, direservasi_oleh, direservasi_sampai, pos_x, pos_y, lebar, tinggi, rotasi}
   let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
+  // Jumlah stand yang dipesan -- ditentukan di Langkah 2 bareng jenisnya,
+  // dipakai Langkah 3 sebagai BATAS PERSIS berapa kotak yang boleh diklik
+  // di denah (lihat renderJumlahSelector(), buatKotakLokasiPublik(), dan
+  // validasiLangkah3Lokal()). Direset ke 1 setiap kali jenis stand berganti.
+  let jumlahDipesan = 1;
   let pendaftaranDibuka = true;
   let ujiCobaAktifBazar = false; // true kalau PIN uji coba (sama dengan Lomba) sedang aktif di sessionStorage
   // Kode stand yang DIPILIH pengunjung lewat klik di denah.
@@ -355,12 +380,59 @@ function initDaftarBazar() {
       radio.addEventListener("change", function () {
         if (jenisTerpilih !== radio.value) {
           jenisTerpilih = radio.value;
+          jumlahDipesan = 1;
           kodeTerpilihSet = new Set();
           reservasiTerakhirUntuk = null;
+          renderJumlahSelector();
         }
       });
     });
+
+    renderJumlahSelector();
   }
+
+  /* ---------------- Jumlah stand yang dipesan (Langkah 2, bareng jenis) ---------------- */
+  function renderJumlahSelector() {
+    const wrap = document.getElementById("bazar-jumlah-wrap");
+    const select = document.getElementById("bazarJumlahStand");
+    if (!wrap || !select) return;
+
+    if (!jenisTerpilih) {
+      wrap.style.display = "none";
+      return;
+    }
+
+    // Batas atas dropdown = jumlah stand jenis ini yang masih KOSONG
+    // (tenant_id null) -- sama basisnya dengan hitungan "terpakai" di kartu
+    // jenis, bukan ikut memperhitungkan reservasi sementara orang lain
+    // (itu soal lain, dicek ulang di Langkah 3 & saat submit_bazar()).
+    // Dibatasi maksimal 20 pilihan di dropdown supaya tidak kepanjangan.
+    const tersedia = standList.filter(function (s) { return s.jenis === jenisTerpilih && !s.tenant_id; }).length;
+    const maks = Math.max(1, Math.min(tersedia, 20));
+    if (jumlahDipesan > maks) jumlahDipesan = maks;
+
+    let opsiHTML = "";
+    for (let n = 1; n <= maks; n++) {
+      opsiHTML += '<option value="' + n + '"' + (n === jumlahDipesan ? " selected" : "") + '>' + n + (n === 1 ? " stand" : " stand") + '</option>';
+    }
+    select.innerHTML = opsiHTML;
+    select.value = String(jumlahDipesan);
+    wrap.style.display = "block";
+  }
+
+  // Listener dipasang SEKALI di sini (bukan di dalam renderJumlahSelector(),
+  // yang hanya mengganti isi <option> lewat innerHTML -- elemen <select>-nya
+  // sendiri tidak pernah dibuat ulang, jadi listener yang dipasang sekali di
+  // sini tetap berlaku terus tanpa perlu dipasang ulang/ganda).
+  document.getElementById("bazarJumlahStand").addEventListener("change", function () {
+    const n = parseInt(this.value, 10);
+    jumlahDipesan = isNaN(n) || n < 1 ? 1 : n;
+    // Ganti jumlah pesanan membatalkan pilihan lokasi lama (kalau ada) --
+    // reservasi yang sempat terkunci (kalau pernah maju ke Langkah 3->4 lalu
+    // mundur ke sini) sudah dilepas lewat listener "Kembali" di bawah.
+    kodeTerpilihSet = new Set();
+    reservasiTerakhirUntuk = null;
+  });
 
   /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual (Langkah 3) ---------------- */
   function labelRingkasKodeBazarPublik(kode) {
@@ -450,21 +522,63 @@ function initDaftarBazar() {
       el.style.boxShadow = dipilih ? "0 2px 6px rgba(0,0,0,0.3)" : "none";
     }
     terapkanGayaTerpilih();
+    // Disimpan di elemennya sendiri supaya bisa dipanggil dari LUAR (lewat
+    // segarkanSemuaGayaPilihan()) saat seleksi lebih dari satu kotak berubah
+    // SEKALIGUS -- mis. mode "pilih 1" yang menukar kotak terpilih lama ke
+    // yang baru (lihat klik handler di bawah), closure milik kotak LAMA itu
+    // sendiri yang harus dipanggil supaya outline-nya ikut hilang.
+    el._segarkanGayaPilihan = terapkanGayaTerpilih;
 
     el.addEventListener("click", function () {
-      if (kodeTerpilihSet.has(opsi.kode)) kodeTerpilihSet.delete(opsi.kode);
-      else kodeTerpilihSet.add(opsi.kode);
-      terapkanGayaTerpilih();
+      if (kodeTerpilihSet.has(opsi.kode)) {
+        // Batalkan pilihan yang sudah ada -- selalu boleh.
+        kodeTerpilihSet.delete(opsi.kode);
+        terapkanGayaTerpilih();
+      } else if (kodeTerpilihSet.size < jumlahDipesan) {
+        // Masih ada jatah sesuai jumlah yang dipesan di Langkah 2.
+        kodeTerpilihSet.add(opsi.kode);
+        terapkanGayaTerpilih();
+      } else if (jumlahDipesan === 1) {
+        // Mode "pesan 1 stand" -- berperilaku seperti radio: klik kotak lain
+        // otomatis MENUKAR pilihan (tidak perlu batalkan manual dulu).
+        kodeTerpilihSet.clear();
+        kodeTerpilihSet.add(opsi.kode);
+        segarkanSemuaGayaPilihan();
+      } else {
+        // Sudah mencapai jumlah yang dipesan (>1) -- JANGAN tambah, cuma
+        // beri tahu lewat #bazar-lokasi-batas-pesan (lihat perbaruiTotalLokasi()).
+        perbaruiTotalLokasi();
+        return;
+      }
       perbaruiTotalLokasi();
     });
 
     return el;
   }
 
+  // Menyegarkan gaya outline SEMUA kotak yang sedang bisa dipilih sesuai isi
+  // kodeTerpilihSet terbaru -- dipakai saat mode "pesan 1 stand" menukar
+  // pilihan (lihat klik handler di buatKotakLokasiPublik()), supaya kotak
+  // yang baru saja DIBATALKAN otomatis juga ikut kehilangan outline-nya
+  // (bukan cuma kotak yang baru diklik).
+  function segarkanSemuaGayaPilihan() {
+    Object.keys(kotakStandElMap).forEach(function (kode) {
+      const el = kotakStandElMap[kode];
+      if (el && typeof el._segarkanGayaPilihan === "function") el._segarkanGayaPilihan();
+    });
+  }
+
   let kotakStandElMap = {};
 
   function renderLokasiPicker() {
     if (!jenisTerpilih) return;
+
+    const hintEl = document.getElementById("bazar-lokasi-hint");
+    if (hintEl) {
+      hintEl.textContent = jumlahDipesan === 1
+        ? "Klik salah satu kotak di denah di bawah untuk memilih lokasi stand Anda. Begitu Anda klik \"Lanjut\", lokasi yang dipilih dikunci sementara (15 menit) supaya tidak diambil pendaftar lain selagi Anda mengisi Langkah 4."
+        : "Klik TEPAT " + jumlahDipesan + " kotak di denah di bawah, sesuai jumlah stand yang Anda pesan di Langkah 2. Begitu Anda klik \"Lanjut\", lokasi yang dipilih dikunci sementara (15 menit) supaya tidak diambil pendaftar lain selagi Anda mengisi Langkah 4.";
+    }
 
     const warnaJenisAktif = WARNA_JENIS_DENAH_PUBLIK[jenisTerpilih] || "#777777";
     legendaEl.innerHTML =
@@ -526,8 +640,11 @@ function initDaftarBazar() {
     const dipilih = kodeTerpilihSet.size;
     const harga = jenisTerpilih && jenisStandInfo[jenisTerpilih] ? (jenisStandInfo[jenisTerpilih].harga || 0) : 0;
     lokasiTotalEl.textContent = dipilih === 0
-      ? "Belum ada lokasi dipilih."
-      : (dipilih + " stand dipilih (" + Array.from(kodeTerpilihSet).sort().join(", ") + ") × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
+      ? ("Belum ada lokasi dipilih (pilih " + jumlahDipesan + (jumlahDipesan === 1 ? " stand" : " stand") + " sesuai yang dipesan di Langkah 2).")
+      : (dipilih + " dari " + jumlahDipesan + " stand dipilih (" + Array.from(kodeTerpilihSet).sort().join(", ") + ") × " + formatRupiahDaftarBazar(harga) + " = " + formatRupiahDaftarBazar(dipilih * harga) + ".");
+
+    const batasEl = document.getElementById("bazar-lokasi-batas-pesan");
+    if (batasEl) batasEl.style.display = (jumlahDipesan > 1 && dipilih >= jumlahDipesan) ? "block" : "none";
   }
 
   function highlightKodeBentrok(daftarKode) {
@@ -757,9 +874,14 @@ function initDaftarBazar() {
   }
 
   function validasiLangkah3Lokal() {
-    const kosong = kodeTerpilihSet.size === 0;
-    lokasiErrorEl.style.display = kosong ? "block" : "none";
-    return !kosong;
+    // Sekarang harus TEPAT sejumlah jumlahDipesan (bukan cuma "minimal satu"
+    // seperti sebelumnya) -- jumlahnya sendiri sudah ditentukan di Langkah 2.
+    const cukup = kodeTerpilihSet.size === jumlahDipesan;
+    lokasiErrorEl.textContent = kodeTerpilihSet.size === 0
+      ? ("Pilih " + jumlahDipesan + (jumlahDipesan === 1 ? " lokasi stand" : " lokasi stand") + " di denah sesuai yang dipesan.")
+      : ("Jumlah lokasi yang dipilih (" + kodeTerpilihSet.size + ") belum sesuai jumlah yang dipesan (" + jumlahDipesan + "). Pilih/batalkan kotak di denah sampai jumlahnya pas.");
+    lokasiErrorEl.style.display = cukup ? "none" : "block";
+    return cukup;
   }
 
   function validasiLangkah4() {
