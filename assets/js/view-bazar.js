@@ -117,33 +117,12 @@ function escapeHTMLBazarInfo(teks) {
 // (termasuk `window.ViewXxx` di baris paling akhirnya). Ini sumber bug
 // nyata yang sempat bikin tombol "Daftar Stand Sekarang" gagal berpindah
 // halaman (console menunjukkan error ini persis).
-const PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO = [
-  "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
-  "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
-  "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
-  "Lagi semedi di Air Terjun Kebenaran sambil ngumpulin cakra buat Bazar ALIF 5.0. Jangan diganggu dulu, nanti juga muncul sendiri. 🏞️🧘",
-  "Rasengan Bazar-nya masih dalam proses pembentukan cakra, belum stabil kalau dibuka sekarang. Ditunggu ya sampai sempurna. 🌀",
-  "Mode Sage lagi aktif: panitia sedang menyerap cakra alam demi persiapan Bazar yang maksimal. Coba mampir lagi nanti. 🍃"
-];
-
-// "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) --
-// menyembunyikan halaman info INI juga (bukan cuma form "/daftar-bazar"
-// seperti pendaftaran_dibuka=false), KECUALI untuk panitia yang sedang
-// login di browser ini (akun Supabase Auth yang sama dengan
-// "/admin"/"/adminbazar" -- lihat getSession() di bawah), supaya panitia
-// tetap bisa pratinjau halaman ini sebelum/sambil memutuskan kapan
-// dibuka lagi ke publik.
-function tampilkanPesanBazarTutupTotal() {
-  const app = document.getElementById("app");
-  if (!app) return;
-  const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL_INFO.length)];
-  app.innerHTML =
-    '<section class="hero container">' +
-      '<span class="hero__eyebrow">Al Azzaam Islamic Fair</span>' +
-      '<h1>🌀 Bazar Belum Dibuka</h1>' +
-      '<p class="lede">' + escapeHTMLBazarInfo(pesan) + '</p>' +
-    '</section>';
-}
+// Migrasi 0043: "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi
+// 0035) DIHAPUS dari aplikasi -- halaman info publik "/bazar" ini sekarang
+// SELALU bisa dibuka siapa saja, apa pun status pendaftaran. Kolom
+// `tutup_total` dibiarkan ada di database (additive-only) tapi sudah tidak
+// dibaca di sini lagi. Hanya "/daftar-bazar" (form) yang masih bisa
+// dikunci, lewat tombol satu-klik di "/adminbazar" (lihat view-daftarbazar.js).
 
 // Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
 const URUTAN_JENIS_STAND_INFO = ["A", "B", "C"];
@@ -286,36 +265,15 @@ async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
 }
 
 async function initBazar() {
-  const [{ data: settings }, { data: standData }, { data: elemenData }, { data: tenantPublik }, { data: sesi }] = await Promise.all([
-    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+  const [{ data: settings }, { data: standData }, { data: elemenData }, { data: tenantPublik }] = await Promise.all([
+    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
     supabaseClient.from("bazar_stand").select("jenis,area,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi"),
     supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
-    supabaseClient.rpc("bazar_denah_publik"),
-    supabaseClient.auth.getSession()
+    supabaseClient.rpc("bazar_denah_publik")
   ]);
   const elemenList = elemenData || [];
   const namaTenantByKode = {};
   (tenantPublik || []).forEach(function (r) { namaTenantByKode[r.kode] = r.nama_usaha; });
-
-  const panitiaLogin = !!(sesi && sesi.session);
-  if (settings && settings.tutup_total === true && !panitiaLogin) {
-    tampilkanPesanBazarTutupTotal();
-    return;
-  }
-
-  // Panitia yang login tetap melihat halaman ini seperti biasa walau
-  // tutup_total aktif (supaya bisa pratinjau) -- diberi banner pengingat
-  // di paling atas supaya tidak lupa ini sedang tersembunyi dari publik.
-  if (settings && settings.tutup_total === true && panitiaLogin) {
-    const hero = document.querySelector(".hero.container");
-    if (hero) {
-      const banner = document.createElement("div");
-      banner.className = "notice notice--error";
-      banner.style.marginBottom = "16px";
-      banner.textContent = "🔒 Mode Pratinjau Panitia: halaman ini sedang DISEMBUNYIKAN dari publik (\"Tutup Total Bazar\" aktif di /adminbazar).";
-      hero.insertBefore(banner, hero.firstChild);
-    }
-  }
 
   const judulEl = document.getElementById("bazar-judul");
   const deskripsiEl = document.getElementById("bazar-deskripsi");
