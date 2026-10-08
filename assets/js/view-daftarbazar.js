@@ -227,27 +227,15 @@ const DAFTAR_BAZAR_TEMPLATE = `
 </main>
 `;
 
-// Pesan lucu bertema "lagi maintenance, ngumpulin cakra dulu" untuk saklar
-// "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi 0035) -- dipilih
-// acak tiap kali form ini dirender. ISI-nya SAMA PERSIS dengan yang ada di
-// view-bazar.js (kalau mau diubah, ganti di KEDUA tempat itu supaya tetap
-// konsisten) -- tapi NAMA KONSTANTANYA SENGAJA DIBEDAKAN (diberi akhiran
-// `_DAFTAR` di sini, `_INFO` di view-bazar.js) karena kedua file ini sama-
-// sama dimuat sebagai <script> klasik di index.html dan berbagi SATU scope
-// global yang sama -- dua `const` dengan nama IDENTIK di dua file berbeda
-// akan membuat browser melempar `SyntaxError: Identifier '...' has already
-// been declared` saat file kedua dimuat, yang GAGAL TOTAL me-load seluruh
-// isi file itu (termasuk `window.ViewDaftarBazar` di baris paling akhir) --
-// inilah sebab nyata laporan "tombol Daftar Stand Sekarang tidak bisa
-// pindah halaman" (bukan soal file basi di GitHub seperti dugaan awal).
-const PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR = [
-  "Bazar-nya lagi mode pertapaan dulu, ngumpulin cakra sebanyak-banyaknya biar pas dibuka nanti langsung ngegas. 🌀 Sabar ya, chakra-nya baru keisi separuh.",
-  "Maintenance dulu, Ninja! Panitia lagi menghimpun cakra di seluruh penjuru pondok sebelum Bazar resmi dibuka ke publik. 🥷⚡",
-  "Error 404: Cakra belum cukup. Sedang dalam proses pengisian ulang, balik lagi nanti kalau sudah full tank ya. 🔋",
-  "Lagi semedi di Air Terjun Kebenaran sambil ngumpulin cakra buat Bazar ALIF 5.0. Jangan diganggu dulu, nanti juga muncul sendiri. 🏞️🧘",
-  "Rasengan Bazar-nya masih dalam proses pembentukan cakra, belum stabil kalau dibuka sekarang. Ditunggu ya sampai sempurna. 🌀",
-  "Mode Sage lagi aktif: panitia sedang menyerap cakra alam demi persiapan Bazar yang maksimal. Coba mampir lagi nanti. 🍃"
-];
+// Migrasi 0043: "Tutup Total Bazar" (bazar_settings.tutup_total, migrasi
+// 0035) DIHAPUS dari aplikasi -- lihat view-bazar.js untuk catatan yang
+// sama. Form ini ("/daftar-bazar") sekarang satu-satunya yang bisa dikunci,
+// lewat `bazar_settings.pendaftaran_dibuka` (tombol satu-klik di
+// "/adminbazar"), DAN sekarang bisa dilewati lewat "kode uji coba" yang
+// SAMA PERSIS dengan milik Lomba (migrasi 0020/0043, lihat `router.js`:
+// `KODE_UJI_COBA_PANITIA`, `window.ujiCobaAktif()`, sessionStorage key
+// "alif_uji_coba_pin") -- satu PIN yang sama membuka mode uji coba untuk
+// Lomba MAUPUN Bazar sekaligus, tidak perlu 2 PIN terpisah.
 
 // Urutan tampil jenis stand -- tetap A, B, C apa pun urutan key di jsonb.
 const URUTAN_JENIS_STAND = ["A", "B", "C"];
@@ -309,6 +297,7 @@ function initDaftarBazar() {
   let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
   let pendaftaranDibuka = true;
+  let ujiCobaAktifBazar = false; // true kalau PIN uji coba (sama dengan Lomba) sedang aktif di sessionStorage
   // Kode stand yang DIPILIH pengunjung lewat klik di denah.
   let kodeTerpilihSet = new Set();
   const sesiToken = buatSesiTokenBazar();
@@ -565,40 +554,14 @@ function initDaftarBazar() {
 
   /* ---------------- Muat pengaturan bazar (buka/tutup, jenis & denah stand, info biaya/rekening) ---------------- */
   async function muatPengaturanBazar() {
-    const [{ data: settings }, { data: standData }, { data: elemenData }, { data: sesi }] = await Promise.all([
-      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,tutup_total,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+    const [{ data: settings }, { data: standData }, { data: elemenData }] = await Promise.all([
+      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
       supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,direservasi_oleh,direservasi_sampai,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
-      supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
-      supabaseClient.auth.getSession()
+      supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
     ]);
 
-    const panitiaLogin = !!(sesi && sesi.session);
-    if (settings && settings.tutup_total === true && !panitiaLogin) {
-      const shell = document.querySelector(".form-shell");
-      if (shell) {
-        const pesan = PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR[Math.floor(Math.random() * PESAN_LUCU_BAZAR_TUTUP_TOTAL_DAFTAR.length)];
-        shell.innerHTML =
-          '<div style="text-align:center;padding:20px 0;">' +
-            '<div style="font-size:2.4rem;margin-bottom:12px;">🌀</div>' +
-            '<h2>Bazar Belum Dibuka</h2>' +
-            '<p>' + escapeHTMLDaftarBazar(pesan) + '</p>' +
-          '</div>';
-      }
-      return false;
-    }
-
-    if (settings && settings.tutup_total === true && panitiaLogin) {
-      const shell = document.querySelector(".form-shell");
-      if (shell) {
-        const banner = document.createElement("div");
-        banner.className = "notice notice--error";
-        banner.style.marginBottom = "16px";
-        banner.textContent = "🔒 Mode Pratinjau Panitia: halaman ini sedang DISEMBUNYIKAN dari publik (\"Tutup Total Bazar\" aktif di /adminbazar).";
-        shell.insertBefore(banner, shell.firstChild);
-      }
-    }
-
     pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
+    ujiCobaAktifBazar = !!(window.ujiCobaAktif && window.ujiCobaAktif());
     jenisStandInfo = (settings && settings.jenis_stand_info) || {};
     standList = standData || [];
     elemenList = elemenData || [];
@@ -618,7 +581,11 @@ function initDaftarBazar() {
       infoRekeningEl.style.display = "block";
     }
 
-    if (!pendaftaranDibuka || semuaPenuh) {
+    // Kode uji coba (sama persis dengan Lomba) membuka form ini walau
+    // `pendaftaran_dibuka` false -- TAPI tidak membuka stand yang memang
+    // sudah penuh (itu bukan soal status buka/tutup, tidak ada gunanya
+    // dilewati PIN).
+    if ((!pendaftaranDibuka && !ujiCobaAktifBazar) || semuaPenuh) {
       const shell = document.querySelector(".form-shell");
       const pesan = !pendaftaranDibuka
         ? "Mohon maaf, pendaftaran stand/tenant bazar ALIF 5.0 sedang tidak dibuka sementara oleh panitia. Silakan cek kembali nanti atau hubungi panitia untuk informasi lebih lanjut."
@@ -630,7 +597,42 @@ function initDaftarBazar() {
             '<h2>' + (!pendaftaranDibuka ? "Pendaftaran Bazar Sedang Ditutup" : "Stand Penuh") + '</h2>' +
             '<p>' + pesan + '</p>' +
             '<p><a href="#/bazar" class="btn btn--ghost">Kembali ke halaman Bazar</a></p>' +
+            (!pendaftaranDibuka ? (
+              '<div style="margin-top:18px;">' +
+                '<button type="button" class="btn btn--ghost" id="btn-bazar-ujicoba-reveal" style="font-size:12.5px;opacity:0.7;">Panitia? Masuk mode uji coba</button>' +
+                '<div id="bazar-ujicoba-wrap" style="display:none;max-width:260px;margin:12px auto 0;">' +
+                  '<input type="password" id="bazar-ujicoba-pin" placeholder="Kode uji coba" style="width:100%;text-align:center;letter-spacing:2px;" />' +
+                  '<p class="form-error" id="bazar-ujicoba-error" style="display:none;margin-top:6px;">Kode salah.</p>' +
+                  '<button type="button" class="btn btn--primary" id="bazar-ujicoba-submit" style="margin-top:8px;width:100%;">Masuk</button>' +
+                '</div>' +
+              '</div>'
+            ) : "") +
           '</div>';
+
+        if (!pendaftaranDibuka) {
+          const btnReveal = document.getElementById("btn-bazar-ujicoba-reveal");
+          const wrap = document.getElementById("bazar-ujicoba-wrap");
+          const pinInput = document.getElementById("bazar-ujicoba-pin");
+          const pinError = document.getElementById("bazar-ujicoba-error");
+          btnReveal.addEventListener("click", function () {
+            wrap.style.display = "block";
+            pinInput.focus();
+          });
+          function cobaUjiCobaBazar() {
+            const val = pinInput.value.trim();
+            if (window.KODE_UJI_COBA_PANITIA && val === window.KODE_UJI_COBA_PANITIA) {
+              pinError.style.display = "none";
+              try { sessionStorage.setItem("alif_uji_coba_pin", val); } catch (e) { /* tetap lanjut walau gagal disimpan */ }
+              router(); // render ulang halaman ini dari awal -- sekarang akan lolos gerbang karena sessionStorage sudah terisi
+            } else {
+              pinError.style.display = "block";
+            }
+          }
+          document.getElementById("bazar-ujicoba-submit").addEventListener("click", cobaUjiCobaBazar);
+          pinInput.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") cobaUjiCobaBazar();
+          });
+        }
       }
       return false;
     }
@@ -643,18 +645,48 @@ function initDaftarBazar() {
     return bagian.length > 1 ? bagian.pop() : "bin";
   }
 
+  function tungguSebentar(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  // "Failed to fetch" (gagal di level jaringan, BUKAN error terstruktur dari
+  // Supabase) sering muncul di HP dengan sinyal pas-pasan (4G naik-turun,
+  // apalagi kalau beberapa berkas diunggah BERSAMAAN -- lihat perubahan di
+  // bawah, sekarang diunggah BERGANTIAN satu-satu, bukan `Promise.all`
+  // sekaligus, supaya tidak berebut koneksi di jaringan lemah). Begitu
+  // ketemu error yang pola pesannya khas masalah jaringan sesaat (bukan
+  // berkas ditolak server/format salah/dsb), coba ulang otomatis sampai 2x
+  // lagi dengan jeda singkat sebelum benar-benar menyerah -- pengalaman
+  // nyata pendaftar: 1 dari 5 berkas gagal di tengah sinyal lemot TIDAK
+  // harus langsung membatalkan seluruh pendaftarannya.
+  function kemungkinanErrorJaringan(pesan) {
+    const p = String(pesan || "").toLowerCase();
+    return p.indexOf("failed to fetch") !== -1 ||
+      p.indexOf("network") !== -1 ||
+      p.indexOf("load failed") !== -1 ||
+      p.indexOf("networkerror") !== -1;
+  }
+
   async function uploadKeStorageBazar(file, label) {
     const path = "bazar/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensi(file);
-    const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
-      contentType: file.type,
-      upsert: false
-    });
-    if (error) {
-      console.error("Detail error upload (" + label + "):", error);
-      throw new Error("Gagal mengunggah " + label + ": " + error.message);
+    const MAKS_PERCOBAAN = 3;
+    let error;
+    for (let percobaan = 1; percobaan <= MAKS_PERCOBAAN; percobaan++) {
+      const hasil = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
+        contentType: file.type,
+        upsert: percobaan > 1 // percobaan ulang pakai path YANG SAMA -- upsert:true supaya tidak ditolak "sudah ada" kalau percobaan pertama ternyata sempat tersimpan sebagian sebelum koneksinya putus
+      });
+      error = hasil.error;
+      if (!error) {
+        const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+        return data.publicUrl;
+      }
+      console.error("Detail error upload (" + label + "), percobaan " + percobaan + ":", error);
+      const bolehCobaLagi = percobaan < MAKS_PERCOBAAN && kemungkinanErrorJaringan(error.message);
+      if (!bolehCobaLagi) break;
+      await tungguSebentar(1200 * percobaan); // jeda makin lama tiap percobaan ulang
     }
-    const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-    return data.publicUrl;
+    throw new Error("Gagal mengunggah " + label + ": " + error.message);
   }
 
   function setupUploadSingle(inputId, boxId, filenameId) {
@@ -889,13 +921,35 @@ function initDaftarBazar() {
     const fileBukti = document.getElementById("bazarFileBukti").files[0];
     const kodeDipilih = Array.from(kodeTerpilihSet);
 
-    Promise.all([
-      uploadKeStorageBazar(fileLogo, "logo-usaha"),
-      uploadKeStorageBazar(filePoster, "poster-promosi"),
-      uploadKeStorageBazar(fileIg1, "bukti-follow-ig-1"),
-      uploadKeStorageBazar(fileIg2, "bukti-follow-ig-2"),
-      uploadKeStorageBazar(fileBukti, "bukti-bayar")
-    ])
+    // Diunggah BERGANTIAN satu-per-satu (bukan `Promise.all` lima sekaligus
+    // seperti sebelumnya) -- 5 unggahan bersamaan gampang berebut koneksi di
+    // HP dengan sinyal pas-pasan (dilaporkan nyata: "Gagal mengunggah
+    // poster-promosi: Failed to fetch" di tengah 4G lemah), jadi diunggah
+    // satu-satu supaya tiap unggahan dapat jatah koneksi penuh + tombol
+    // "Mengirim..." sekalian menunjukkan progres (mis. "Mengunggah 2/5...")
+    // supaya pendaftar tahu prosesnya masih jalan, bukan macet. Urutan
+    // berkasnya SENGAJA bukti-bayar PALING AKHIR -- kalau salah satu berkas
+    // identitas gagal total (habis 3x percobaan, lihat uploadKeStorageBazar),
+    // pendaftar tahu lebih awal TANPA harus menunggu bukti bayar (biasanya
+    // berkas paling besar) ikut terunggah dulu.
+    const daftarUnggah = [
+      { file: fileLogo, label: "logo-usaha" },
+      { file: filePoster, label: "poster-promosi" },
+      { file: fileIg1, label: "bukti-follow-ig-1" },
+      { file: fileIg2, label: "bukti-follow-ig-2" },
+      { file: fileBukti, label: "bukti-bayar" }
+    ];
+
+    async function unggahSemuaBergantian() {
+      const hasil = [];
+      for (let i = 0; i < daftarUnggah.length; i++) {
+        btnSubmit.textContent = "Mengunggah " + (i + 1) + "/" + daftarUnggah.length + "...";
+        hasil.push(await uploadKeStorageBazar(daftarUnggah[i].file, daftarUnggah[i].label));
+      }
+      return hasil;
+    }
+
+    unggahSemuaBergantian()
       .then(function (hasil) {
         return supabaseClient.rpc("submit_bazar", {
           p_nama_usaha: document.getElementById("bazarNamaUsaha").value.trim(),
@@ -906,7 +960,8 @@ function initDaftarBazar() {
           p_kode_stand: kodeDipilih,
           p_url_foto_produk: [hasil[0], hasil[1]],
           p_url_bukti_follow_ig: [hasil[2], hasil[3]],
-          p_url_bukti_bayar: hasil[4]
+          p_url_bukti_bayar: hasil[4],
+          p_kode_uji_coba: (window.ujiCobaAktif && window.ujiCobaAktif()) ? window.KODE_UJI_COBA_PANITIA : null
         });
       })
       .then(async function (res) {
