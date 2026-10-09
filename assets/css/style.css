@@ -774,6 +774,15 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* ---------- Halaman Panitia ---------- */
 .admin-page { padding: 40px 0 80px; }
+/* Panel Panitia (Lomba `/admin` & Bazar `/adminbazar`) dibuat lebih LEBAR
+   dari halaman publik biasa -- aslinya ikut ".container" (max-width 1080px)
+   yang dirancang untuk halaman publik berisi teks/kartu, jadi di monitor
+   lebar tabel data pendaftar/tenant yang banyak kolom terasa sempit dengan
+   jarak kosong longgar di kiri-kanan. Override cuma untuk kombinasi class
+   ".admin-page.container" (keduanya SELALU dipasang bersamaan di
+   view-admin.js & view-adminbazar.js) supaya ".container" sendiri yang
+   dipakai halaman publik lain tidak ikut berubah. */
+.admin-page.container { max-width: 1400px; }
 
 .admin-login { max-width: 420px; margin: 0 auto; }
 .admin-login h1 { font-size: 1.6rem; }
@@ -925,6 +934,77 @@ textarea { resize: vertical; min-height: 80px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Warna SELURUH BARIS menyesuaikan status pendaftaran -- dipasang lewat
+   class tambahan di <tr> (lihat kelasBarisStatusLomba() di view-admin.js &
+   kelasBarisStatusBazar() di view-adminbazar.js), BUKAN cuma mewarnai
+   kolom/dropdown status saja -- supaya status tiap baris langsung kelihatan
+   sekilas pandang tanpa perlu membaca teks dropdownnya satu-satu, sama di
+   tabel Data Pendaftar (Lomba) maupun Data Tenant (Bazar). Warna dipasang
+   di tiap <td> (bukan cuma di <tr>) mengikuti pola ".anggota-detail" yang
+   sudah ada supaya konsisten tercat di semua browser (background di <tr>
+   saja tidak selalu ikut tercat di balik border <td> collapse). */
+.admin-table tr.status-row--pending td { background: #fdf6e3; }
+.admin-table tr.status-row--warn td { background: #fde7cf; }
+.admin-table tr.status-row--success td { background: var(--green-100); }
+.admin-table tr.status-row--danger td { background: rgba(194, 58, 46, 0.1); }
+/* Dropdown status & tombol di dalam baris berwarna tetap diberi latar putih
+   sendiri supaya kontras & jelas bisa diklik, tidak "tenggelam" ke warna
+   baris di belakangnya. */
+.admin-table tr.status-row--pending select.status-select,
+.admin-table tr.status-row--warn select.status-select,
+.admin-table tr.status-row--success select.status-select,
+.admin-table tr.status-row--danger select.status-select { background: var(--white); }
+/* Hover (baris yang bisa diketuk untuk detail) tetap kelihatan walau
+   barisnya sudah berwarna -- warna hover sengaja dibuat sedikit LEBIH GELAP
+   dari warna status-nya sendiri (bukan hijau generik) supaya tidak terlihat
+   seperti status berubah saat kursor cuma lewat. */
+.admin-table tr.row-clickable.status-row--pending:hover td { background: #faeec0; }
+.admin-table tr.row-clickable.status-row--warn:hover td { background: #fbdcb3; }
+.admin-table tr.row-clickable.status-row--success:hover td { background: #d3ebda; }
+.admin-table tr.row-clickable.status-row--danger:hover td { background: rgba(194, 58, 46, 0.18); }
+/* ---------- Stepper jumlah pesanan ala GoFood/GrabFood (tombol bundar
+   minus/plus + angka besar di tengah) -- dipakai Langkah 2 form
+   /daftar-bazar (#bazar-jumlah-wrap) untuk menentukan jumlah stand yang
+   dipesan, pengganti dropdown <select> yang lama. ---------- */
+.qty-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--white);
+  border: 1.5px solid #e3e0d3;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+.qty-stepper__btn {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--green-600);
+  color: var(--white);
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, transform 0.08s ease;
+}
+.qty-stepper__btn:hover:not(:disabled) { background: var(--green-700); }
+.qty-stepper__btn:active:not(:disabled) { transform: scale(0.9); }
+.qty-stepper__btn:disabled { background: #d8d4c4; cursor: not-allowed; }
+.qty-stepper__value {
+  min-width: 36px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: var(--ink-900);
+}
+
 /* ---------- Chip list (dipakai halaman info Bazar untuk daftar kategori
    stand, murni tampilan read-only -- bukan pilihan form) ---------- */
 .chip-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
