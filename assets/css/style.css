@@ -926,6 +926,19 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: var(--radius-sm);
   border: 1.5px solid #e3e0d3;
   font-size: 0.74rem;
+  /* Lebar minimum supaya status terpanjang ("Perlu Tambah Nomor Punggung")
+     tidak kepotong/kepepet -- sebelumnya lebar dropdown cuma mengikuti
+     teks OPSI YANG SEDANG TERPILIH jadi kolomnya ikut menyempit begitu
+     statusnya pendek ("Lunas", "Diterima"), lalu kepotong lagi begitu
+     diganti ke status yang teksnya lebih panjang. */
+  min-width: 190px;
+  width: 100%;
+}
+/* Kolom Status (dilebarkan atas permintaan panitia -- dulu sempit/kepotong
+   karena ikut lebar dropdown-nya saja) -- dipasang di <th> & <td> sekaligus
+   supaya lebar kolomnya konsisten dari baris header sampai baris data. */
+.admin-table th.col-status, .admin-table td.col-status {
+  min-width: 206px;
 }
 /* Kolom yang bisa panjang (nama, sekolah) dipotong dengan "..." — teks
    lengkapnya muncul lewat tooltip (atribut title) saat kursor diarahkan. */
@@ -1216,7 +1229,7 @@ tr.row-clickable:hover { background: var(--green-100); }
   background: var(--white);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  max-width: 620px;
+  max-width: 680px;
   width: 100%;
   max-height: 88vh;
   overflow-y: auto;
@@ -1245,17 +1258,91 @@ tr.row-clickable:hover { background: var(--green-100); }
 }
 .modal-close:hover { color: var(--danger); }
 .modal-box__body { padding: 18px 22px 24px; }
-.modal-tim-info { display: grid; gap: 6px; margin-bottom: 14px; font-size: 0.9rem; }
-.modal-tim-info strong { color: var(--green-900); }
-.modal-tim-berkas { font-size: 0.86rem; margin-bottom: 6px; }
-.modal-table { font-size: 0.82rem; }
-.modal-table th, .modal-table td { white-space: normal; }
 
-/* Status pendaftaran tim di popup detail (lihat migrasi 0018 -- cek usia
-   otomatis anggota tim), dan baris anggota yang usianya di luar syarat. */
-.modal-status { font-weight: 600; }
-.modal-status--warn { color: var(--danger); }
-.modal-status-hint { color: var(--danger); font-size: 0.82rem; margin: -4px 0 14px; }
+/* Popup detail pendaftar (Lomba) dirapikan jadi grid dua kolom per field
+   (label kecil di atas, nilai di bawahnya -- bukan "Label: Nilai" sebaris
+   seperti sebelumnya yang jadi padat/susah dipindai sekilas), dipakai
+   bukaModalIndividu()/bukaModalTim() di view-admin.js. Jatuh ke satu kolom
+   otomatis di layar sempit lewat auto-fit. */
+.modal-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px 20px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed #e3e0d3;
+}
+.modal-field__label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-400);
+  margin-bottom: 2px;
+}
+.modal-field__value { font-size: 0.92rem; color: var(--ink-900); }
+/* Field yang sengaja melebar penuh (nama lengkap, nomor pendaftaran) --
+   supaya tidak ikut dipotong jadi 1-dari-N-kolom seperti field pendek. */
+.modal-field--full { grid-column: 1 / -1; }
+
+/* Status ditampilkan sebagai pil berwarna (bukan cuma teks tebal merah
+   seperti sebelumnya) -- pakai palet yang SAMA dengan warna baris tabel
+   (".status-row--...") supaya konsisten, lihat kelasBarisStatusLomba() /
+   kelasBarisStatusBazar(). */
+.status-pill {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.status-pill--pending { background: #fdf6e3; color: #8a6d1a; }
+.status-pill--warn { background: #fde7cf; color: #a4480c; }
+.status-pill--success { background: var(--green-100); color: var(--green-900); }
+.status-pill--danger { background: rgba(194, 58, 46, 0.12); color: var(--danger); }
+
+.modal-status-hint {
+  color: var(--danger);
+  font-size: 0.82rem;
+  margin: -6px 0 16px;
+  padding: 8px 12px;
+  background: rgba(194, 58, 46, 0.06);
+  border-radius: var(--radius-sm);
+}
+
+/* Bagian "Berkas" dirapikan jadi baris chip yang bisa diklik (bukan daftar
+   link bertitik "·" sebaris seperti sebelumnya), dipakai bukaModalIndividu/
+   bukaModalTim. Tiap chip = satu link berkas (atau placeholder "-" kalau
+   belum ada). */
+.modal-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-400);
+  margin: 0 0 8px;
+}
+.modal-berkas-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.modal-berkas-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1.5px solid #e3e0d3;
+  background: var(--page-bg);
+  font-size: 0.8rem;
+  text-decoration: none;
+  color: var(--green-700);
+  font-weight: 600;
+}
+.modal-berkas-chip:hover { border-color: var(--green-500); background: var(--green-100); }
+.modal-berkas-chip--kosong { color: var(--ink-400); font-weight: 400; cursor: default; }
+.modal-berkas-chip--kosong:hover { border-color: #e3e0d3; background: var(--page-bg); }
+
+.modal-table { font-size: 0.82rem; margin-top: 6px; }
+.modal-table th, .modal-table td { white-space: normal; }
 .row-usia-warn td { background: rgba(194, 58, 46, 0.08); color: var(--danger); }
 
 /* ==========================================================================
