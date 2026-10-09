@@ -212,6 +212,18 @@ async function loadTabTenant() {
 
   let filterAktif = "";
 
+  // Warna baris menyesuaikan status (lihat ".status-row--..." di
+  // style.css) -- Bazar cuma punya 3 status (tidak ada "Perlu Verifikasi
+  // Usia"/"Perlu Tambah Nomor Punggung" seperti Lomba), jadi tidak ada
+  // kelompok "warn" di sini. Nama fungsi diberi akhiran "Bazar" supaya
+  // tidak bentrok dengan versi Lomba di view-admin.js (satu scope global
+  // JS yang sama, lihat Catatan Teknis README).
+  function kelasBarisStatusBazar(status) {
+    if (status === "Diterima") return "status-row--success";
+    if (status === "Ditolak") return "status-row--danger";
+    return "status-row--pending"; // "Menunggu Verifikasi"
+  }
+
   function renderBarisBazar() {
     const cari = document.getElementById("filter-cari-bazar").value.toLowerCase();
     const tampil = rows.filter(function (r) {
@@ -238,7 +250,7 @@ async function loadTabTenant() {
 
       const kodeList = kodeStandPerTenant[r.id] || [];
       return (
-        '<tr>' +
+        '<tr class="' + kelasBarisStatusBazar(r.status) + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.nama_usaha) + '">' + escapeHTMLBazarAdmin(r.nama_usaha) + '</td>' +
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.jenis_produk) + '">' + escapeHTMLBazarAdmin(r.jenis_produk) + '</td>' +
@@ -275,6 +287,16 @@ async function loadTabTenant() {
         const row = rows.find(function (r) { return r.id === id; });
         if (row) row[field] = nilaiBaru;
         renderRekapBazar();
+
+        // Warna baris langsung diperbarui di tempat begitu status BERHASIL
+        // tersimpan -- cuma untuk kolom status pendaftaran (bukan status
+        // pembayaran, yang tidak punya pemetaan warna baris sendiri), sama
+        // seperti versi Lomba di view-admin.js, supaya tidak perlu memuat
+        // ulang tabel/halaman untuk melihat warnanya berubah.
+        if (field === "status") {
+          const trStatusBazar = sel.closest("tr");
+          if (trStatusBazar) trStatusBazar.className = kelasBarisStatusBazar(nilaiBaru);
+        }
       });
     });
 
