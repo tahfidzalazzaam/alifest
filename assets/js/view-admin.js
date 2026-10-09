@@ -559,6 +559,19 @@ async function loadTabPendaftar() {
   function renderBaris() {
     const cari = document.getElementById("filter-cari").value.toLowerCase();
 
+    // Warna baris menyesuaikan status (lihat ".status-row--..." di
+    // style.css) -- dikelompokkan jadi 4 kelompok visual: "pending" (lagi
+    // menunggu), "warn" (butuh tindak lanjut panitia: usia/nomor punggung),
+    // "success" (Diterima), "danger" (Ditolak). Nama fungsi diberi akhiran
+    // "Lomba" supaya tidak bentrok dengan versi Bazar di view-adminbazar.js
+    // (satu scope global JS yang sama, lihat Catatan Teknis README).
+    function kelasBarisStatusLomba(status) {
+      if (status === "Diterima") return "status-row--success";
+      if (status === "Ditolak") return "status-row--danger";
+      if (status === "Perlu Verifikasi Usia" || status === "Perlu Tambah Nomor Punggung") return "status-row--warn";
+      return "status-row--pending"; // "Menunggu Verifikasi"
+    }
+
     const tampil = rows.filter(function (r) {
       if (lombaFilter && r.lomba_id !== lombaFilter) return false;
       if (cari && r.nama_lengkap.toLowerCase().indexOf(cari) === -1 &&
@@ -592,7 +605,7 @@ async function loadTabPendaftar() {
         : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · IG: ' + renderDaftarBerkasTim(r.url_bukti_follow_ig));
 
       return (
-        '<tr class="row-clickable" data-id="' + r.id + '">' +
+        '<tr class="row-clickable ' + kelasBarisStatusLomba(r.status) + '" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
           '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + lpBadge + '</span>' + tombolTim + '</td>' +
           '<td>' + r.lomba_nama + '</td>' +
@@ -683,6 +696,16 @@ async function loadTabPendaftar() {
         if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
       }
       renderRekap();
+
+      // Warna baris langsung diperbarui di tempat (tanpa menggambar ulang
+      // seluruh tabel, supaya filter/scroll panitia tidak ikut ter-reset)
+      // begitu status BERHASIL tersimpan -- permintaan panitia supaya warna
+      // baris benar-benar mengikuti status terkini tiap kali diganti, bukan
+      // cuma saat tabelnya dimuat ulang dari awal.
+      const trStatusLomba = sel.closest("tr");
+      if (trStatusLomba) {
+        trStatusLomba.className = "row-clickable " + kelasBarisStatusLomba(statusBaru);
+      }
 
       // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga
       // mengirim notifikasi WA (sama seperti Diterima/Ditolak) begitu panitia
