@@ -149,11 +149,19 @@ const DAFTAR_BAZAR_TEMPLATE = `
                    lagi) -- begitu jenis dipilih, pendaftar sekalian menentukan
                    MAU PESAN BERAPA stand jenis itu. Jumlah ini yang nanti
                    membatasi persis berapa kotak yang boleh diklik di denah
-                   Langkah 3 (lihat renderJumlahSelector()/validasiLangkah3Lokal()). -->
-              <div class="field" id="bazar-jumlah-wrap" style="display:none;margin-top:18px;max-width:280px;">
-                <label for="bazarJumlahStand">Jumlah Stand yang Dipesan</label>
-                <select id="bazarJumlahStand"></select>
-                <p class="hint" style="margin-top:6px;">Jumlah ini menentukan berapa lokasi yang bisa dipilih di Langkah 3 (Penentuan Tempat).</p>
+                   Langkah 3 (lihat renderJumlahSelector()/validasiLangkah3Lokal()).
+                   Kontrolnya berupa stepper tombol -/+ ala GoFood/GrabFood
+                   (permintaan panitia) -- BUKAN dropdown <select> lagi, supaya
+                   lebih enak dipakai di HP (sentuh tombol besar, bukan buka
+                   dropdown panjang). -->
+              <div class="field" id="bazar-jumlah-wrap" style="display:none;margin-top:18px;">
+                <label>Jumlah Stand yang Dipesan</label>
+                <div class="qty-stepper" id="bazar-jumlah-stepper">
+                  <button type="button" class="qty-stepper__btn" id="bazar-jumlah-kurang" aria-label="Kurangi jumlah stand">−</button>
+                  <span class="qty-stepper__value" id="bazar-jumlah-angka">1</span>
+                  <button type="button" class="qty-stepper__btn" id="bazar-jumlah-tambah" aria-label="Tambah jumlah stand">+</button>
+                </div>
+                <p class="hint" id="bazar-jumlah-maks-hint" style="margin-top:6px;"></p>
               </div>
             </fieldset>
           </div>
@@ -391,47 +399,73 @@ function initDaftarBazar() {
     renderJumlahSelector();
   }
 
-  /* ---------------- Jumlah stand yang dipesan (Langkah 2, bareng jenis) ---------------- */
+  /* ---------------- Jumlah stand yang dipesan (Langkah 2, bareng jenis) ----------------
+     Stepper tombol -/+ ala GoFood/GrabFood (bukan dropdown <select> lagi).
+     jumlahMaksStepperBazar menyimpan batas atas yang berlaku SAAT INI (jenis
+     stand terakhir dipilih) -- dihitung ulang tiap kali renderJumlahSelector()
+     jalan (dipicu saat jenis stand berganti), lalu dipakai tombol +/- untuk
+     tahu kapan harus berhenti/di-disable, tanpa perlu menghitung ulang
+     standList tiap kali tombolnya diklik. */
+  let jumlahMaksStepperBazar = 1;
+
   function renderJumlahSelector() {
     const wrap = document.getElementById("bazar-jumlah-wrap");
-    const select = document.getElementById("bazarJumlahStand");
-    if (!wrap || !select) return;
+    if (!wrap) return;
 
     if (!jenisTerpilih) {
       wrap.style.display = "none";
       return;
     }
 
-    // Batas atas dropdown = jumlah stand jenis ini yang masih KOSONG
+    // Batas atas stepper = jumlah stand jenis ini yang masih KOSONG
     // (tenant_id null) -- sama basisnya dengan hitungan "terpakai" di kartu
     // jenis, bukan ikut memperhitungkan reservasi sementara orang lain
     // (itu soal lain, dicek ulang di Langkah 3 & saat submit_bazar()).
-    // Dibatasi maksimal 20 pilihan di dropdown supaya tidak kepanjangan.
+    // Dibatasi maksimal 20 per pesanan supaya tetap wajar.
     const tersedia = standList.filter(function (s) { return s.jenis === jenisTerpilih && !s.tenant_id; }).length;
-    const maks = Math.max(1, Math.min(tersedia, 20));
-    if (jumlahDipesan > maks) jumlahDipesan = maks;
+    jumlahMaksStepperBazar = Math.max(1, Math.min(tersedia, 20));
+    if (jumlahDipesan > jumlahMaksStepperBazar) jumlahDipesan = jumlahMaksStepperBazar;
 
-    let opsiHTML = "";
-    for (let n = 1; n <= maks; n++) {
-      opsiHTML += '<option value="' + n + '"' + (n === jumlahDipesan ? " selected" : "") + '>' + n + (n === 1 ? " stand" : " stand") + '</option>';
-    }
-    select.innerHTML = opsiHTML;
-    select.value = String(jumlahDipesan);
+    perbaruiTampilanStepperJumlahBazar();
     wrap.style.display = "block";
   }
 
-  // Listener dipasang SEKALI di sini (bukan di dalam renderJumlahSelector(),
-  // yang hanya mengganti isi <option> lewat innerHTML -- elemen <select>-nya
-  // sendiri tidak pernah dibuat ulang, jadi listener yang dipasang sekali di
-  // sini tetap berlaku terus tanpa perlu dipasang ulang/ganda).
-  document.getElementById("bazarJumlahStand").addEventListener("change", function () {
-    const n = parseInt(this.value, 10);
-    jumlahDipesan = isNaN(n) || n < 1 ? 1 : n;
+  // Menggambar ulang angka & status aktif/nonaktif kedua tombol stepper --
+  // dipanggil baik dari renderJumlahSelector() (saat jenis berganti) maupun
+  // dari klik tombol -/+ itu sendiri di bawah.
+  function perbaruiTampilanStepperJumlahBazar() {
+    const angkaEl = document.getElementById("bazar-jumlah-angka");
+    const btnKurang = document.getElementById("bazar-jumlah-kurang");
+    const btnTambah = document.getElementById("bazar-jumlah-tambah");
+    const maksHintEl = document.getElementById("bazar-jumlah-maks-hint");
+    if (!angkaEl || !btnKurang || !btnTambah) return;
+    angkaEl.textContent = String(jumlahDipesan);
+    btnKurang.disabled = jumlahDipesan <= 1;
+    btnTambah.disabled = jumlahDipesan >= jumlahMaksStepperBazar;
+    if (maksHintEl) {
+      maksHintEl.textContent = "Maksimal " + jumlahMaksStepperBazar + " stand tersedia untuk jenis ini.";
+    }
+  }
+
+  // Listener dipasang SEKALI di sini (elemen tombolnya sendiri tidak pernah
+  // dibuat ulang lewat innerHTML seperti dropdown lama, jadi aman dipasang
+  // sekali saja di luar renderJumlahSelector()).
+  document.getElementById("bazar-jumlah-kurang").addEventListener("click", function () {
+    if (jumlahDipesan <= 1) return;
+    jumlahDipesan -= 1;
     // Ganti jumlah pesanan membatalkan pilihan lokasi lama (kalau ada) --
     // reservasi yang sempat terkunci (kalau pernah maju ke Langkah 3->4 lalu
     // mundur ke sini) sudah dilepas lewat listener "Kembali" di bawah.
     kodeTerpilihSet = new Set();
     reservasiTerakhirUntuk = null;
+    perbaruiTampilanStepperJumlahBazar();
+  });
+  document.getElementById("bazar-jumlah-tambah").addEventListener("click", function () {
+    if (jumlahDipesan >= jumlahMaksStepperBazar) return;
+    jumlahDipesan += 1;
+    kodeTerpilihSet = new Set();
+    reservasiTerakhirUntuk = null;
+    perbaruiTampilanStepperJumlahBazar();
   });
 
   /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual (Langkah 3) ---------------- */
