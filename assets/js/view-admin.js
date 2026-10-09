@@ -283,6 +283,41 @@ function ekstrakPathBerkas(url) {
 // kenapa perubahan ini diperlukan (bug: nomor tidak terulang kalau baris
 // dihapus lewat cara lain selain tombol Hapus).
 
+// Warna baris/pil status menyesuaikan status pendaftaran -- dikelompokkan
+// jadi 4 kelompok visual: "pending" (lagi menunggu), "warn" (butuh tindak
+// lanjut panitia: usia/nomor punggung), "success" (Diterima), "danger"
+// (Ditolak). Dipakai BERSAMA oleh renderBaris() (warna baris tabel) dan
+// bukaModalIndividu()/bukaModalTim() (pil status di popup detail) -- jadi
+// SENGAJA ditaruh di scope atas (bukan di dalam renderBaris() lagi seperti
+// sebelumnya) supaya bisa diakses dari kedua tempat. Nama fungsi diberi
+// akhiran "Lomba" supaya tidak bentrok dengan versi Bazar di
+// view-adminbazar.js (satu scope global JS yang sama, lihat Catatan Teknis
+// README).
+function kelasBarisStatusLomba(status) {
+  if (status === "Diterima") return "status-row--success";
+  if (status === "Ditolak") return "status-row--danger";
+  if (status === "Perlu Verifikasi Usia" || status === "Perlu Tambah Nomor Punggung") return "status-row--warn";
+  return "status-row--pending"; // "Menunggu Verifikasi"
+}
+
+// Pil status berwarna di popup detail (lihat ".status-pill--..." di
+// style.css) -- pakai palet yang SAMA dengan warna baris tabel (cukup
+// mengganti awalan "status-row--" jadi "status-pill--"), supaya warnanya
+// konsisten antara tabel & popup.
+function pilStatusLombaHTML(status) {
+  const sufiks = kelasBarisStatusLomba(status).replace("status-row--", "");
+  return '<span class="status-pill status-pill--' + sufiks + '">' + escapeHTML(status) + '</span>';
+}
+
+// Satu chip link berkas di popup detail (lihat ".modal-berkas-chip" di
+// style.css) -- kalau url-nya kosong/null, tampil sebagai chip abu-abu
+// "label -" yang tidak bisa diklik (bukan <a> sama sekali), supaya jelas
+// berkas itu memang belum ada (bukan link rusak).
+function chipBerkasHTML(label, url) {
+  if (!url) return '<span class="modal-berkas-chip modal-berkas-chip--kosong">📎 ' + escapeHTML(label) + ' -</span>';
+  return '<a href="' + url + '" target="_blank" rel="noopener" class="modal-berkas-chip">📎 ' + escapeHTML(label) + '</a>';
+}
+
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
 // "rule" (opsional) = baris lomba_rules yang cocok dengan row.lomba_id --
 // dipakai untuk menyorot anggota yang usianya di luar syarat jenjang tim itu
@@ -290,31 +325,30 @@ function ekstrakPathBerkas(url) {
 // disediakan (mis. dipanggil dari tempat lain), popup tetap tampil normal
 // tanpa penyorotan.
 async function bukaModalTim(row, rule) {
-  const statusClass = (row.status === "Perlu Verifikasi Usia" || row.status === "Perlu Tambah Nomor Punggung") ? " modal-status--warn" : "";
   const infoHTML =
-    '<div class="modal-tim-info">' +
-      '<div><strong>Nama Tim/Sekolah:</strong> ' + row.nama_tim + '</div>' +
-      '<div><strong>Nama Pendamping:</strong> ' + (row.pembina || "-") + '</div>' +
-      '<div><strong>No. WA Pendamping:</strong> ' + row.whatsapp + '</div>' +
-      '<div><strong>Nomor Pendaftaran:</strong> ' + row.nomor_pendaftaran + '</div>' +
-      '<div><strong>Status:</strong> <span class="modal-status' + statusClass + '">' + row.status + '</span></div>' +
+    '<div class="modal-field-grid">' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Nama Tim/Sekolah</span><span class="modal-field__value">' + escapeHTML(row.nama_tim) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Nama Pendamping</span><span class="modal-field__value">' + escapeHTML(row.pembina || "-") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">No. WA Pendamping</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Status</span><span class="modal-field__value">' + pilStatusLombaHTML(row.status) + '</span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
-      ? '<p class="hint modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
+      ? '<p class="modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
       : "") +
     (row.status === "Perlu Tambah Nomor Punggung"
-      ? '<p class="hint modal-status-hint">Link "Lengkapi Nomor Punggung" sudah/akan dikirim ke pendamping lewat WA -- status otomatis balik ke "Menunggu Verifikasi" begitu mereka selesai mengisi semua nomor punggung lewat link itu.</p>'
+      ? '<p class="modal-status-hint">Link "Lengkapi Nomor Punggung" sudah/akan dikirim ke pendamping lewat WA -- status otomatis balik ke "Menunggu Verifikasi" begitu mereka selesai mengisi semua nomor punggung lewat link itu.</p>'
       : "") +
     (row.status === "Ditolak" && row.alasan_penolakan
-      ? '<p class="hint modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
+      ? '<p class="modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
       : "") +
-    '<div class="modal-tim-berkas">' +
-      '<strong>Berkas:</strong> ' +
-      (row.url_surat_delegasi ? '<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">Surat Delegasi</a>' : '<span class="hint">Delegasi -</span>') +
-      ' · Bukti IG: ' + renderDaftarBerkasTim(row.url_bukti_follow_ig) +
-      ' · Kartu Anggota: ' + renderDaftarBerkasTim(row.url_berkas_tim) +
+    '<p class="modal-section-title">Berkas</p>' +
+    '<div class="modal-berkas-row">' +
+      chipBerkasHTML("Surat Delegasi", row.url_surat_delegasi) +
+      renderDaftarBerkasTim(row.url_bukti_follow_ig, "Bukti IG") +
+      renderDaftarBerkasTim(row.url_berkas_tim, "Kartu Anggota") +
     '</div>' +
-    '<h4 style="margin-top:16px;">Anggota Tim</h4>' +
+    '<p class="modal-section-title" style="margin-top:18px;">Anggota Tim</p>' +
     '<div id="modal-tim-anggota"><p class="hint">Memuat data anggota tim...</p></div>';
 
   bukaModal("Detail Tim — " + row.nama_tim, infoHTML);
@@ -360,12 +394,17 @@ async function bukaModalTim(row, rule) {
     );
 }
 
-function renderDaftarBerkasTim(urlBerkasTim) {
+// Menggambar satu atau lebih chip berkas (lihat chipBerkasHTML() di atas)
+// untuk field yang bisa berisi BANYAK file sekaligus (mis. beberapa
+// screenshot bukti follow IG) -- "label" dipakai sebagai awalan tiap chip,
+// diberi nomor urut #1/#2/dst kalau lebih dari satu file.
+function renderDaftarBerkasTim(urlBerkasTim, label) {
   const daftar = Array.isArray(urlBerkasTim) ? urlBerkasTim : [];
-  if (daftar.length === 0) return '<span class="hint">-</span>';
+  if (daftar.length === 0) return chipBerkasHTML(label, null);
+  if (daftar.length === 1) return chipBerkasHTML(label, daftar[0]);
   return daftar.map(function (url, i) {
-    return '<a href="' + url + '" target="_blank" rel="noopener">#' + (i + 1) + '</a>';
-  }).join(" · ");
+    return chipBerkasHTML(label + " #" + (i + 1), url);
+  }).join("");
 }
 
 /* -------- Popup detail peserta INDIVIDU: dibuka dengan mengetuk baris -------- */
@@ -377,30 +416,29 @@ function renderDaftarBerkasTim(urlBerkasTim) {
 // select("*") pada `pendaftaran`), jadi fungsi ini sinkron (tidak seperti
 // bukaModalTim yang harus memuat anggota_tim secara async).
 function bukaModalIndividu(row) {
-  const statusClass = row.status === "Perlu Verifikasi Usia" ? " modal-status--warn" : "";
   const infoHTML =
-    '<div class="modal-tim-info">' +
-      '<div><strong>Nama Lengkap Peserta:</strong> ' + row.nama_lengkap + '</div>' +
-      '<div><strong>Nama Pendamping:</strong> ' + (row.nama_pendamping || "-") + '</div>' +
-      '<div><strong>Jenjang/Kelas:</strong> ' + row.jenjang + '/' + row.kelas + '</div>' +
-      '<div><strong>Jenis Kelamin:</strong> ' + (row.jenis_kelamin === "perempuan" ? "Perempuan" : row.jenis_kelamin === "laki-laki" ? "Laki-laki" : "-") + '</div>' +
-      '<div><strong>Tanggal Lahir:</strong> ' + formatTanggalLahir(row.tanggal_lahir) + (row.usia != null ? " (" + row.usia + " th)" : "") + '</div>' +
-      '<div><strong>Asal Sekolah:</strong> ' + row.asal_sekolah + '</div>' +
-      '<div><strong>No. WhatsApp:</strong> ' + row.whatsapp + '</div>' +
-      '<div><strong>Email:</strong> ' + (row.email || "-") + '</div>' +
-      '<div><strong>Nomor Pendaftaran:</strong> ' + row.nomor_pendaftaran + '</div>' +
-      '<div><strong>Status:</strong> <span class="modal-status' + statusClass + '">' + row.status + '</span></div>' +
+    '<div class="modal-field-grid">' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Nama Lengkap Peserta</span><span class="modal-field__value">' + escapeHTML(row.nama_lengkap) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Nama Pendamping</span><span class="modal-field__value">' + escapeHTML(row.nama_pendamping || "-") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Jenjang/Kelas</span><span class="modal-field__value">' + escapeHTML(row.jenjang) + '/' + escapeHTML(row.kelas) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Jenis Kelamin</span><span class="modal-field__value">' + (row.jenis_kelamin === "perempuan" ? "Perempuan" : row.jenis_kelamin === "laki-laki" ? "Laki-laki" : "-") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Tanggal Lahir</span><span class="modal-field__value">' + formatTanggalLahir(row.tanggal_lahir) + (row.usia != null ? " (" + row.usia + " th)" : "") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Asal Sekolah</span><span class="modal-field__value">' + escapeHTML(row.asal_sekolah) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">No. WhatsApp</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Email</span><span class="modal-field__value">' + escapeHTML(row.email || "-") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Status</span><span class="modal-field__value">' + pilStatusLombaHTML(row.status) + '</span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
-      ? '<p class="hint modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
+      ? '<p class="modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
       : "") +
     (row.status === "Ditolak" && row.alasan_penolakan
-      ? '<p class="hint modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
+      ? '<p class="modal-status-hint"><strong>Alasan Penolakan:</strong> ' + escapeHTML(row.alasan_penolakan) + '</p>'
       : "") +
-    '<div class="modal-tim-berkas">' +
-      '<strong>Berkas:</strong> ' +
-      (row.url_kartu_pelajar ? '<a href="' + row.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu Pelajar</a>' : '<span class="hint">Kartu -</span>') +
-      ' · Bukti IG: ' + renderDaftarBerkasTim(row.url_bukti_follow_ig) +
+    '<p class="modal-section-title">Berkas</p>' +
+    '<div class="modal-berkas-row">' +
+      chipBerkasHTML("Kartu Pelajar", row.url_kartu_pelajar) +
+      renderDaftarBerkasTim(row.url_bukti_follow_ig, "Bukti IG") +
     '</div>';
 
   bukaModal("Detail Peserta — " + row.nama_lengkap, infoHTML);
@@ -455,7 +493,7 @@ async function loadTabPendaftar() {
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
-      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Lahir/Usia</th><th>Tipe</th><th>Sekolah</th><th>WA</th><th>Berkas</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Lahir/Usia</th><th>Tipe</th><th>Sekolah</th><th>WA</th><th class="col-status">Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   /* -------- Kuota efektif per sel (jenjang x gender), sama dengan rumus di server -------- */
@@ -559,19 +597,6 @@ async function loadTabPendaftar() {
   function renderBaris() {
     const cari = document.getElementById("filter-cari").value.toLowerCase();
 
-    // Warna baris menyesuaikan status (lihat ".status-row--..." di
-    // style.css) -- dikelompokkan jadi 4 kelompok visual: "pending" (lagi
-    // menunggu), "warn" (butuh tindak lanjut panitia: usia/nomor punggung),
-    // "success" (Diterima), "danger" (Ditolak). Nama fungsi diberi akhiran
-    // "Lomba" supaya tidak bentrok dengan versi Bazar di view-adminbazar.js
-    // (satu scope global JS yang sama, lihat Catatan Teknis README).
-    function kelasBarisStatusLomba(status) {
-      if (status === "Diterima") return "status-row--success";
-      if (status === "Ditolak") return "status-row--danger";
-      if (status === "Perlu Verifikasi Usia" || status === "Perlu Tambah Nomor Punggung") return "status-row--warn";
-      return "status-row--pending"; // "Menunggu Verifikasi"
-    }
-
     const tampil = rows.filter(function (r) {
       if (lombaFilter && r.lomba_id !== lombaFilter) return false;
       if (cari && r.nama_lengkap.toLowerCase().indexOf(cari) === -1 &&
@@ -583,7 +608,7 @@ async function loadTabPendaftar() {
 
     const tbody = document.querySelector("#tabel-pendaftar tbody");
     if (tampil.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="11">Tidak ada data yang cocok.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10">Tidak ada data yang cocok.</td></tr>';
       return;
     }
 
@@ -600,9 +625,15 @@ async function loadTabPendaftar() {
       const lahirUsia = isTim ? "-" : (formatTanggalLahir(r.tanggal_lahir) + (r.usia != null ? " (" + r.usia + "th)" : ""));
       const kelasLabel = isTim ? "-" : (r.jenjang + '/' + r.kelas);
 
-      const berkasCell = isTim
-        ? ('<button type="button" class="btn-link btn-lihat-tim" data-id="' + r.id + '">Lihat berkas</button>')
-        : ('<a href="' + r.url_kartu_pelajar + '" target="_blank" rel="noopener">Kartu</a> · IG: ' + renderDaftarBerkasTim(r.url_bukti_follow_ig));
+      // Kolom "Berkas" terpisah SUDAH DIHAPUS dari tabel ini (permintaan
+      // panitia, supaya kolom Status bisa dilebarkan & tabel tidak terlalu
+      // ramai) -- semua link berkas (Kartu Pelajar/Surat Delegasi/Bukti IG/
+      // Kartu Anggota) tetap bisa dilihat lewat popup detail yang terbuka
+      // begitu barisnya diketuk (bukaModalIndividu/bukaModalTim di bawah),
+      // jadi tidak ada informasi yang hilang -- cuma dipindah dari tabel ke
+      // popup. Baris TETAP bisa diketuk di mana saja (row-clickable) untuk
+      // membuka popup itu, jadi tombol "Lihat berkas" terpisah yang dulu ada
+      // di kolom ini juga tidak diperlukan lagi.
 
       return (
         '<tr class="row-clickable ' + kelasBarisStatusLomba(r.status) + '" data-id="' + r.id + '">' +
@@ -614,8 +645,7 @@ async function loadTabPendaftar() {
           '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
           '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
-          '<td>' + berkasCell + '</td>' +
-          '<td><select class="status-select" data-id="' + r.id + '">' +
+          '<td class="col-status"><select class="status-select" data-id="' + r.id + '">' +
             (isTim
               ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
               : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"]
@@ -649,13 +679,10 @@ async function loadTabPendaftar() {
       });
     });
 
-    tbody.querySelectorAll(".btn-lihat-tim").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        const id = btn.getAttribute("data-id");
-        const row = rows.find(function (r) { return r.id === id; });
-        if (row) bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
-      });
-    });
+    // (Tombol "Lihat berkas" / class ".btn-lihat-tim" yang dulu ada di kolom
+    // Berkas, beserta listener-nya, sudah dihapus bersamaan dengan kolom
+    // Berkas itu sendiri -- lihat komentar di renderBaris() di atas. Baris
+    // tim tetap bisa dibuka lewat listener "row-clickable" di atas.)
 
     // Fungsi bersama yang benar-benar MENYIMPAN perubahan status ke database
     // -- dipakai baik untuk status biasa (langsung) maupun status "Ditolak"
