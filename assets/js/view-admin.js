@@ -318,6 +318,206 @@ function chipBerkasHTML(label, url) {
   return '<a href="' + url + '" target="_blank" rel="noopener" class="modal-berkas-chip">📎 ' + escapeHTML(label) + '</a>';
 }
 
+/* ==================== Ubah status pendaftaran -- SEKARANG DIPINDAH ke
+   dalam popup detail (dulu lewat dropdown langsung di baris tabel) ====================
+   Tombol/dropdown "ubah status" yang dulu ada di kolom Status tabel Data
+   Pendaftar sudah DIPINDAH ke dalam popup detail (bukaModalIndividu/
+   bukaModalTim) -- permintaan panitia supaya tabelnya lebih ringkas (kolom
+   Status di tabel sekarang MURNI tampilan, pil warna saja, tidak bisa
+   diklik), sementara aksi ubah status dilakukan dari popup yang sudah
+   menampilkan detail lengkap pendaftar itu. Fungsi-fungsi di bawah ini
+   SENGAJA ditaruh di scope atas (bukan lagi nested di dalam renderBaris()
+   seperti sebelumnya) supaya bisa dipanggil dari popup (top-level juga),
+   dan menyegarkan tabel di belakang popup lewat referensi
+   renderBarisPendaftarRef/renderRekapPendaftarRef di bawah -- diisi oleh
+   loadTabPendaftar() tiap kali tab "Data Pendaftar" dimuat. */
+let renderBarisPendaftarRef = null;
+let renderRekapPendaftarRef = null;
+
+// Membuka ULANG popup detail yang sesuai (individu/tim) dengan data `row`
+// TERKINI -- dipakai untuk: (a) menutup popup sementara "Alasan Penolakan"
+// lalu kembali ke detail begitu selesai/dibatalkan, (b) menyegarkan isi
+// popup (termasuk dropdown status & pil warnanya) begitu status BERHASIL
+// diubah, supaya panitia tetap melihat detail yang sama tanpa perlu
+// mengetuk ulang barisnya di tabel.
+function bukaUlangPopupDetailLomba(row, isTim, rule) {
+  if (isTim) {
+    bukaModalTim(row, rule);
+  } else {
+    bukaModalIndividu(row);
+  }
+}
+
+// Fungsi bersama yang benar-benar MENYIMPAN perubahan status ke database --
+// dipakai baik untuk status biasa (langsung) maupun status "Ditolak" (baru
+// dipanggil SETELAH panitia memilih alasan penolakan lewat popup, lihat
+// bukaModalAlasanPenolakanPopup di bawah). `alasanPenolakan` cuma dikirim
+// kalau statusBaru === "Ditolak"; untuk status lain selalu null (mis. tidak
+// menimpa alasan lama kalau panitia pernah menolak lalu mengubah lagi ke
+// status lain, biar riwayatnya tetap ada kalau nanti ditolak ulang).
+async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTim, rule) {
+  // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
+  // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
+  // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
+  // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
+  // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
+  if (statusBaru === "Perlu Tambah Nomor Punggung") {
+    const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: row.id });
+    if (tokenError) {
+      alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
+      bukaUlangPopupDetailLomba(row, isTim, rule); // kembali ke detail, status belum berubah
+      return;
+    }
+  }
+
+  const payload = { status: statusBaru };
+  if (statusBaru === "Ditolak") payload.alasan_penolakan = alasanPenolakan;
+
+  const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", row.id);
+  if (error) {
+    alert("Gagal mengubah status: " + error.message);
+    bukaUlangPopupDetailLomba(row, isTim, rule);
+    return;
+  }
+
+  // `row` adalah REFERENSI yang sama dengan elemen di array `rows` milik
+  // loadTabPendaftar() (dioper apa adanya dari rows.find() saat popup
+  // dibuka) -- jadi cukup diubah di sini, otomatis ikut ter-update di
+  // array itu juga tanpa perlu dicari ulang.
+  row.status = statusBaru;
+  if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
+
+  // Menyegarkan tabel DI BELAKANG popup (warna baris & kartu rekap) --
+  // lewat referensi yang diisi loadTabPendaftar(), bukan dengan menduga-duga
+  // elemen DOM tabelnya dari sini.
+  if (typeof renderRekapPendaftarRef === "function") renderRekapPendaftarRef();
+  if (typeof renderBarisPendaftarRef === "function") renderBarisPendaftarRef();
+
+  // Popup detail dibuka ULANG dengan data terbaru (dropdown status & pil
+  // warnanya ikut menampilkan status yang baru saja tersimpan) -- SEBELUM
+  // mengirim notifikasi WA, supaya elemen ".wa-status-note" yang dicari
+  // kirimNotifikasiWA() sudah ada lagi di DOM popup yang baru.
+  bukaUlangPopupDetailLomba(row, isTim, rule);
+
+  // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga mengirim
+  // notifikasi WA (sama seperti Diterima/Ditolak) begitu status ini
+  // tersimpan -- untuk lomba tim (Futsal), pesannya otomatis menyebut nama
+  // anggota yang usianya di luar syarat lewat placeholder {anggota_usia},
+  // atau link lengkapi nomor punggung lewat placeholder {link_lengkapi},
+  // atau (khusus "Ditolak") alasan penolakan lewat placeholder {alasan}
+  // (dihitung di Edge Function kirim-notifikasi-wa, lihat file itu).
+  if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
+    kirimNotifikasiWA(row.id);
+  }
+}
+
+// Popup WAJIB pilih alasan penolakan, dibuka saat panitia memilih "Ditolak"
+// di dropdown status popup -- daftar pilihannya diambil dari
+// site_settings.alasan_penolakan_list (diedit panitia sendiri lewat tab
+// "Notifikasi WA", lihat loadTabNotifWa), ditambah satu opsi tetap "Lainnya
+// (tulis sendiri)" untuk kasus yang tidak ada di daftar. Menggantikan
+// sementara isi popup detail yang sedang terbuka (pakai modal yang sama),
+// lalu kembali ke detailnya lagi lewat bukaUlangPopupDetailLomba() begitu
+// panitia menekan "Batal" atau selesai menyimpan.
+async function bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule) {
+  const { data: settingsRow } = await supabaseClient
+    .from("site_settings").select("alasan_penolakan_list").eq("id", 1).single();
+  const daftarAlasan = (settingsRow && Array.isArray(settingsRow.alasan_penolakan_list))
+    ? settingsRow.alasan_penolakan_list
+    : [];
+  const alasanLama = row.alasan_penolakan;
+
+  const optionsHTML = daftarAlasan.map(function (a) {
+    const selected = a === alasanLama ? " selected" : "";
+    return '<option value="' + escapeHTML(a) + '"' + selected + '>' + escapeHTML(a) + '</option>';
+  }).join("") + '<option value="__lainnya__"' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? " selected" : "") + '>Lainnya (tulis sendiri)</option>';
+
+  const isiHTML =
+    '<p class="hint">Pilih alasan penolakan -- wajib diisi, akan ikut dikirim ke pendaftar lewat WA lewat placeholder <code>{alasan}</code>.</p>' +
+    '<div class="field">' +
+      '<label for="alasan-penolakan-select">Alasan</label>' +
+      '<select id="alasan-penolakan-select">' + optionsHTML + '</select>' +
+    '</div>' +
+    '<div class="field" id="alasan-penolakan-lainnya-wrap" style="margin-top:12px;display:none;">' +
+      '<label for="alasan-penolakan-lainnya">Tulis alasan sendiri</label>' +
+      '<input id="alasan-penolakan-lainnya" type="text" placeholder="mis. Berkas tidak lengkap" value="' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? escapeHTML(alasanLama) : "") + '">' +
+    '</div>' +
+    '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-batal-alasan-penolakan">Batal</button>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-alasan-penolakan">Tandai Ditolak</button>' +
+    '</div>';
+
+  bukaModal("Alasan Penolakan — " + (row.nama_tim || row.nama_lengkap), isiHTML);
+
+  const selectEl = document.getElementById("alasan-penolakan-select");
+  const lainnyaWrap = document.getElementById("alasan-penolakan-lainnya-wrap");
+  const lainnyaInput = document.getElementById("alasan-penolakan-lainnya");
+
+  function syncLainnyaVisibility() {
+    lainnyaWrap.style.display = selectEl.value === "__lainnya__" ? "block" : "none";
+  }
+  syncLainnyaVisibility();
+  selectEl.addEventListener("change", syncLainnyaVisibility);
+
+  document.getElementById("btn-batal-alasan-penolakan").addEventListener("click", function () {
+    bukaUlangPopupDetailLomba(row, isTim, rule); // kembali ke detail, status tidak jadi diubah
+  });
+
+  document.getElementById("btn-simpan-alasan-penolakan").addEventListener("click", function () {
+    const alasanDipilih = selectEl.value === "__lainnya__"
+      ? lainnyaInput.value.trim()
+      : selectEl.value;
+    if (!alasanDipilih) {
+      alert("Alasan penolakan wajib diisi.");
+      return;
+    }
+    commitPerubahanStatusLomba(row, "Ditolak", alasanDipilih, isTim, rule);
+  });
+}
+
+// Memasang listener dropdown status di dalam popup detail yang baru saja
+// digambar (bukaModalIndividu/bukaModalTim) -- dipanggil SETELAH bukaModal()
+// supaya elemennya sudah ada di DOM. "rule" cuma relevan untuk tim (dioper
+// apa adanya ke bukaUlangPopupDetailLomba/commitPerubahanStatusLomba kalau
+// perlu membuka ulang popup tim).
+// Dropdown status yang dipasang di popup detail (menggantikan dropdown yang
+// dulu ada di kolom Status tabel) -- "isTim" menentukan daftar opsinya
+// (tim/Futsal punya opsi tambahan "Perlu Tambah Nomor Punggung"). Diikuti
+// span ".wa-status-note" untuk pesan "mengirim WA.../✅ terkirim/⚠️ gagal"
+// yang sama persis perilakunya dengan sebelumnya (lihat kirimNotifikasiWA()).
+function statusSelectPopupHTML(id, status, isTim) {
+  const opsi = isTim
+    ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
+    : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"];
+  return (
+    '<select id="modal-status-select" class="status-select">' +
+      opsi.map(function (s) {
+        return '<option value="' + s + '"' + (s === status ? " selected" : "") + '>' + s + "</option>";
+      }).join("") +
+    '</select> <span class="wa-status-note" data-note-for="' + escapeHTML(id) + '"></span>'
+  );
+}
+
+function pasangListenerStatusPopup(row, isTim, rule) {
+  const sel = document.getElementById("modal-status-select");
+  if (!sel) return;
+  sel.addEventListener("change", function () {
+    const statusBaru = sel.value;
+    const statusLama = row.status;
+    if (statusBaru === statusLama) return;
+
+    // Status "Ditolak" WAJIB menyertakan alasan -- panitia harus pilih dulu
+    // lewat popup (dropdown + opsi tulis sendiri) sebelum status-nya benar-
+    // benar tersimpan.
+    if (statusBaru === "Ditolak") {
+      bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule);
+      return;
+    }
+
+    commitPerubahanStatusLomba(row, statusBaru, null, isTim, rule);
+  });
+}
+
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
 // "rule" (opsional) = baris lomba_rules yang cocok dengan row.lomba_id --
 // dipakai untuk menyorot anggota yang usianya di luar syarat jenjang tim itu
@@ -331,7 +531,7 @@ async function bukaModalTim(row, rule) {
       '<div class="modal-field"><span class="modal-field__label">Nama Pendamping</span><span class="modal-field__value">' + escapeHTML(row.pembina || "-") + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">No. WA Pendamping</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
-      '<div class="modal-field"><span class="modal-field__label">Status</span><span class="modal-field__value">' + pilStatusLombaHTML(row.status) + '</span></div>' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, true) + '</span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
@@ -352,6 +552,7 @@ async function bukaModalTim(row, rule) {
     '<div id="modal-tim-anggota"><p class="hint">Memuat data anggota tim...</p></div>';
 
   bukaModal("Detail Tim — " + row.nama_tim, infoHTML);
+  pasangListenerStatusPopup(row, true, rule);
 
   const { data: anggota, error } = await supabaseClient
     .from("anggota_tim").select("*").eq("nomor_pendaftaran", row.nomor_pendaftaran).order("created_at");
@@ -427,7 +628,7 @@ function bukaModalIndividu(row) {
       '<div class="modal-field"><span class="modal-field__label">No. WhatsApp</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Email</span><span class="modal-field__value">' + escapeHTML(row.email || "-") + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
-      '<div class="modal-field"><span class="modal-field__label">Status</span><span class="modal-field__value">' + pilStatusLombaHTML(row.status) + '</span></div>' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, false) + '</span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
@@ -442,6 +643,7 @@ function bukaModalIndividu(row) {
     '</div>';
 
   bukaModal("Detail Peserta — " + row.nama_lengkap, infoHTML);
+  pasangListenerStatusPopup(row, false, null);
 }
 
 /* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function, dipanggil saat
@@ -645,14 +847,7 @@ async function loadTabPendaftar() {
           '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
           '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
           '<td>' + r.whatsapp + '</td>' +
-          '<td class="col-status"><select class="status-select" data-id="' + r.id + '">' +
-            (isTim
-              ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
-              : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"]
-            ).map(function (s) {
-              return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
-            }).join("") +
-          '</select> <span class="wa-status-note" data-note-for="' + r.id + '"></span></td>' +
+          '<td class="col-status">' + pilStatusLombaHTML(r.status) + '</td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
@@ -684,154 +879,12 @@ async function loadTabPendaftar() {
     // Berkas itu sendiri -- lihat komentar di renderBaris() di atas. Baris
     // tim tetap bisa dibuka lewat listener "row-clickable" di atas.)
 
-    // Fungsi bersama yang benar-benar MENYIMPAN perubahan status ke database
-    // -- dipakai baik untuk status biasa (langsung) maupun status "Ditolak"
-    // (baru dipanggil SETELAH panitia memilih alasan penolakan lewat modal,
-    // lihat bukaModalAlasanPenolakan di bawah). `alasanPenolakan` cuma
-    // dikirim kalau statusBaru === "Ditolak"; untuk status lain selalu null
-    // (mis. tidak menimpa alasan lama kalau panitia pernah menolak lalu
-    // mengubah lagi ke status lain, biar riwayatnya tetap ada kalau nanti
-    // ditolak ulang -- lihat bukaModalAlasanPenolakan, alasan lama dipakai
-    // sebagai nilai awal dropdown-nya).
-    async function commitPerubahanStatus(id, sel, statusBaru, alasanPenolakan) {
-      // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
-      // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
-      // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
-      // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
-      // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
-      if (statusBaru === "Perlu Tambah Nomor Punggung") {
-        const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: id });
-        if (tokenError) {
-          alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
-          sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
-          return;
-        }
-      }
-
-      const payload = { status: statusBaru };
-      if (statusBaru === "Ditolak") payload.alasan_penolakan = alasanPenolakan;
-
-      const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", id);
-      if (error) {
-        alert("Gagal mengubah status: " + error.message);
-        sel.value = (rows.find(function (r) { return r.id === id; }) || {}).status || sel.value;
-        return;
-      }
-      const row = rows.find(function (r) { return r.id === id; });
-      if (row) {
-        row.status = statusBaru;
-        if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
-      }
-      renderRekap();
-
-      // Warna baris langsung diperbarui di tempat (tanpa menggambar ulang
-      // seluruh tabel, supaya filter/scroll panitia tidak ikut ter-reset)
-      // begitu status BERHASIL tersimpan -- permintaan panitia supaya warna
-      // baris benar-benar mengikuti status terkini tiap kali diganti, bukan
-      // cuma saat tabelnya dimuat ulang dari awal.
-      const trStatusLomba = sel.closest("tr");
-      if (trStatusLomba) {
-        trStatusLomba.className = "row-clickable " + kelasBarisStatusLomba(statusBaru);
-      }
-
-      // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga
-      // mengirim notifikasi WA (sama seperti Diterima/Ditolak) begitu panitia
-      // MEMILIH status ini di dropdown -- untuk lomba tim (Futsal), pesannya
-      // otomatis menyebut nama anggota yang usianya di luar syarat lewat
-      // placeholder {anggota_usia}, atau link lengkapi nomor punggung lewat
-      // placeholder {link_lengkapi}, atau (khusus "Ditolak") alasan
-      // penolakan lewat placeholder {alasan} (dihitung di Edge Function
-      // kirim-notifikasi-wa, lihat file itu). Ini cuma perubahan kode
-      // (frontend + Edge Function), tidak perlu migrasi SQL baru lagi.
-      if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
-        kirimNotifikasiWA(id, sel);
-      }
-    }
-
-    // Modal wajib pilih alasan penolakan, dibuka saat panitia memilih
-    // "Ditolak" di dropdown status -- daftar pilihannya diambil dari
-    // site_settings.alasan_penolakan_list (diedit panitia sendiri lewat tab
-    // "Notifikasi WA", lihat loadTabNotifWa), ditambah satu opsi tetap
-    // "Lainnya (tulis sendiri)" untuk kasus yang tidak ada di daftar.
-    async function bukaModalAlasanPenolakan(id, sel, statusLama) {
-      const row = rows.find(function (r) { return r.id === id; });
-      const { data: settingsRow } = await supabaseClient
-        .from("site_settings").select("alasan_penolakan_list").eq("id", 1).single();
-      const daftarAlasan = (settingsRow && Array.isArray(settingsRow.alasan_penolakan_list))
-        ? settingsRow.alasan_penolakan_list
-        : [];
-      const alasanLama = row ? row.alasan_penolakan : null;
-
-      const optionsHTML = daftarAlasan.map(function (a) {
-        const selected = a === alasanLama ? " selected" : "";
-        return '<option value="' + escapeHTML(a) + '"' + selected + '>' + escapeHTML(a) + '</option>';
-      }).join("") + '<option value="__lainnya__"' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? " selected" : "") + '>Lainnya (tulis sendiri)</option>';
-
-      const isiHTML =
-        '<p class="hint">Pilih alasan penolakan -- wajib diisi, akan ikut dikirim ke pendaftar lewat WA lewat placeholder <code>{alasan}</code>.</p>' +
-        '<div class="field">' +
-          '<label for="alasan-penolakan-select">Alasan</label>' +
-          '<select id="alasan-penolakan-select">' + optionsHTML + '</select>' +
-        '</div>' +
-        '<div class="field" id="alasan-penolakan-lainnya-wrap" style="margin-top:12px;display:none;">' +
-          '<label for="alasan-penolakan-lainnya">Tulis alasan sendiri</label>' +
-          '<input id="alasan-penolakan-lainnya" type="text" placeholder="mis. Berkas tidak lengkap" value="' + (alasanLama && daftarAlasan.indexOf(alasanLama) === -1 ? escapeHTML(alasanLama) : "") + '">' +
-        '</div>' +
-        '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">' +
-          '<button type="button" class="btn btn--ghost" id="btn-batal-alasan-penolakan">Batal</button>' +
-          '<button type="button" class="btn btn--primary" id="btn-simpan-alasan-penolakan">Tandai Ditolak</button>' +
-        '</div>';
-
-      bukaModal("Alasan Penolakan — " + (row ? (row.nama_tim || row.nama_lengkap) : ""), isiHTML);
-
-      const selectEl = document.getElementById("alasan-penolakan-select");
-      const lainnyaWrap = document.getElementById("alasan-penolakan-lainnya-wrap");
-      const lainnyaInput = document.getElementById("alasan-penolakan-lainnya");
-
-      function syncLainnyaVisibility() {
-        lainnyaWrap.style.display = selectEl.value === "__lainnya__" ? "block" : "none";
-      }
-      syncLainnyaVisibility();
-      selectEl.addEventListener("change", syncLainnyaVisibility);
-
-      document.getElementById("btn-batal-alasan-penolakan").addEventListener("click", function () {
-        sel.value = statusLama || sel.value;
-        tutupModal();
-      });
-
-      document.getElementById("btn-simpan-alasan-penolakan").addEventListener("click", function () {
-        const alasanDipilih = selectEl.value === "__lainnya__"
-          ? lainnyaInput.value.trim()
-          : selectEl.value;
-        if (!alasanDipilih) {
-          alert("Alasan penolakan wajib diisi.");
-          return;
-        }
-        tutupModal();
-        commitPerubahanStatus(id, sel, "Ditolak", alasanDipilih);
-      });
-    }
-
-    tbody.querySelectorAll(".status-select").forEach(function (sel) {
-      sel.addEventListener("change", async function () {
-        const id = sel.getAttribute("data-id");
-        const statusBaru = sel.value;
-        const statusLama = (rows.find(function (r) { return r.id === id; }) || {}).status;
-
-        // Status "Ditolak" WAJIB menyertakan alasan -- panitia harus pilih
-        // dulu lewat modal (dropdown + opsi tulis sendiri) sebelum status-nya
-        // benar-benar tersimpan. Modal ini juga yang memanggil
-        // commitPerubahanStatus begitu panitia menekan "Tandai Ditolak", dan
-        // yang mengembalikan dropdown ke status lama kalau panitia menekan
-        // "Batal".
-        if (statusBaru === "Ditolak") {
-          bukaModalAlasanPenolakan(id, sel, statusLama);
-          return;
-        }
-
-        commitPerubahanStatus(id, sel, statusBaru, null);
-      });
-    });
+    // (Dropdown status & logika penyimpanannya -- dulu ada persis di sini,
+    // di kolom Status tabel -- SUDAH DIPINDAH ke dalam popup detail. Lihat
+    // commitPerubahanStatusLomba()/bukaModalAlasanPenolakanPopup()/
+    // pasangListenerStatusPopup() di scope atas file ini, dipanggil dari
+    // bukaModalIndividu()/bukaModalTim(). Kolom Status di tabel sekarang
+    // murni tampilan baca-saja lewat pilStatusLombaHTML().)
 
     tbody.querySelectorAll(".btn-hapus-pendaftar").forEach(function (btn) {
       btn.addEventListener("click", async function () {
@@ -876,6 +929,13 @@ async function loadTabPendaftar() {
     });
 
   }
+
+  // Diisi supaya popup detail (bukaModalIndividu/bukaModalTim, lewat
+  // commitPerubahanStatusLomba() di scope atas file ini) bisa menyegarkan
+  // tabel & kartu rekap di belakangnya begitu status diubah dari dalam
+  // popup -- lihat komentar di definisi kedua variabel ini.
+  renderBarisPendaftarRef = renderBaris;
+  renderRekapPendaftarRef = renderRekap;
 
   renderRekap();
   renderBaris();
