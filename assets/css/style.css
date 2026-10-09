@@ -934,11 +934,16 @@ textarea { resize: vertical; min-height: 80px; }
   min-width: 190px;
   width: 100%;
 }
-/* Kolom Status (dilebarkan atas permintaan panitia -- dulu sempit/kepotong
-   karena ikut lebar dropdown-nya saja) -- dipasang di <th> & <td> sekaligus
-   supaya lebar kolomnya konsisten dari baris header sampai baris data. */
+/* Kolom Status di TABEL (dilebarkan atas permintaan panitia -- dulu sempit/
+   kepotong karena ikut lebar dropdown-nya saja) -- dipasang di <th> & <td>
+   sekaligus supaya lebar kolomnya konsisten dari baris header sampai baris
+   data. Sekarang isinya cuma pil status BACA-SAJA (lihat pilStatusLombaHTML()
+   di view-admin.js) -- dropdown untuk MENGUBAH status sudah dipindah ke
+   dalam popup detail (".status-select" di atas), jadi lebar minimumnya
+   diturunkan sedikit dari sebelumnya (cukup untuk pil terpanjang, tidak
+   perlu selebar dropdown lagi). */
 .admin-table th.col-status, .admin-table td.col-status {
-  min-width: 206px;
+  min-width: 170px;
 }
 /* Kolom yang bisa panjang (nama, sekolah) dipotong dengan "..." — teks
    lengkapnya muncul lewat tooltip (atribut title) saat kursor diarahkan. */
