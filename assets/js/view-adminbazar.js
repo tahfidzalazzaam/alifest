@@ -392,11 +392,17 @@ async function loadTabDenahBazar() {
     _denahResizeHandler = null;
   }
 
-  const [{ data: standData, error }, { data: tenantData }, { data: elemenData, error: errorElemen }] = await Promise.all([
+  const [{ data: standData, error }, { data: tenantData }, { data: elemenData, error: errorElemen }, { data: settingsData }] = await Promise.all([
     supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("area").order("nomor"),
     supabaseClient.from("bazar_tenant").select("id,nama_usaha,nomor_pendaftaran,status"),
-    supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
+    supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
+    supabaseClient.from("bazar_settings").select("denah_background_url").eq("id", 1).single()
   ]);
+  // Foto latar kanvas denah (opsional, migrasi 0044) -- `let` karena bisa
+  // diganti/dihapus panitia lewat tombol di renderVisual() di bawah, lalu
+  // dipakai ulang begitu renderVisual() dipanggil lagi (ganti sub-tab, atau
+  // setelah upload baru).
+  let denahBgUrl = settingsData ? settingsData.denah_background_url : null;
   if (error) {
     content.innerHTML = "<p>Gagal memuat denah stand: " + error.message + "</p>";
     return;
@@ -524,6 +530,9 @@ async function loadTabDenahBazar() {
       '<div class="submit-row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">' +
         '<button type="button" class="btn btn--primary" id="btn-simpan-denah-visual">💾 Simpan Tata Letak</button>' +
         '<button type="button" class="btn btn--ghost" id="btn-tambah-label-denah">➕ Tambah Kotak/Label</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-ganti-bg-denah">🖼️ ' + (denahBgUrl ? "Ganti" : "Pasang") + ' Background</button>' +
+        (denahBgUrl ? '<button type="button" class="btn btn--ghost" id="btn-hapus-bg-denah">Hapus Background</button>' : "") +
+        '<input type="file" id="input-bg-denah" accept="image/*" style="display:none;">' +
         '<span class="hint" id="denah-visual-status" style="margin-left:6px;"></span>' +
       '</div>' +
       // `#denah-visual-pad` membungkus kanvas dengan jarak kosong di semua
@@ -537,7 +546,7 @@ async function loadTabDenahBazar() {
       // terlihat "bocor" keluar garis putus-putus, itu sengaja dibiarkan
       // (murni kosmetik) demi handle-nya tetap bisa dipakai.
       '<div id="denah-visual-pad" style="padding:40px 20px 20px 20px;">' +
-        '<div id="denah-visual-outer" style="width:100%;max-width:900px;overflow:visible;position:relative;border:2px dashed #b9d9c2;border-radius:16px;background:#eef7ec;">' +
+        '<div id="denah-visual-outer" style="width:100%;max-width:900px;overflow:visible;position:relative;border:2px dashed #b9d9c2;border-radius:16px;' + (denahBgUrl ? ("background:center/cover no-repeat url('" + denahBgUrl + "'), #eef7ec;") : "background:#eef7ec;") + '">' +
           '<div id="denah-visual-inner" style="position:relative;width:' + DENAH_CANVAS_W + 'px;height:' + DENAH_CANVAS_H + 'px;transform-origin:top left;"></div>' +
         '</div>' +
       '</div>' +
@@ -643,15 +652,23 @@ async function loadTabDenahBazar() {
         const bh = Math.max(30, boundAwal.h + dy);
         const skalaX = bw / boundAwal.w;
         const skalaY = bh / boundAwal.h;
+        // Stand yang ikut diseleksi tetap PERSEGI walau di-resize BARENGAN
+        // lewat handle grup ini -- pakai skala seragam (terkecil dari
+        // skalaX/skalaY) khusus untuk id stand, sisanya (label) tetap pakai
+        // skala per-sumbu seperti biasa.
+        const skalaSeragam = Math.min(skalaX, skalaY);
 
         selectedIds.forEach(function (id) {
           const r = kotakAwal[id];
           const el = kotakElMap[id];
           if (!r || !el) return;
-          const baruX = boundAwal.x + (r.x - boundAwal.x) * skalaX;
-          const baruY = boundAwal.y + (r.y - boundAwal.y) * skalaY;
-          const baruW = Math.max(20, r.w * skalaX);
-          const baruH = Math.max(16, r.h * skalaY);
+          const stand = standList.some(function (s) { return s.id === id; });
+          const sx = stand ? skalaSeragam : skalaX;
+          const sy = stand ? skalaSeragam : skalaY;
+          const baruX = boundAwal.x + (r.x - boundAwal.x) * sx;
+          const baruY = boundAwal.y + (r.y - boundAwal.y) * sy;
+          const baruW = Math.max(20, r.w * sx);
+          const baruH = Math.max(16, r.h * sy);
           el.style.left = baruX + "px";
           el.style.top = baruY + "px";
           el.style.width = baruW + "px";
@@ -948,8 +965,15 @@ async function loadTabDenahBazar() {
           const rad = -(rotasi * Math.PI / 180);
           const dxLokal = dxLayar * Math.cos(rad) - dyLayar * Math.sin(rad);
           const dyLokal = dxLayar * Math.sin(rad) + dyLayar * Math.cos(rad);
-          const baruW = Math.max(30, startW + dxLokal);
-          const baruH = Math.max(24, startH + dyLokal);
+          // Kotak STAND wajib tetap PERSEGI (permintaan panitia) -- pakai
+          // tarikan TERBESAR dari dua arah (kanan ATAU bawah) supaya kedua
+          // arah tarikan sama-sama terasa membesarkan, bukan cuma salah satu.
+          // Label/elemen lain (bukan stand) tetap bebas jadi persegi panjang
+          // seperti sebelumnya.
+          const baruW = opsi.tipe === "stand"
+            ? Math.max(30, startW + Math.max(dxLokal, dyLokal))
+            : Math.max(30, startW + dxLokal);
+          const baruH = opsi.tipe === "stand" ? baruW : Math.max(24, startH + dyLokal);
           el.style.width = baruW + "px";
           el.style.height = baruH + "px";
           // Tulisan di dalamnya ikut membesar/mengecil SAAT resize berlangsung
@@ -1150,6 +1174,37 @@ async function loadTabDenahBazar() {
       elemenList.push(baru);
       gambarSemua();
     });
+
+    // Background foto kanvas denah (migrasi 0044) -- pola upload sama
+    // seperti logo navbar di loadTabLogo() (view-admin.js), bucket
+    // "aset-situs" dipakai bersama.
+    document.getElementById("btn-ganti-bg-denah").addEventListener("click", function () {
+      document.getElementById("input-bg-denah").click();
+    });
+    document.getElementById("input-bg-denah").addEventListener("change", async function () {
+      const file = this.files[0];
+      if (!file) return;
+      if (!file.type.startsWith("image/")) { alert("Pilih berkas gambar."); return; }
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = "bazar-denah-bg/bg-" + Date.now() + "." + ext;
+      const { error: errUp } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: file.type });
+      if (errUp) { alert("Gagal upload: " + errUp.message); return; }
+      const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+      const { error: errUpdate } = await supabaseClient.from("bazar_settings").update({ denah_background_url: pub.publicUrl }).eq("id", 1);
+      if (errUpdate) { alert("Gagal menyimpan background: " + errUpdate.message); return; }
+      denahBgUrl = pub.publicUrl;
+      renderVisual();
+    });
+    const btnHapusBg = document.getElementById("btn-hapus-bg-denah");
+    if (btnHapusBg) {
+      btnHapusBg.addEventListener("click", async function () {
+        if (!confirm("Hapus background foto denah, kembali ke warna polos?")) return;
+        const { error } = await supabaseClient.from("bazar_settings").update({ denah_background_url: null }).eq("id", 1);
+        if (error) { alert("Gagal menghapus background: " + error.message); return; }
+        denahBgUrl = null;
+        renderVisual();
+      });
+    }
 
     document.getElementById("btn-simpan-denah-visual").addEventListener("click", async function () {
       const btn = this;
