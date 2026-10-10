@@ -11,6 +11,11 @@
 // 0031) & fungsi publik bazar_jumlah_terisi() -- sama seperti yang dipakai
 // form pendaftaran, supaya angkanya selalu konsisten.
 
+// Diisi initBazar(), dipakai renderDenahInfo() (migrasi 0044, background
+// foto denah -- satu pengaturan global yang sama dipakai editor visual
+// panitia & picker lokasi di /daftar-bazar).
+let denahBackgroundUrlInfo = null;
+
 const BAZAR_TEMPLATE = `
 <section class="hero container">
   <span class="hero__eyebrow">Al Azzaam Islamic Fair</span>
@@ -219,6 +224,8 @@ async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
   const innerEl = document.getElementById("bazar-denah-info-inner");
   if (!wrap) return;
 
+  outerEl.style.background = denahBackgroundUrlInfo ? ("center/cover no-repeat url('" + denahBackgroundUrlInfo + "'), #eef7ec") : "#eef7ec";
+
   judulEl.textContent = "Denah Jenis " + jenis;
   const warnaJenisAktif = WARNA_JENIS_DENAH_INFO[jenis] || "#777777";
   legendaEl.innerHTML =
@@ -266,7 +273,7 @@ async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
 
 async function initBazar() {
   const [{ data: settings }, { data: standData }, { data: elemenData }, { data: tenantPublik }] = await Promise.all([
-    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+    supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening,denah_background_url").eq("id", 1).single(),
     supabaseClient.from("bazar_stand").select("jenis,area,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi"),
     supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
     supabaseClient.rpc("bazar_denah_publik")
@@ -282,6 +289,7 @@ async function initBazar() {
 
   const pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
   const jenisStandInfo = (settings && settings.jenis_stand_info) || {};
+  denahBackgroundUrlInfo = (settings && settings.denah_background_url) || null;
   const standList = standData || [];
   const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
 
