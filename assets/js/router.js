@@ -27,7 +27,8 @@ const ROUTES = {
   "#/daftar-bazar": window.ViewDaftarBazar,
   "#/adminbazar": window.ViewAdminBazar,
   "#/adminprofil": window.ViewAdminProfil,
-  "#/lengkapi": window.ViewLengkapi
+  "#/lengkapi": window.ViewLengkapi,
+  "#/timadmin": window.ViewTimAdmin
 };
 
 function normalisasiHash() {
@@ -61,6 +62,7 @@ function judulUntukView(view) {
   if (view === window.ViewAdminBazar) return "Panitia Bazar - ALIF 5.0";
   if (view === window.ViewAdminProfil) return "Panitia Beranda - ALIF 5.0";
   if (view === window.ViewLengkapi) return "Lengkapi Nomor Punggung - ALIF 5.0";
+  if (view === window.ViewTimAdmin) return "Mode Maintenance - ALIF 5.0";
   return document.title; // view tak dikenal -- biarkan judul tab apa adanya
 }
 
@@ -119,15 +121,23 @@ function cekAksesLangsungAdmin() {
     tampilkanView(window.ViewLengkapi, "");
     return true;
   }
+  if (path === "/timadmin") {
+    tampilkanView(window.ViewTimAdmin, "");
+    return true;
+  }
   return false;
 }
 
-function muatAwal() {
+async function muatAwal() {
+  if (await cekDanTerapkanMaintenance()) return; // seluruh situs tertutup -- lihat definisinya di bawah
   if (cekAksesLangsungAdmin()) return;
   router();
 }
 
-window.addEventListener("hashchange", router);
+window.addEventListener("hashchange", async function () {
+  if (await cekDanTerapkanMaintenance()) return;
+  router();
+});
 window.addEventListener("DOMContentLoaded", muatAwal);
 window.addEventListener("DOMContentLoaded", muatLogoNavbar);
 
@@ -269,6 +279,54 @@ window.terapkanStatusPendaftaran = function (dibuka) {
     navCta.innerHTML = dibuka ? "Daftar Lomba" : "🔒 Daftar Lomba";
   }
 };
+
+// ---------------------------------------------------------------------------
+// Mode Maintenance (migrasi 0045, site_settings.mode_maintenance) -- saklar
+// global yang menutup SELURUH situs (beda dari "Gerbang pendaftaran
+// ditutup" di bawah, yang cuma menutup form Lomba) -- begitu AKTIF, SEMUA
+// halaman diganti pesan pemeliharaan, TERMASUK "/admin"/"/adminbazar"/
+// "/adminprofil" -- SATU-SATUNYA pengecualian adalah "/timadmin"
+// (view-timadmin.js) sendiri, supaya selalu ada jalan menyalakan/mematikan
+// mode ini. Dicek ULANG setiap navigasi (bukan cuma sekali di awal seperti
+// "Gerbang pendaftaran ditutup" di bawah) -- lewat `muatAwal()` (saat
+// halaman pertama dimuat) DAN tiap `hashchange` (saat pindah halaman lewat
+// link navbar di SPA yang sama) -- supaya begitu panitia mengaktifkan mode
+// ini, pengunjung yang sedang membuka tab lain situs ini & lanjut berpindah
+// halaman ikut langsung terkena, bukan baru kena setelah me-refresh browser.
+// ---------------------------------------------------------------------------
+function halamanBebasMaintenance() {
+  const path = window.location.pathname.replace(/\/+$/, "");
+  const hash = window.location.hash;
+  const hashTanpaQuery = hash.indexOf("?") === -1 ? hash : hash.slice(0, hash.indexOf("?"));
+  return path === "/timadmin" || hashTanpaQuery === "#/timadmin";
+}
+
+function tampilkanModeMaintenance() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.innerHTML =
+    '<div style="min-height:65vh;display:flex;align-items:center;justify-content:center;padding:20px;">' +
+      '<div class="gate-box">' +
+        '<div class="gate-box__emoji">🛠️</div>' +
+        '<h2>Situs Sedang Istirahat Sebentar</h2>' +
+        '<p>ALIF 5.0 sedang dalam mode pemeliharaan. Coba kembali lagi dalam beberapa saat, ya!</p>' +
+      '</div>' +
+    '</div>';
+  document.title = "Pemeliharaan - ALIF 5.0";
+  setNavAktif("");
+}
+
+// Mengembalikan `true` kalau situs SEDANG tertutup (dan halaman maintenance
+// sudah ditampilkan, caller cukup `return` tanpa melanjutkan routing
+// normal) -- `false` kalau situs normal/halaman ini dikecualikan, caller
+// lanjut seperti biasa.
+async function cekDanTerapkanMaintenance() {
+  if (halamanBebasMaintenance()) return false;
+  const { data } = await supabaseClient.from("site_settings").select("mode_maintenance").eq("id", 1).single();
+  if (!data || !data.mode_maintenance) return false;
+  tampilkanModeMaintenance();
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // "Gerbang" pendaftaran ditutup -- muncul sekali per sesi browser, di
