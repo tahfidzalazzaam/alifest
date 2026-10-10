@@ -301,18 +301,42 @@ function halamanBebasMaintenance() {
   return path === "/timadmin" || hashTanpaQuery === "#/timadmin";
 }
 
+// Sengaja dibuat terlihat seperti halaman eror sistem BENERAN (gelap, cuma
+// teks, tanpa logo/emoji/branding ALIF) -- permintaan panitia supaya
+// pengunjung mengira situs benar-benar bermasalah, bukan cuma "sedang
+// istirahat", supaya tidak ada yang menghubungi panitia menanyakan kapan
+// situs akan normal lagi. Elemen lain di luar #app (navbar, bunting,
+// footer) ikut disembunyikan supaya seluruh layar jadi halaman eror itu
+// sendiri, bukan cuma potongan konten di tengah situs ALIF yang biasa.
 function tampilkanModeMaintenance() {
   const app = document.getElementById("app");
   if (!app) return;
+
+  document.querySelectorAll(".bunting, .navbar, .footer").forEach(function (el) {
+    el.style.display = "none";
+  });
+  document.documentElement.style.background = "#0a0a0b";
+  document.body.style.background = "#0a0a0b";
+  document.body.style.margin = "0";
+
   app.innerHTML =
-    '<div style="min-height:65vh;display:flex;align-items:center;justify-content:center;padding:20px;">' +
-      '<div class="gate-box">' +
-        '<div class="gate-box__emoji">🛠️</div>' +
-        '<h2>Situs Sedang Istirahat Sebentar</h2>' +
-        '<p>ALIF 5.0 sedang dalam mode pemeliharaan. Coba kembali lagi dalam beberapa saat, ya!</p>' +
+    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+      'padding:24px;background:#0a0a0b;color:#d4d4d8;' +
+      'font-family:ui-monospace,SFMono-Regular,Consolas,\'Liberation Mono\',Menlo,monospace;">' +
+      '<div style="max-width:620px;">' +
+        '<div style="font-size:14px;color:#71717a;letter-spacing:.04em;margin:0 0 10px;">' +
+          'Error 503' +
+        '</div>' +
+        '<h1 style="font-size:21px;font-weight:600;color:#e4e4e7;margin:0 0 14px;line-height:1.35;">' +
+          'Service Temporarily Unavailable' +
+        '</h1>' +
+        '<p style="font-size:14px;line-height:1.7;color:#a1a1aa;margin:0;">' +
+          'The server is currently unable to handle this request due to a temporary ' +
+          'overloading or maintenance of the server. Please try again later.' +
+        '</p>' +
       '</div>' +
     '</div>';
-  document.title = "Pemeliharaan - ALIF 5.0";
+  document.title = "503 Service Unavailable";
   setNavAktif("");
 }
 
