@@ -321,6 +321,7 @@ function initDaftarBazar() {
   const ringkasanAkhirEl = document.getElementById("bazar-ringkasan-akhir");
 
   let jenisStandInfo = {};
+  let denahBackgroundUrl = null;
   let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, direservasi_oleh, direservasi_sampai, pos_x, pos_y, lebar, tinggi, rotasi}
   let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
@@ -626,6 +627,7 @@ function initDaftarBazar() {
 
     const outerEl = document.getElementById("bazar-denah-outer");
     const innerEl = document.getElementById("bazar-denah-inner");
+    outerEl.style.background = denahBackgroundUrl ? ("center/cover no-repeat url('" + denahBackgroundUrl + "'), #eef7ec") : "#eef7ec";
     innerEl.style.width = DENAH_PUBLIK_CANVAS_W + "px";
     innerEl.style.height = DENAH_PUBLIK_CANVAS_H + "px";
 
@@ -706,7 +708,7 @@ function initDaftarBazar() {
   /* ---------------- Muat pengaturan bazar (buka/tutup, jenis & denah stand, info biaya/rekening) ---------------- */
   async function muatPengaturanBazar() {
     const [{ data: settings }, { data: standData }, { data: elemenData }] = await Promise.all([
-      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening").eq("id", 1).single(),
+      supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening,denah_background_url").eq("id", 1).single(),
       supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,direservasi_oleh,direservasi_sampai,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
       supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
     ]);
@@ -714,6 +716,7 @@ function initDaftarBazar() {
     pendaftaranDibuka = !settings || settings.pendaftaran_dibuka !== false;
     ujiCobaAktifBazar = !!(window.ujiCobaAktif && window.ujiCobaAktif());
     jenisStandInfo = (settings && settings.jenis_stand_info) || {};
+    denahBackgroundUrl = (settings && settings.denah_background_url) || null;
     standList = standData || [];
     elemenList = elemenData || [];
     const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
