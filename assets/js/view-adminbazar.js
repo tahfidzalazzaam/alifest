@@ -113,8 +113,23 @@ async function renderDashboardBazar(root, session) {
       '<button type="button" class="admin-tab is-active" data-tab="tenant">Data Tenant</button>' +
       '<button type="button" class="admin-tab" data-tab="denah">Denah Stand</button>' +
       '<button type="button" class="admin-tab" data-tab="pengaturan">Pengaturan Bazar</button>' +
+      '<button type="button" class="admin-tab" data-tab="notifwa">Notifikasi WA</button>' +
     '</div>' +
-    '<div id="adminbazar-content"></div>';
+    '<div id="adminbazar-content"></div>' +
+    // ⚠️ PERBAIKAN: sebelumnya halaman ini TIDAK PUNYA elemen
+    // `#modal-overlay`/`#modal-box` sama sekali -- padahal `bukaModal()`
+    // (dipakai BERSAMA dari view-admin.js, satu scope global JS yang sama)
+    // langsung memanggil `document.getElementById("modal-overlay").innerHTML
+    // = ...` tanpa cek null. Akibatnya "🖼️ Buat Poster Rekap Stand" (yang
+    // memanggil `bukaModal()` sebagai baris PERTAMA-nya) langsung melempar
+    // error JS ("Cannot set properties of null") saat diklik -- SEBELUM
+    // baris kode apa pun lain berjalan, jadi persis seperti "diklik tapi
+    // tidak terjadi apa-apa". Markup di bawah ini SENGAJA disamakan PERSIS
+    // dengan punya `/admin` (lihat `renderDashboard()` di view-admin.js)
+    // supaya `bukaModal()`/`tutupModal()` jalan identik di kedua halaman.
+    '<div class="modal-overlay" id="modal-overlay" style="display:none;">' +
+      '<div class="modal-box" id="modal-box"></div>' +
+    '</div>';
 
   const btnToggleBazar = document.getElementById("btn-toggle-pendaftaran-bazar");
   perbaruiTombolToggleBazar();
@@ -143,6 +158,7 @@ async function renderDashboardBazar(root, session) {
       if (nama === "tenant") loadTabTenant();
       if (nama === "denah") loadTabDenahBazar();
       if (nama === "pengaturan") loadTabPengaturanBazar();
+      if (nama === "notifwa") loadTabNotifWaBazar();
     });
   });
 
@@ -190,6 +206,7 @@ async function loadTabTenant() {
     '<div class="rekap-grid" id="bazar-rekap-grid"></div>' +
     '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' +
       '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap-bazar">🖼️ Buat Poster Rekap Stand</button>' +
+      '<button type="button" class="btn btn--ghost" id="btn-unduh-xlsx-tenant">⬇️ Unduh Data Tenant (XLSX)</button>' +
     '</div>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari-bazar" placeholder="Cari nama usaha / nomor pendaftaran..." />' +
@@ -266,7 +283,7 @@ async function loadTabTenant() {
             ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
-          '</select></td>' +
+          '</select><span class="hint wa-status-note-bazar" data-note-for="' + r.id + '"></span></td>' +
           '<td><button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
@@ -296,6 +313,13 @@ async function loadTabTenant() {
         if (field === "status") {
           const trStatusBazar = sel.closest("tr");
           if (trStatusBazar) trStatusBazar.className = kelasBarisStatusBazar(nilaiBaru);
+
+          // Notifikasi WA ke tenant HANYA dipicu saat status dipilih jadi
+          // "Diterima" (permintaan panitia) -- pesannya menyertakan Link
+          // Grup WA (placeholder {grup}, diatur di tab "Notifikasi WA").
+          // Edge Function sendiri MEMBACA ULANG status dari database
+          // (bukan percaya nilai ini), jadi aman walau klik ganda/nyasar.
+          if (nilaiBaru === "Diterima") kirimNotifikasiWABazar(id);
         }
       });
     });
@@ -349,6 +373,10 @@ async function loadTabTenant() {
     bukaPosterRekapBazar(rows);
   });
 
+  document.getElementById("btn-unduh-xlsx-tenant").addEventListener("click", function () {
+    unduhXLSXTenant(this, rows, kodeStandPerTenant);
+  });
+
   document.querySelectorAll("#bazar-rekap-grid .rekap-card").forEach(function (card) {
     card.addEventListener("click", function () {
       document.querySelectorAll("#bazar-rekap-grid .rekap-card").forEach(function (c) { c.classList.remove("is-active"); });
@@ -357,6 +385,92 @@ async function loadTabTenant() {
       renderBarisBazar();
     });
   });
+}
+
+/* -------- Kirim notifikasi WA (Fonnte) ke TENANT, lewat Edge Function,
+   dipanggil saat status pendaftaran stand diubah jadi "Diterima" -- pola &
+   nama fungsi sengaja disamakan dengan kirimNotifikasiWA() di view-admin.js
+   (akhiran "Bazar" supaya tidak bentrok, satu scope global JS yang sama) -------- */
+async function kirimNotifikasiWABazar(id) {
+  const noteEl = document.querySelector('.wa-status-note-bazar[data-note-for="' + id + '"]');
+  if (noteEl) noteEl.textContent = " · mengirim WA...";
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("kirim-notifikasi-wa-bazar", { body: { id: id } });
+    if (error) throw error;
+    if (data && data.success === false) throw new Error(data.message || "Gagal mengirim notifikasi WA.");
+    if (noteEl) {
+      noteEl.textContent = " · ✅ WA terkirim";
+      setTimeout(function () { if (noteEl) noteEl.textContent = ""; }, 4000);
+    }
+  } catch (err) {
+    console.error("Gagal mengirim notifikasi WA ke tenant:", err);
+    if (noteEl) {
+      noteEl.textContent = " · ⚠️ WA gagal terkirim";
+      noteEl.title = (err && err.message) || String(err);
+    }
+  }
+}
+
+/* -------- Unduh Data Tenant sebagai XLSX (murni client-side) --------
+   Pola & pustaka SAMA dengan unduhXLSXPendaftar() di view-admin.js (SheetJS
+   dimuat LAZY dari CDN, hanya saat tombol diklik) -- nama fungsi/variabel
+   diberi akhiran "Bazar"/"Tenant" supaya tidak bentrok nama (satu scope
+   global JS yang sama, lihat Catatan Teknis README). SATU sheet saja
+   (tenant tidak punya sub-kelompok seperti jenjang/gender milik Lomba),
+   SEMUA tenant yang sedang dimuat (tidak mengikuti filter kartu rekap/kotak
+   cari, sama seperti versi Lomba -- selalu arsip utuh). */
+let sheetJSPromiseBazar = null;
+function muatSheetJSBazar() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (sheetJSPromiseBazar) return sheetJSPromiseBazar;
+  sheetJSPromiseBazar = new Promise(function (resolve, reject) {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    script.onload = function () { if (window.XLSX) resolve(window.XLSX); else reject(new Error("Pustaka XLSX gagal dimuat.")); };
+    script.onerror = function () { reject(new Error("Gagal memuat pustaka XLSX dari CDN.")); };
+    document.head.appendChild(script);
+  });
+  return sheetJSPromiseBazar;
+}
+
+const HEADER_TENANT_XLSX = [
+  "Nomor Pendaftaran", "Nama Usaha", "Jenis Produk", "Jenis Stand", "Kode Stand",
+  "Nama Penanggung Jawab", "No. WhatsApp", "Link Foto Produk", "Link Bukti Follow IG",
+  "Link Bukti Bayar", "Status Pembayaran", "Status"
+];
+
+async function unduhXLSXTenant(btn, rows, kodeStandPerTenant) {
+  const labelAsli = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Menyiapkan...";
+  try {
+    const XLSX = await muatSheetJSBazar();
+    const barisTenant = rows.map(function (r) {
+      return {
+        "Nomor Pendaftaran": r.nomor_pendaftaran,
+        "Nama Usaha": r.nama_usaha,
+        "Jenis Produk": r.jenis_produk,
+        "Jenis Stand": r.jenis_stand || r.kategori_stand || "",
+        "Kode Stand": (kodeStandPerTenant[r.id] || []).join(", "),
+        "Nama Penanggung Jawab": r.nama_penanggung_jawab,
+        "No. WhatsApp": r.whatsapp,
+        "Link Foto Produk": Array.isArray(r.url_foto_produk) ? r.url_foto_produk.join(", ") : (r.url_foto_produk || ""),
+        "Link Bukti Follow IG": Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig.join(", ") : (r.url_bukti_follow_ig || ""),
+        "Link Bukti Bayar": r.url_bukti_bayar || "",
+        "Status Pembayaran": r.status_pembayaran,
+        "Status": r.status
+      };
+    });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(barisTenant, { header: HEADER_TENANT_XLSX });
+    XLSX.utils.book_append_sheet(wb, ws, "Data Tenant");
+    XLSX.writeFile(wb, "data-tenant-bazar-alif5-" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  } catch (err) {
+    alert("Gagal membuat file XLSX: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = labelAsli;
+  }
 }
 
 /* ==================== TAB BARU: DENAH STAND (migrasi 0037 + 0038) ==================== */
@@ -1440,6 +1554,141 @@ async function loadTabPengaturanBazar() {
   });
 }
 
+/* ==================== TAB 4: NOTIFIKASI WA (migrasi 0046) ====================
+   Dua pesan WA otomatis KHUSUS Bazar, terpisah dari tab "Notifikasi WA"
+   milik Lomba di view-admin.js (tabel & Edge Function-nya beda):
+     (A) ke TENANT -- saat status stand-nya diubah jadi "Diterima" (tab
+         "Data Tenant") -- pesannya + Link Grup WA diatur di sini.
+     (B) ke PANITIA -- otomatis saat ADA pendaftar stand baru -- pesannya
+         diatur di sini, TAPI nomor/ID grup tujuannya diatur LEWAT SECRET
+         Edge Function FONNTE_TARGET_PANITIA (dashboard Supabase), BUKAN di
+         sini -- supaya tidak tersimpan di tabel yang bisa dibaca publik. */
+const WA_BAZAR_PLACEHOLDER_HINT_DITERIMA =
+  'Placeholder: <code>{usaha}</code>, <code>{nomor}</code>, <code>{penanggung_jawab}</code>, <code>{grup}</code> (Link Grup WA tenant di bawah).';
+const WA_BAZAR_PLACEHOLDER_HINT_PANITIA =
+  'Placeholder: <code>{usaha}</code>, <code>{nomor}</code>, <code>{jenis_produk}</code>, <code>{penanggung_jawab}</code>, <code>{whatsapp}</code>.';
+
+async function loadTabNotifWaBazar() {
+  const content = document.getElementById("adminbazar-content");
+  content.innerHTML = '<p class="hint">Memuat pengaturan notifikasi WA...</p>';
+
+  const { data: settings, error } = await supabaseClient
+    .from("bazar_settings")
+    .select("wa_template_diterima, link_grup_wa, wa_template_panitia_baru")
+    .eq("id", 1).single();
+
+  if (error) {
+    content.innerHTML = "<p>Gagal memuat pengaturan notifikasi WA: " + error.message + "</p>";
+    return;
+  }
+
+  const templateDiterima = (settings && settings.wa_template_diterima) || "";
+  const linkGrup = (settings && settings.link_grup_wa) || "";
+  const templatePanitiaBaru = (settings && settings.wa_template_panitia_baru) || "";
+
+  content.innerHTML =
+    '<div class="form-shell" style="max-width:640px;">' +
+      '<h3>💬 Notifikasi WA ke Tenant (saat Diterima)</h3>' +
+      '<p>Dikirim otomatis ke nomor WhatsApp penanggung jawab tenant setiap kali status stand-nya dipilih jadi <strong>Diterima</strong> di tab "Data Tenant".</p>' +
+      '<div class="field">' +
+        '<label for="wabazar-template-diterima">Pesan</label>' +
+        '<textarea id="wabazar-template-diterima" rows="8">' + escapeHTMLBazarAdmin(templateDiterima) + '</textarea>' +
+      '</div>' +
+      '<div class="hint" style="margin-top:6px;">' + WA_BAZAR_PLACEHOLDER_HINT_DITERIMA + '</div>' +
+      '<div class="field" style="margin-top:18px;">' +
+        '<label for="wabazar-link-grup">Link Grup WA Tenant</label>' +
+        '<input type="text" id="wabazar-link-grup" value="' + escapeHTMLBazarAdmin(linkGrup) + '" placeholder="https://chat.whatsapp.com/..." />' +
+        '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, HANYA untuk tenant yang statusnya diubah jadi "Diterima".</div>' +
+      '</div>' +
+      '<div class="form-error" id="wabazar-diterima-error" style="display:none;"></div>' +
+      '<div class="submit-row">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-wabazar-diterima">Simpan</button>' +
+      '</div>' +
+      '<p class="hint" id="wabazar-diterima-status" style="margin-top:10px;"></p>' +
+    '</div>' +
+    '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
+      '<h3>📥 Notifikasi WA ke Panitia (pendaftar baru)</h3>' +
+      '<p>Dikirim otomatis ke grup/nomor panitia setiap kali ADA pendaftar stand bazar baru masuk (langsung begitu formulir publik berhasil dikirim).</p>' +
+      '<div class="field">' +
+        '<label for="wabazar-template-panitia">Pesan</label>' +
+        '<textarea id="wabazar-template-panitia" rows="7">' + escapeHTMLBazarAdmin(templatePanitiaBaru) + '</textarea>' +
+      '</div>' +
+      '<div class="hint" style="margin-top:6px;">' + WA_BAZAR_PLACEHOLDER_HINT_PANITIA + '</div>' +
+      '<div class="form-error" id="wabazar-panitia-error" style="display:none;"></div>' +
+      '<div class="submit-row">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-wabazar-panitia">Simpan</button>' +
+      '</div>' +
+      '<p class="hint" id="wabazar-panitia-status" style="margin-top:10px;"></p>' +
+    '</div>' +
+    '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
+      '<h3>⚙️ Tujuan Notifikasi Panitia & Setup Fonnte</h3>' +
+      '<p class="hint">Nomor WA atau ID grup TUJUAN notifikasi "pendaftar baru" di atas SENGAJA tidak diatur di halaman ini (supaya tidak tersimpan di tempat yang bisa dibaca publik) -- diisi lewat secret Edge Function <code>FONNTE_TARGET_PANITIA</code> (Project Settings → Edge Functions → Secrets), sama tempatnya dengan <code>FONNTE_TOKEN</code> yang sudah ada. Pastikan Edge Function <code>kirim-notifikasi-wa-bazar</code> dan <code>notifikasi-bazar-baru</code> sudah ter-deploy. Lihat README.md bagian "Setup Notifikasi WhatsApp (Fonnte)" untuk langkah lengkapnya.</p>' +
+    '</div>';
+
+  document.getElementById("btn-simpan-wabazar-diterima").addEventListener("click", async function () {
+    const btn = this;
+    const errEl = document.getElementById("wabazar-diterima-error");
+    const statusEl = document.getElementById("wabazar-diterima-status");
+    errEl.style.display = "none";
+
+    const teks = document.getElementById("wabazar-template-diterima").value;
+    if (!teks.trim()) {
+      errEl.textContent = "Pesan tidak boleh kosong.";
+      errEl.style.display = "block";
+      return;
+    }
+    const linkGrupBaru = document.getElementById("wabazar-link-grup").value.trim();
+
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
+    const { error: errSimpan } = await supabaseClient
+      .from("bazar_settings")
+      .update({ wa_template_diterima: teks, link_grup_wa: linkGrupBaru || null })
+      .eq("id", 1);
+    btn.disabled = false;
+    btn.textContent = "Simpan";
+
+    if (errSimpan) {
+      errEl.textContent = "Gagal menyimpan: " + errSimpan.message;
+      errEl.style.display = "block";
+      return;
+    }
+    statusEl.textContent = "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+
+  document.getElementById("btn-simpan-wabazar-panitia").addEventListener("click", async function () {
+    const btn = this;
+    const errEl = document.getElementById("wabazar-panitia-error");
+    const statusEl = document.getElementById("wabazar-panitia-status");
+    errEl.style.display = "none";
+
+    const teks = document.getElementById("wabazar-template-panitia").value;
+    if (!teks.trim()) {
+      errEl.textContent = "Pesan tidak boleh kosong.";
+      errEl.style.display = "block";
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Menyimpan...";
+    const { error: errSimpan } = await supabaseClient
+      .from("bazar_settings")
+      .update({ wa_template_panitia_baru: teks })
+      .eq("id", 1);
+    btn.disabled = false;
+    btn.textContent = "Simpan";
+
+    if (errSimpan) {
+      errEl.textContent = "Gagal menyimpan: " + errSimpan.message;
+      errEl.style.display = "block";
+      return;
+    }
+    statusEl.textContent = "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+}
+
 /* ==================== POSTER REKAP PENDAFTAR STAND (tab "Data Tenant") ====================
    SENGAJA dibuat tema & tata letak yang BERBEDA dari poster rekap Lomba
    (`gambarPosterRekap()` di view-admin.js) -- bukan cuma ganti warna, supaya
@@ -1738,6 +1987,10 @@ async function bukaPosterRekapBazar(tenantRows) {
     '<p class="hint">Memuat logo & menyiapkan poster...</p>'
   );
 
+  // Dibungkus try/catch -- lihat komentar yang sama di `bukaPosterRekap()`
+  // versi Lomba (view-admin.js) untuk alasannya (supaya tidak macet
+  // selamanya di pesan "Memuat logo..." kalau ada langkah yang gagal).
+  try {
   const [{ data: settingsData }, { data: siteSettingsData }, { data: standRows }] = await Promise.all([
     supabaseClient.from("bazar_settings").select("jenis_stand_info").eq("id", 1).single(),
     supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single(),
@@ -1825,6 +2078,20 @@ async function bukaPosterRekapBazar(tenantRows) {
     }
     setTimeout(function () { statusEl.textContent = ""; }, 3500);
   });
+  } catch (err) {
+    console.error("Poster Rekap Stand gagal dibuat:", err);
+    const overlayGagal = document.getElementById("modal-overlay");
+    if (!overlayGagal || overlayGagal.style.display === "none") return;
+    bukaModal(
+      "🖼️ Poster Rekap Pendaftar Stand",
+      '<p>Gagal menyiapkan poster: ' + escapeHTMLBazarAdmin((err && err.message) || String(err)) + '</p>' +
+      '<p class="hint">Coba lagi -- biasanya ini karena koneksi lambat/putus sesaat saat memuat logo situs.</p>' +
+      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-coba-lagi-poster-bazar">🔄 Coba Lagi</button></div>'
+    );
+    document.getElementById("btn-coba-lagi-poster-bazar").addEventListener("click", function () {
+      bukaPosterRekapBazar(tenantRows);
+    });
+  }
 }
 
 window.ViewAdminBazar = { template: ADMINBAZAR_TEMPLATE, init: initAdminBazar };
