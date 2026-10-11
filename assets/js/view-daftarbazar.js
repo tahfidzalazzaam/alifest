@@ -799,6 +799,40 @@ function initDaftarBazar() {
     return bagian.length > 1 ? bagian.pop() : "bin";
   }
 
+  // Kecilkan otomatis berkas FOTO sebelum diunggah -- pola & alasan SAMA
+  // PERSIS dengan `kecilkanGambarJikaPerlu()` di view-daftar.js (lihat
+  // komentar di sana), diberi akhiran "Bazar" di sini supaya tidak bentrok
+  // nama (satu scope global JS yang sama). Ini juga yang paling berperan
+  // membuat pengunggahan Langkah 4 (sampai 5 berkas foto: logo, poster, 2
+  // bukti follow IG, bukti bayar) jadi jauh lebih singkat di sinyal lemah --
+  // foto HP yang tadinya 3-8MB biasanya jadi tinggal ratusan KB sebelum
+  // dikirim, bukan cuma diunggah bergantian seperti perbaikan sebelumnya.
+  function kecilkanGambarJikaPerluBazar(file) {
+    if (!file || file.type.indexOf("image/") !== 0 || file.size < 400 * 1024) {
+      return Promise.resolve(file);
+    }
+    return new Promise(function (resolve) {
+      const img = new Image();
+      const urlSementara = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(urlSementara);
+        const MAKS_SISI = 1600;
+        const skala = Math.min(1, MAKS_SISI / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * skala), h = Math.round(img.naturalHeight * skala);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob(function (blob) {
+          if (!blob || blob.size >= file.size) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+        }, "image/jpeg", 0.82);
+      };
+      img.onerror = function () { URL.revokeObjectURL(urlSementara); resolve(file); };
+      img.src = urlSementara;
+    });
+  }
+
   function tungguSebentar(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
@@ -822,6 +856,7 @@ function initDaftarBazar() {
   }
 
   async function uploadKeStorageBazar(file, label) {
+    file = await kecilkanGambarJikaPerluBazar(file);
     const path = "bazar/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensi(file);
     const MAKS_PERCOBAAN = 3;
     let error;
@@ -1132,6 +1167,21 @@ function initDaftarBazar() {
           regNumberEl.textContent = data.nomor_pendaftaran || "-";
           resultPanel.classList.add("is-visible");
           resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+          // Pemberitahuan WA "pendaftar baru" ke grup/nomor panitia (migrasi
+          // 0046) -- BEST-EFFORT, sengaja TIDAK di-await dan TIDAK pernah
+          // menampilkan eror ke pendaftar: kalau Fonnte/secret panitia belum
+          // disetel atau gagal terkirim, pendaftaran itu sendiri TETAP sukses
+          // (sudah tersimpan di database lewat submit_bazar di atas) --
+          // notifikasi ini murni pemberitahuan tambahan, bukan bagian dari
+          // alur pendaftaran yang wajib berhasil. `data.id` (uuid baris
+          // bazar_tenant yang baru) ditambahkan di submit_bazar() sejak
+          // migrasi ini supaya Edge Function bisa mengambil data lengkapnya
+          // sendiri dari database (bukan dari body request).
+          if (data.id) {
+            supabaseClient.functions.invoke("notifikasi-bazar-baru", { body: { id: data.id } })
+              .catch(function (err) { console.error("Gagal mengirim notifikasi WA ke panitia:", err); });
+          }
         } else {
           // Salah satu stand yang dipilih baru saja diambil pendaftar lain
           // meski sudah sempat direservasi (kedaluwarsa, atau race
