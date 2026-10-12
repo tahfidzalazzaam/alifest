@@ -38,7 +38,16 @@ const DAFTAR_BAZAR_TEMPLATE = `
 
   <div class="form-shell">
     <div class="notice" id="bazar-info-biaya" style="display:none;"></div>
-    <div class="notice" id="bazar-info-rekening" style="display:none;"></div>
+    <!-- #bazar-info-rekening SENGAJA TIDAK ditaruh di sini (atas halaman,
+         sebelum wizard) lagi -- permintaan panitia: info rekening/transfer
+         cuma relevan pas Langkah 4 (saat benar-benar akan unggah bukti
+         transfer), jadi dipindah ke dalam pane Langkah 4 sendiri (dekat
+         kotak unggah Bukti Pembayaran, lihat di bawah) supaya tidak "numpuk"
+         di atas tiap kali pindah Langkah 1-3 (sebelumnya elemen ini selalu
+         ada di sini, ikut ter-scroll-ke-atas tiap kali perbaruiTampilanLangkah()
+         jalan). id elemen TETAP SAMA ("bazar-info-rekening") supaya
+         muatPengaturanBazar() di bawah tidak perlu diubah sama sekali --
+         cuma lokasinya di HTML yang pindah. -->
     <div class="notice" id="bazar-draft-dipulihkan-hint" style="display:none;background:#eef6ff;border:1px solid #a9c9f5;color:#1d4e89;">
       ℹ️ Draf pendaftaran Anda yang terakhir berhasil dipulihkan. <strong>Catatan:</strong> berkas yang sudah dipilih sebelumnya (logo, poster, screenshot follow IG, bukti bayar) perlu dipilih ulang karena alasan keamanan browser -- isian lainnya (nama usaha, jenis stand, lokasi, dsb) sudah terisi otomatis.
     </div>
@@ -215,6 +224,14 @@ const DAFTAR_BAZAR_TEMPLATE = `
             <fieldset>
               <legend>Bukti Pembayaran</legend>
               <div class="wizard-ringkasan" id="bazar-ringkasan-akhir"></div>
+
+              <!-- Info rekening/transfer (dipindah ke sini dari atas halaman --
+                   lihat catatan panjang dekat #bazar-info-biaya di atas) --
+                   ditaruh PERSIS sebelum kotak unggah Bukti Pembayaran,
+                   supaya pendaftar langsung lihat ke rekening mana harus
+                   transfer TEPAT pada saat akan mengunggah buktinya, tanpa
+                   perlu scroll balik ke atas. -->
+              <div class="notice" id="bazar-info-rekening" style="display:none;margin-bottom:16px;"></div>
 
               <div class="field" id="bazar-bukti-bayar-wrap">
                 <label id="bazar-bukti-bayar-label">Bukti Pembayaran Sewa Stand</label>
