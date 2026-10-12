@@ -856,8 +856,18 @@ function initDaftarBazar() {
   // bukti follow IG, bukti bayar) jadi jauh lebih singkat di sinyal lemah --
   // foto HP yang tadinya 3-8MB biasanya jadi tinggal ratusan KB sebelum
   // dikirim, bukan cuma diunggah bergantian seperti perbaikan sebelumnya.
+  // Ambang & ukuran diperketat (sebelumnya memicu di >=400KB, sisi maks
+  // 1600px, kualitas 0.82) -- dilaporkan: unggahan logo (berkas PERTAMA di
+  // antrean) masih sering "Failed to fetch" walau sinyal kelihatan penuh,
+  // dan pendaftar menduga berkasnya masih terlalu besar/lama diunggah.
+  // Sekarang memicu lebih dini (>=250KB) dan hasil akhirnya dibuat lebih
+  // kecil lagi (sisi maks 1280px, kualitas 0.75) -- foto logo/produk tidak
+  // butuh resolusi tinggi untuk ditampilkan di tabel/poster Panitia, jadi
+  // ukuran file yang lebih kecil (biasanya tinggal puluhan-ratusan KB, bukan
+  // ratusan KB-1MB seperti sebelumnya) mengurangi waktu unggah & peluang
+  // koneksi lemah sempat putus di tengah proses unggahnya.
   function kecilkanGambarJikaPerluBazar(file) {
-    if (!file || file.type.indexOf("image/") !== 0 || file.size < 400 * 1024) {
+    if (!file || file.type.indexOf("image/") !== 0 || file.size < 250 * 1024) {
       return Promise.resolve(file);
     }
     return new Promise(function (resolve) {
@@ -865,7 +875,7 @@ function initDaftarBazar() {
       const urlSementara = URL.createObjectURL(file);
       img.onload = function () {
         URL.revokeObjectURL(urlSementara);
-        const MAKS_SISI = 1600;
+        const MAKS_SISI = 1280;
         const skala = Math.min(1, MAKS_SISI / Math.max(img.naturalWidth, img.naturalHeight));
         const w = Math.round(img.naturalWidth * skala), h = Math.round(img.naturalHeight * skala);
         const canvas = document.createElement("canvas");
@@ -875,7 +885,7 @@ function initDaftarBazar() {
         canvas.toBlob(function (blob) {
           if (!blob || blob.size >= file.size) { resolve(file); return; }
           resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
-        }, "image/jpeg", 0.82);
+        }, "image/jpeg", 0.75);
       };
       img.onerror = function () { URL.revokeObjectURL(urlSementara); resolve(file); };
       img.src = urlSementara;
@@ -917,6 +927,25 @@ function initDaftarBazar() {
 
   const MAKS_PERCOBAAN_UPLOAD_BAZAR = 6;
   const MAKS_JEDA_MS = 5000; // jeda antar percobaan di-cap 5 detik (naik 1.2s, 2.4s, 3.6s, 4.8s, lalu mentok 5s)
+  const BATAS_WAKTU_UNGGAH_MS = 15000; // lihat komentar di bawah
+
+  // supabase-js (storage.upload) TIDAK punya batas waktu bawaan -- di
+  // koneksi yang sangat lemah, SATU percobaan upload bisa menggantung lama
+  // sebelum browser akhirnya melempar "Failed to fetch" sendiri (kalau
+  // sempat melempar sama sekali) -- dilaporkan pendaftar: terasa "lama" dan
+  // mengganggu. Supaya TIAP percobaan dibatasi tegas 15 detik (bukan
+  // menunggu browser), dibungkus Promise.race melawan timer -- begitu
+  // timernya menang, dianggap error jaringan biasa (pesannya cocok dengan
+  // kemungkinanErrorJaringan() di atas) supaya tetap ikut alur percobaan
+  // ulang yang sama persis, bukan jalur terpisah.
+  function unggahDenganBatasWaktu(path, file) {
+    return Promise.race([
+      supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: true }),
+      new Promise(function (resolve) {
+        setTimeout(function () { resolve({ error: { message: "Waktu unggah habis (timeout jaringan)" } }); }, BATAS_WAKTU_UNGGAH_MS);
+      })
+    ]);
+  }
 
   // `onPercobaan(percobaan, maksPercobaan)` opsional -- dipanggil SEBELUM
   // tiap percobaan ulang (bukan percobaan pertama) supaya pemanggil bisa
@@ -929,10 +958,7 @@ function initDaftarBazar() {
     let error;
     for (let percobaan = 1; percobaan <= MAKS_PERCOBAAN_UPLOAD_BAZAR; percobaan++) {
       if (percobaan > 1 && typeof onPercobaan === "function") onPercobaan(percobaan, MAKS_PERCOBAAN_UPLOAD_BAZAR);
-      const hasil = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
-        contentType: file.type,
-        upsert: percobaan > 1 // percobaan ulang pakai path YANG SAMA -- upsert:true supaya tidak ditolak "sudah ada" kalau percobaan pertama ternyata sempat tersimpan sebagian sebelum koneksinya putus
-      });
+      const hasil = await unggahDenganBatasWaktu(path, file);
       error = hasil.error;
       if (!error) {
         const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
