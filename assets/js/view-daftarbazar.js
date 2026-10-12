@@ -229,6 +229,17 @@ const DAFTAR_BAZAR_TEMPLATE = `
                 <span>Saya menyatakan data yang diisi sudah benar dan bersedia mematuhi ketentuan bazar ALIF 5.0.</span>
               </label>
               <div class="form-error" id="bazar-konfirmasi-error">Centang pernyataan ini sebelum mengirim.</div>
+
+              <!-- Peringatan sinyal lemah (BARU) -- lihat pasangPemantauSinyalBazar()
+                   di bawah. Tersembunyi secara default, HANYA dimunculkan kalau
+                   browser mendukung Network Information API (navigator.connection,
+                   umumnya Chrome Android) DAN sinyal/koneksinya terdeteksi lemah
+                   -- supaya pendaftar tahu LEBIH AWAL (sebelum menekan "Kirim")
+                   kalau unggahan berisiko lambat/gagal, bukan baru tahu setelah
+                   gagal berkali-kali. -->
+              <div class="hint" id="bazar-sinyal-lemah-hint" style="display:none;margin-top:14px;padding:10px 14px;border-radius:10px;background:#fff6e0;border:1px solid #f0cf7a;color:#7a5b00;">
+                ⚠️ Sinyal/koneksi internet Anda saat ini terdeteksi lemah. Mengunggah berkas mungkin lambat atau gagal. Disarankan pindah ke tempat dengan sinyal/WiFi lebih kuat sebelum menekan "Kirim Pendaftaran Bazar".
+              </div>
             </fieldset>
           </div>
 
@@ -350,6 +361,35 @@ function initDaftarBazar() {
     return div.innerHTML;
   }
 
+  /* ---------------- Peringatan sinyal/koneksi lemah (Langkah 4) ----------------
+     Memakai Network Information API (`navigator.connection`, didukung Chrome
+     Android & sebagian besar browser Android lain -- TIDAK didukung Safari/
+     iOS, jadi fungsi ini SELALU dibungkus pengecekan `"connection" in
+     navigator` dan diam saja/tidak melakukan apa pun di browser yang tidak
+     mendukungnya, bukan dianggap "sinyal bagus" begitu saja). Dipanggil
+     setiap kali tampilan langkah diperbarui (lihat perbaruiTampilanLangkah()
+     di bawah) DAN setiap kali koneksi berubah (event "change" pada
+     `navigator.connection`, dipasang SEKALI saat form ini pertama dibuka,
+     lihat dekat akhir fungsi init ini) -- supaya peringatannya ikut
+     muncul/hilang otomatis kalau pendaftar berpindah dari WiFi lemah ke
+     sinyal HP yang lebih kuat (atau sebaliknya) SELAGI mengisi formulir,
+     tanpa perlu reload halaman. Ini murni INFORMASI (tidak memblokir tombol
+     "Kirim") -- pendaftar tetap boleh mencoba kirim kapan saja, percobaan
+     ulang otomatis di uploadKeStorageBazar() tetap jalan seperti biasa. */
+  function sinyalTerdeteksiLemahBazar() {
+    if (!("connection" in navigator) || !navigator.connection) return false;
+    const c = navigator.connection;
+    const tipeLemah = ["slow-2g", "2g", "3g"].indexOf(c.effectiveType) !== -1;
+    const downlinkLemah = typeof c.downlink === "number" && c.downlink > 0 && c.downlink < 0.6; // Mbps
+    return tipeLemah || downlinkLemah;
+  }
+
+  function perbaruiPeringatanSinyalBazar() {
+    const hintEl = document.getElementById("bazar-sinyal-lemah-hint");
+    if (!hintEl) return;
+    hintEl.style.display = (currentStep === 4 && sinyalTerdeteksiLemahBazar()) ? "block" : "none";
+  }
+
   /* ---------------- Mekanisme wizard (geser antar langkah) ---------------- */
   function perbaruiTampilanLangkah() {
     trackEl.style.transform = "translateX(-" + ((currentStep - 1) * 100) + "%)";
@@ -361,7 +401,16 @@ function initDaftarBazar() {
     btnKembali.style.display = currentStep === 1 ? "none" : "inline-block";
     btnLanjut.style.display = currentStep === TOTAL_STEP ? "none" : "inline-block";
     btnSubmit.style.display = currentStep === TOTAL_STEP ? "inline-block" : "none";
+    perbaruiPeringatanSinyalBazar();
     document.querySelector(".form-shell").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // Dipasang SEKALI saat form ini pertama dibuka -- lihat komentar di atas
+  // sinyalTerdeteksiLemahBazar() untuk alasannya. `{ passive: true }` karena
+  // listener ini cuma membaca & memperbarui tampilan, tidak pernah
+  // memanggil preventDefault().
+  if ("connection" in navigator && navigator.connection && typeof navigator.connection.addEventListener === "function") {
+    navigator.connection.addEventListener("change", perbaruiPeringatanSinyalBazar, { passive: true });
   }
 
   /* ---------------- Pilihan Jenis Stand (A/B/C, dari bazar_settings.jenis_stand_info) ---------------- */
@@ -843,24 +892,43 @@ function initDaftarBazar() {
   // bawah, sekarang diunggah BERGANTIAN satu-satu, bukan `Promise.all`
   // sekaligus, supaya tidak berebut koneksi di jaringan lemah). Begitu
   // ketemu error yang pola pesannya khas masalah jaringan sesaat (bukan
-  // berkas ditolak server/format salah/dsb), coba ulang otomatis sampai 2x
-  // lagi dengan jeda singkat sebelum benar-benar menyerah -- pengalaman
-  // nyata pendaftar: 1 dari 5 berkas gagal di tengah sinyal lemot TIDAK
-  // harus langsung membatalkan seluruh pendaftarannya.
+  // berkas ditolak server/format salah/dsb), coba ulang otomatis sebelum
+  // benar-benar menyerah -- pengalaman nyata pendaftar: 1 dari 5 berkas
+  // gagal di tengah sinyal lemot TIDAK harus langsung membatalkan seluruh
+  // pendaftarannya.
+  //
+  // MAKS_PERCOBAAN dinaikkan dari 3 jadi 6 (sempat dilaporkan: di sinyal 4G
+  // yang BENAR-BENAR lemah, 3x percobaan dengan jeda pendek masih sering
+  // habis duluan sebelum koneksinya sempat pulih sebentar -- 6x percobaan
+  // dengan jeda yang naik lebih jauh memberi waktu total lebih panjang
+  // untuk jaringan yang naik-turun punya "jendela" sempat tersambung).
+  // Jeda antar percobaan di-CAP di MAKS_JEDA_MS supaya tidak jadi berjam-jam
+  // kalau percobaannya banyak -- totalnya tetap wajar untuk ukuran formulir
+  // HP (lihat perhitungan di komentar `MAKS_JEDA_MS` di bawah).
   function kemungkinanErrorJaringan(pesan) {
     const p = String(pesan || "").toLowerCase();
     return p.indexOf("failed to fetch") !== -1 ||
       p.indexOf("network") !== -1 ||
       p.indexOf("load failed") !== -1 ||
-      p.indexOf("networkerror") !== -1;
+      p.indexOf("networkerror") !== -1 ||
+      p.indexOf("timeout") !== -1 ||
+      p.indexOf("timed out") !== -1;
   }
 
-  async function uploadKeStorageBazar(file, label) {
+  const MAKS_PERCOBAAN_UPLOAD_BAZAR = 6;
+  const MAKS_JEDA_MS = 5000; // jeda antar percobaan di-cap 5 detik (naik 1.2s, 2.4s, 3.6s, 4.8s, lalu mentok 5s)
+
+  // `onPercobaan(percobaan, maksPercobaan)` opsional -- dipanggil SEBELUM
+  // tiap percobaan ulang (bukan percobaan pertama) supaya pemanggil bisa
+  // menampilkan progres "percobaan ke-X" ke pendaftar (lihat
+  // unggahSemuaBergantian() di bawah) -- supaya kelihatan sedang berusaha
+  // mencoba lagi, bukan diam/macet.
+  async function uploadKeStorageBazar(file, label, onPercobaan) {
     file = await kecilkanGambarJikaPerluBazar(file);
     const path = "bazar/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensi(file);
-    const MAKS_PERCOBAAN = 3;
     let error;
-    for (let percobaan = 1; percobaan <= MAKS_PERCOBAAN; percobaan++) {
+    for (let percobaan = 1; percobaan <= MAKS_PERCOBAAN_UPLOAD_BAZAR; percobaan++) {
+      if (percobaan > 1 && typeof onPercobaan === "function") onPercobaan(percobaan, MAKS_PERCOBAAN_UPLOAD_BAZAR);
       const hasil = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
         contentType: file.type,
         upsert: percobaan > 1 // percobaan ulang pakai path YANG SAMA -- upsert:true supaya tidak ditolak "sudah ada" kalau percobaan pertama ternyata sempat tersimpan sebagian sebelum koneksinya putus
@@ -871,9 +939,9 @@ function initDaftarBazar() {
         return data.publicUrl;
       }
       console.error("Detail error upload (" + label + "), percobaan " + percobaan + ":", error);
-      const bolehCobaLagi = percobaan < MAKS_PERCOBAAN && kemungkinanErrorJaringan(error.message);
+      const bolehCobaLagi = percobaan < MAKS_PERCOBAAN_UPLOAD_BAZAR && kemungkinanErrorJaringan(error.message);
       if (!bolehCobaLagi) break;
-      await tungguSebentar(1200 * percobaan); // jeda makin lama tiap percobaan ulang
+      await tungguSebentar(Math.min(1200 * percobaan, MAKS_JEDA_MS)); // jeda makin lama tiap percobaan ulang, di-cap
     }
     throw new Error("Gagal mengunggah " + label + ": " + error.message);
   }
@@ -1138,7 +1206,21 @@ function initDaftarBazar() {
       const hasil = [];
       for (let i = 0; i < daftarUnggah.length; i++) {
         btnSubmit.textContent = "Mengunggah " + (i + 1) + "/" + daftarUnggah.length + "...";
-        hasil.push(await uploadKeStorageBazar(daftarUnggah[i].file, daftarUnggah[i].label));
+        hasil.push(await uploadKeStorageBazar(daftarUnggah[i].file, daftarUnggah[i].label, function (percobaan, maks) {
+          // Ditampilkan hanya mulai percobaan ke-2 -- supaya pendaftar di
+          // sinyal lemah melihat aplikasi sedang AKTIF mencoba lagi, bukan
+          // macet/diam begitu percobaan pertama gagal karena koneksi sempat
+          // putus sebentar. Teksnya SENGAJA menyebut "sinyal lemah" secara
+          // eksplisit (bukan cuma nomor percobaan) -- begitu upload sudah
+          // butuh percobaan ulang, itu sendiri sudah bukti kuat sinyalnya
+          // sedang lemah SAAT INI, jadi banner peringatan juga ikut
+          // dimunculkan di sini -- bukan cuma mengandalkan
+          // navigator.connection (Network Information API) yang TIDAK
+          // didukung semua browser (mis. Safari/iOS).
+          btnSubmit.textContent = "Sinyal lemah, mencoba lagi... (berkas " + (i + 1) + "/" + daftarUnggah.length + ", percobaan " + percobaan + "/" + maks + ")";
+          const hintEl = document.getElementById("bazar-sinyal-lemah-hint");
+          if (hintEl) hintEl.style.display = "block";
+        }));
       }
       return hasil;
     }
@@ -1210,7 +1292,17 @@ function initDaftarBazar() {
       })
       .catch(function (err) {
         console.error(err);
-        alert("Gagal mengirim data: " + err.message);
+        // Pesan yang lebih ramah & jelas khusus untuk kegagalan jaringan
+        // (sudah dicoba ulang otomatis sampai 6x oleh uploadKeStorageBazar,
+        // tapi sinyalnya benar-benar putus lebih lama dari itu) -- supaya
+        // pendaftar tahu ini bukan pendaftarannya ditolak/datanya salah,
+        // dan tidak perlu mengisi ulang dari awal -- formulir yang sudah
+        // diisi TETAP ada, cukup ketuk tombol Kirim lagi begitu sinyal
+        // membaik.
+        const pesanRamah = kemungkinanErrorJaringan(err.message)
+          ? "Gagal mengirim data karena koneksi internet terputus-putus (sudah dicoba ulang beberapa kali). Data yang sudah Anda isi TIDAK hilang -- silakan cari sinyal/WiFi yang lebih stabil, lalu ketuk tombol \"Kirim Pendaftaran Bazar\" sekali lagi."
+          : "Gagal mengirim data: " + err.message;
+        alert(pesanRamah);
         btnSubmit.disabled = false;
         btnSubmit.textContent = "Kirim Pendaftaran Bazar";
         btnKembali.disabled = false;
