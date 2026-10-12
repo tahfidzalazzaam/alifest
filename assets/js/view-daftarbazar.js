@@ -39,6 +39,9 @@ const DAFTAR_BAZAR_TEMPLATE = `
   <div class="form-shell">
     <div class="notice" id="bazar-info-biaya" style="display:none;"></div>
     <div class="notice" id="bazar-info-rekening" style="display:none;"></div>
+    <div class="notice" id="bazar-draft-dipulihkan-hint" style="display:none;background:#eef6ff;border:1px solid #a9c9f5;color:#1d4e89;">
+      ℹ️ Draf pendaftaran Anda yang terakhir berhasil dipulihkan. <strong>Catatan:</strong> berkas yang sudah dipilih sebelumnya (logo, poster, screenshot follow IG, bukti bayar) perlu dipilih ulang karena alasan keamanan browser -- isian lainnya (nama usaha, jenis stand, lokasi, dsb) sudah terisi otomatis.
+    </div>
 
     <form id="form-bazar" novalidate>
 
@@ -315,6 +318,22 @@ function buatSesiTokenBazar() {
 }
 
 function initDaftarBazar() {
+  // Dideklarasikan PALING ATAS (sebelum apa pun lain, termasuk sebelum
+  // sesiToken dibuat di bawah) -- bacaDraftBazarTersimpan()/
+  // simpanDraftBazar() dipakai SEGERA setelah ini (lihat deklarasi
+  // _draftBazarAwal beberapa baris di bawah), dan keduanya butuh konstanta
+  // ini. HARUS berupa `const` di titik PALING AWAL seperti ini (bukan di
+  // dekat definisi fungsinya, lebih jauh ke bawah) -- kalau tidak, memanggil
+  // bacaDraftBazarTersimpan() sebelum baris deklarasi `const` ini sempat
+  // dieksekusi akan melempar ReferenceError ("cannot access before
+  // initialization", lihat aturan temporal dead zone `const`/`let` di JS),
+  // yang lalu DIAM-DIAM ditelan oleh try/catch di bacaDraftBazarTersimpan()
+  // -- bug nyata yang sempat ditemukan lewat pengetesan Playwright saat
+  // membangun fitur ini (draf selalu kembali null walau sessionStorage
+  // sudah terisi benar).
+  const BAZAR_DRAFT_KEY = "alif_draft_bazar_v1";
+  const BAZAR_DRAFT_MAKS_UMUR_MS = 2 * 60 * 60 * 1000; // 2 jam -- draf lebih tua dari ini dianggap kedaluwarsa & diabaikan
+
   const form = document.getElementById("form-bazar");
   const jenisChoicesEl = document.getElementById("bazar-jenis-choices");
   const jenisErrorEl = document.getElementById("bazar-jenis-error");
@@ -345,7 +364,16 @@ function initDaftarBazar() {
   let ujiCobaAktifBazar = false; // true kalau PIN uji coba (sama dengan Lomba) sedang aktif di sessionStorage
   // Kode stand yang DIPILIH pengunjung lewat klik di denah.
   let kodeTerpilihSet = new Set();
-  const sesiToken = buatSesiTokenBazar();
+  // Draf tersimpan (kalau ada) dibaca SEKARANG, SEBELUM sesiToken dibuat --
+  // supaya kalau pendaftar me-refresh halaman ini di tengah pengisian,
+  // sesiToken yang dipakai TETAP SAMA dengan sebelum refresh (bukan token
+  // acak baru), sehingga reservasi stand yang sempat terkunci atas nama
+  // token lama (lihat bazar_reservasi_stand, migrasi 0042) masih bisa
+  // dikenali/diperbarui server sebagai "milik sesi yang sama" kalau belum
+  // kedaluwarsa -- lihat pulihkanDraftLanjutanBazar() & simpanDraftBazar()
+  // di bawah untuk mekanisme penyimpanan/pemulihannya secara lengkap.
+  const _draftBazarAwal = bacaDraftBazarTersimpan();
+  const sesiToken = (_draftBazarAwal && _draftBazarAwal.sesiToken) ? _draftBazarAwal.sesiToken : buatSesiTokenBazar();
   let currentStep = 1;
   const TOTAL_STEP = 4;
   // Set true begitu reservasi Langkah 3 -> 4 berhasil, supaya kalau
@@ -360,6 +388,104 @@ function initDaftarBazar() {
     div.textContent = String(teks == null ? "" : teks);
     return div.innerHTML;
   }
+
+  /* ---------------- Draf pengisian (sessionStorage) -- jaga isian tidak hilang kalau halaman di-refresh ----------------
+     Permintaan panitia: "saat mencoba ulang setelah merefresh malah mengisi
+     dari awal lagi" -- sebelum ini, SEMUA state wizard (currentStep,
+     jenisTerpilih, kodeTerpilihSet, dan tiap isian <input>) murni variabel
+     JS di memori, hilang total begitu halaman di-refresh/dimuat ulang (mis.
+     tidak sengaja refresh, atau sengaja refresh karena mengira itu akan
+     "membantu" setelah gagal unggah). Sekarang disalin ke `sessionStorage`
+     (bertahan lewat refresh TAPI hilang begitu tab/jendela ditutup -- tidak
+     dimaksudkan jadi draf permanen) setiap kali ada perubahan berarti, dan
+     dipulihkan begitu form ini dibuka lagi.
+
+     SATU KETERBATASAN YANG TIDAK BISA DIHINDARI (pembatasan keamanan
+     browser, bukan bug): isian `<input type="file">` (logo, poster,
+     screenshot follow IG, bukti bayar) TIDAK PERNAH bisa dipulihkan lewat
+     JavaScript apa pun -- begitu halaman dimuat ulang, kelima berkas itu
+     harus dipilih ulang oleh pendaftar. Makanya begitu draf berhasil
+     dipulihkan, pendaftar diberi tahu lewat #bazar-draft-dipulihkan-hint
+     (lihat pulihkanDraftLanjutanBazar() di bawah) supaya tidak bingung
+     kenapa kotak unggahan masih kosong walau isian teks lain sudah terisi.
+
+     Soal reservasi lokasi stand (migrasi 0042): draf TIDAK langsung
+     memulihkan sampai Langkah 4 -- paling jauh balik ke Langkah 3 dengan
+     lokasi yang sama sudah tercentang, supaya begitu pendaftar klik
+     "Lanjut" lagi, lanjutDariLangkah3() memanggil ulang RPC
+     bazar_reservasi_stand dan reservasinya tervalidasi/diperbarui FRESH ke
+     server -- bukan dipercaya mentah-mentah dari draf lokal yang bisa saja
+     sudah kedaluwarsa (lewat 15 menit) sejak sebelum refresh terjadi. */
+
+  function bacaDraftBazarTersimpan() {
+    try {
+      const mentah = sessionStorage.getItem(BAZAR_DRAFT_KEY);
+      if (!mentah) return null;
+      const draft = JSON.parse(mentah);
+      if (!draft || typeof draft !== "object") return null;
+      if (!draft.disimpanPada || (Date.now() - draft.disimpanPada) > BAZAR_DRAFT_MAKS_UMUR_MS) {
+        sessionStorage.removeItem(BAZAR_DRAFT_KEY);
+        return null;
+      }
+      return draft;
+    } catch (e) {
+      return null; // mis. sessionStorage diblokir/tidak tersedia (mode privat dkk) -- murni best-effort, form tetap jalan normal tanpa draf
+    }
+  }
+
+  function hapusDraftBazar() {
+    try { sessionStorage.removeItem(BAZAR_DRAFT_KEY); } catch (e) { /* abaikan */ }
+  }
+
+  // Dipanggil dari BANYAK titik (lihat di bawah) setiap kali ada perubahan
+  // berarti pada isian -- murah & sederhana (menyalin isian saat ini apa
+  // adanya), jadi aman dipanggil sesering mungkin tanpa perlu debounce.
+  function simpanDraftBazar() {
+    try {
+      const draft = {
+        disimpanPada: Date.now(),
+        sesiToken: sesiToken,
+        currentStep: currentStep,
+        jenisTerpilih: jenisTerpilih,
+        jumlahDipesan: jumlahDipesan,
+        kodeTerpilih: Array.from(kodeTerpilihSet),
+        teks: {
+          bazarNamaUsaha: (document.getElementById("bazarNamaUsaha") || {}).value || "",
+          bazarJenisProduk: (document.getElementById("bazarJenisProduk") || {}).value || "",
+          bazarPenanggungJawab: (document.getElementById("bazarPenanggungJawab") || {}).value || "",
+          bazarWhatsapp: (document.getElementById("bazarWhatsapp") || {}).value || ""
+        },
+        konfirmasi: !!(document.getElementById("bazarKonfirmasi") && document.getElementById("bazarKonfirmasi").checked)
+      };
+      sessionStorage.setItem(BAZAR_DRAFT_KEY, JSON.stringify(draft));
+    } catch (e) { /* abaikan -- murni best-effort, jangan sampai mengganggu pengisian formulir */ }
+  }
+
+  // Bagian draf yang TIDAK butuh data server (standList/jenisStandInfo
+  // belum dimuat di titik ini) -- isian teks & centang konfirmasi langsung
+  // dipulihkan sesaat setelah form dirender, tanpa menunggu
+  // muatPengaturanBazar(). Bagian yang BUTUH data server (jenis/jumlah/
+  // lokasi/langkah) dipulihkan belakangan oleh pulihkanDraftLanjutanBazar().
+  if (_draftBazarAwal) {
+    const t = _draftBazarAwal.teks || {};
+    ["bazarNamaUsaha", "bazarJenisProduk", "bazarPenanggungJawab", "bazarWhatsapp"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el && t[id]) el.value = t[id];
+    });
+    const konfirmasiEl = document.getElementById("bazarKonfirmasi");
+    if (konfirmasiEl) konfirmasiEl.checked = !!_draftBazarAwal.konfirmasi;
+  }
+
+  // Simpan draf setiap kali isian teks/konfirmasi berubah -- listener
+  // dipasang SEKALI di sini (bukan di dalam fungsi render yang bisa
+  // dipanggil berulang) karena elemen-elemen ini tidak pernah dibuat ulang
+  // lewat innerHTML sepanjang hidup form ini.
+  ["bazarNamaUsaha", "bazarJenisProduk", "bazarPenanggungJawab", "bazarWhatsapp"].forEach(function (id) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", simpanDraftBazar);
+  });
+  const bazarKonfirmasiEl = document.getElementById("bazarKonfirmasi");
+  if (bazarKonfirmasiEl) bazarKonfirmasiEl.addEventListener("change", simpanDraftBazar);
 
   /* ---------------- Peringatan sinyal/koneksi lemah (Langkah 4) ----------------
      Memakai Network Information API (`navigator.connection`, didukung Chrome
@@ -442,6 +568,7 @@ function initDaftarBazar() {
           kodeTerpilihSet = new Set();
           reservasiTerakhirUntuk = null;
           renderJumlahSelector();
+          simpanDraftBazar();
         }
       });
     });
@@ -509,6 +636,7 @@ function initDaftarBazar() {
     kodeTerpilihSet = new Set();
     reservasiTerakhirUntuk = null;
     perbaruiTampilanStepperJumlahBazar();
+    simpanDraftBazar();
   });
   document.getElementById("bazar-jumlah-tambah").addEventListener("click", function () {
     if (jumlahDipesan >= jumlahMaksStepperBazar) return;
@@ -516,6 +644,7 @@ function initDaftarBazar() {
     kodeTerpilihSet = new Set();
     reservasiTerakhirUntuk = null;
     perbaruiTampilanStepperJumlahBazar();
+    simpanDraftBazar();
   });
 
   /* ---------------- Pilihan Lokasi Stand -- klik langsung di denah visual (Langkah 3) ---------------- */
@@ -635,6 +764,7 @@ function initDaftarBazar() {
         return;
       }
       perbaruiTotalLokasi();
+      simpanDraftBazar();
     });
 
     return el;
@@ -1153,17 +1283,20 @@ function initDaftarBazar() {
       }
       currentStep = 2;
       perbaruiTampilanLangkah();
+      simpanDraftBazar();
     } else if (currentStep === 2) {
       if (!validasiLangkah2()) return;
       currentStep = 3;
       renderLokasiPicker();
       perbaruiTampilanLangkah();
+      simpanDraftBazar();
     } else if (currentStep === 3) {
       const ok = await lanjutDariLangkah3();
       if (!ok) return;
       perbaruiRingkasanAkhir();
       currentStep = 4;
       perbaruiTampilanLangkah();
+      simpanDraftBazar();
     }
   });
 
@@ -1177,6 +1310,7 @@ function initDaftarBazar() {
       renderLokasiPicker();
     }
     perbaruiTampilanLangkah();
+    simpanDraftBazar();
   });
 
   // Kalau pendaftar mundur dari Langkah 3 balik ke Langkah 2 (berarti
@@ -1271,6 +1405,7 @@ function initDaftarBazar() {
         const data = res.data;
         if (data.success) {
           reservasiTerakhirUntuk = null; // sudah final, tidak perlu dilepas lagi (submit_bazar sendiri yang membersihkan kolom reservasinya)
+          hapusDraftBazar(); // pendaftaran sudah tersimpan di server -- draf lokal tidak diperlukan lagi
           form.style.display = "none";
           regNumberEl.textContent = data.nomor_pendaftaran || "-";
           resultPanel.classList.add("is-visible");
@@ -1337,6 +1472,7 @@ function initDaftarBazar() {
 
   document.getElementById("btn-daftar-bazar-lagi").addEventListener("click", function () {
     lepasReservasiSekarang();
+    hapusDraftBazar(); // mulai pendaftaran stand lain dari draf kosong, bukan membawa isian pendaftaran sebelumnya
     window.gotoRoute("#/daftar-bazar");
   });
 
@@ -1348,14 +1484,64 @@ function initDaftarBazar() {
   // kedaluwarsa otomatis di server (migrasi 0042) tetap jadi jaring
   // pengaman utama, ini cuma percepatan kalau sempat.
   window.addEventListener("beforeunload", function () {
+    // Simpan draf sekali lagi tepat sebelum halaman benar-benar
+    // ditinggalkan/di-refresh -- jaring pengaman tambahan untuk perubahan
+    // apa pun yang mungkin belum sempat tersimpan lewat listener lain.
+    simpanDraftBazar();
     if (!reservasiTerakhirUntuk) return;
     try {
       supabaseClient.rpc("bazar_lepas_reservasi", { p_sesi_token: sesiToken });
     } catch (e) { /* abaikan -- murni best-effort */ }
   });
 
+  // Dipanggil SATU KALI setelah muatPengaturanBazar() berhasil (standList &
+  // jenisStandInfo sudah tersedia) -- memulihkan bagian draf yang butuh data
+  // server ini: jenis & jumlah stand, lokasi yang sempat dipilih, dan posisi
+  // langkah wizard. Lihat komentar lengkap di bagian "Draf pengisian" di
+  // atas untuk alasan kenapa ini sengaja TIDAK langsung memulihkan sampai
+  // Langkah 4.
+  function pulihkanDraftLanjutanBazar() {
+    if (!_draftBazarAwal) return;
+
+    let langkahTujuan = 1;
+
+    if (_draftBazarAwal.jenisTerpilih && jenisStandInfo[_draftBazarAwal.jenisTerpilih]) {
+      jenisTerpilih = _draftBazarAwal.jenisTerpilih;
+      jumlahDipesan = Math.max(1, parseInt(_draftBazarAwal.jumlahDipesan, 10) || 1);
+      renderJenisChoices(); // render ulang -- radio jenis ikut tercentang, jumlahDipesan & stepper ikut terhitung ulang (lihat renderJumlahSelector())
+      langkahTujuan = 2;
+
+      const kodeDisimpan = Array.isArray(_draftBazarAwal.kodeTerpilih) ? _draftBazarAwal.kodeTerpilih : [];
+      // Validasi ulang tiap kode tersimpan terhadap data TERBARU dari
+      // server -- jangan percaya mentah-mentah draf lokal, lokasinya bisa
+      // saja sudah diambil tenant lain atau stand itu sudah tidak ada sejak
+      // sebelum refresh.
+      const kodeValid = kodeDisimpan.filter(function (kode) {
+        const s = standList.find(function (x) { return x.kode === kode; });
+        return !!s && s.jenis === jenisTerpilih && !s.tenant_id;
+      });
+      if (kodeValid.length > 0 && kodeValid.length === jumlahDipesan && (Number(_draftBazarAwal.currentStep) || 1) >= 3) {
+        kodeTerpilihSet = new Set(kodeValid);
+        // Sengaja berhenti di Langkah 3 (BUKAN langsung ke 4) -- begitu
+        // pendaftar klik "Lanjut" lagi dari sini, lanjutDariLangkah3() akan
+        // memanggil ulang RPC bazar_reservasi_stand supaya reservasinya
+        // tervalidasi/diperbarui FRESH ke server, bukan dipercaya mentah-
+        // mentah dari draf lokal yang bisa saja sudah kedaluwarsa.
+        langkahTujuan = 3;
+      }
+    }
+
+    currentStep = langkahTujuan;
+    if (currentStep >= 3) renderLokasiPicker();
+
+    const hintEl = document.getElementById("bazar-draft-dipulihkan-hint");
+    if (hintEl) hintEl.style.display = "block";
+  }
+
   muatPengaturanBazar().then(function (berhasilDibuka) {
-    if (berhasilDibuka) perbaruiTampilanLangkah();
+    if (!berhasilDibuka) return;
+    pulihkanDraftLanjutanBazar();
+    perbaruiTampilanLangkah();
   });
 }
 
