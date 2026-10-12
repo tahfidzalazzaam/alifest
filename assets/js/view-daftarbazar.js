@@ -1352,16 +1352,43 @@ function initDaftarBazar() {
       return;
     }
 
-    btnSubmit.disabled = true;
-    btnSubmit.textContent = "Mengirim...";
-    btnKembali.disabled = true;
-
     const fileLogo = document.getElementById("bazarFileLogo").files[0];
     const filePoster = document.getElementById("bazarFilePoster").files[0];
     const fileIg1 = document.getElementById("bazarFileIg1").files[0];
     const fileIg2 = document.getElementById("bazarFileIg2").files[0];
     const fileBukti = document.getElementById("bazarFileBukti").files[0];
     const kodeDipilih = Array.from(kodeTerpilihSet);
+
+    // Jaring pengaman TAMBAHAN khusus untuk berkas-berkas Langkah 1 (logo,
+    // poster, bukti follow IG) -- validasiLangkah4() di atas HANYA
+    // memeriksa bukti pembayaran (berkas Langkah 4 itu sendiri), BUKAN
+    // keempat berkas Langkah 1. Dalam alur normal (klik "Lanjut" berurutan
+    // dari Langkah 1) itu tidak masalah karena validasiLangkah1() sudah
+    // menjaganya duluan. TAPI sejak fitur draf tersimpan (sessionStorage,
+    // lihat pulihkanDraftLanjutanBazar()) bisa memulihkan pendaftar
+    // LANGSUNG ke Langkah 2/3 setelah refresh -- sedangkan berkas TIDAK
+    // PERNAH bisa ikut dipulihkan (keterbatasan browser) -- pendaftar bisa
+    // saja langsung lanjut ke Langkah 4 lewat tombol "Lanjut" (yang cuma
+    // memvalidasi Langkah 2/3, bukan berkas Langkah 1) lalu menekan "Kirim"
+    // tanpa pernah mengisi ulang keempat berkas itu. Tanpa pengecekan ini,
+    // `ekstensi(file)`/`ekstensi(undefined)` di uploadKeStorageBazar() akan
+    // melempar "Cannot read properties of undefined (reading 'name')" --
+    // pesan eror teknis yang membingungkan, bukan error jelas yang bisa
+    // ditindaklanjuti pendaftar. Begitu ketemu berkas yang kosong, pendaftar
+    // dibawa balik ke Langkah 1 dengan kotak yang kosong ditandai merah.
+    if (!fileLogo || !filePoster || !fileIg1 || !fileIg2) {
+      currentStep = 1;
+      perbaruiTampilanLangkah();
+      validasiLangkah1();
+      alert("Beberapa berkas di Langkah 1 (Logo Usaha/Poster Promosi/Bukti Follow IG) belum dipilih -- kemungkinan karena draf pendaftaran baru saja dipulihkan setelah refresh (berkas memang tidak bisa ikut dipulihkan otomatis). Silakan pilih ulang berkas yang kotaknya ditandai merah di Langkah 1, lalu lanjutkan lagi sampai Langkah 4.");
+      const err = form.querySelector(".field.has-error");
+      if (err) err.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    btnSubmit.disabled = true;
+    btnSubmit.textContent = "Mengirim...";
+    btnKembali.disabled = true;
 
     // Diunggah BERGANTIAN satu-per-satu (bukan `Promise.all` lima sekaligus
     // seperti sebelumnya) -- 5 unggahan bersamaan gampang berebut koneksi di
