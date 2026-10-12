@@ -76,8 +76,8 @@ const DAFTAR_BAZAR_TEMPLATE = `
                 <div class="field">
                   <label>Logo Usaha</label>
                   <div class="upload-field" id="upload-bazar-logo">
-                    <label class="upload-trigger" for="bazarFileLogo">Pilih berkas (JPG/PNG, maks 4MB)</label>
-                    <input type="file" id="bazarFileLogo" name="bazarFileLogo" accept=".jpg,.jpeg,.png" />
+                    <label class="upload-trigger" for="bazarFileLogo">Pilih berkas (foto, maks 12MB)</label>
+                    <input type="file" id="bazarFileLogo" name="bazarFileLogo" accept="image/*" />
                     <div class="filename" id="filename-bazar-logo">Belum ada berkas dipilih.</div>
                   </div>
                   <div class="form-error">Logo usaha wajib diunggah.</div>
@@ -85,8 +85,8 @@ const DAFTAR_BAZAR_TEMPLATE = `
                 <div class="field">
                   <label>Foto Poster Promosi</label>
                   <div class="upload-field" id="upload-bazar-poster">
-                    <label class="upload-trigger" for="bazarFilePoster">Pilih berkas (JPG/PNG, maks 4MB)</label>
-                    <input type="file" id="bazarFilePoster" name="bazarFilePoster" accept=".jpg,.jpeg,.png" />
+                    <label class="upload-trigger" for="bazarFilePoster">Pilih berkas (foto, maks 12MB)</label>
+                    <input type="file" id="bazarFilePoster" name="bazarFilePoster" accept="image/*" />
                     <div class="filename" id="filename-bazar-poster">Belum ada berkas dipilih.</div>
                   </div>
                   <div class="form-error">Foto poster promosi wajib diunggah.</div>
@@ -100,8 +100,8 @@ const DAFTAR_BAZAR_TEMPLATE = `
                   <div class="field" style="margin-bottom:0;">
                     <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @al.azzaam.id</label>
                     <div class="upload-field" id="upload-bazar-ig1">
-                      <label class="upload-trigger" for="bazarFileIg1">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-                      <input type="file" id="bazarFileIg1" name="bazarFileIg1" accept=".jpg,.jpeg,.png,.pdf" />
+                      <label class="upload-trigger" for="bazarFileIg1">Pilih berkas (foto/PDF, maks 12MB)</label>
+                      <input type="file" id="bazarFileIg1" name="bazarFileIg1" accept="image/*,.pdf" />
                       <div class="filename" id="filename-bazar-ig1">Belum ada berkas dipilih.</div>
                     </div>
                     <div class="form-error">Screenshot follow @al.azzaam.id wajib diunggah.</div>
@@ -109,8 +109,8 @@ const DAFTAR_BAZAR_TEMPLATE = `
                   <div class="field" style="margin-bottom:0;">
                     <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @alifest.26</label>
                     <div class="upload-field" id="upload-bazar-ig2">
-                      <label class="upload-trigger" for="bazarFileIg2">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-                      <input type="file" id="bazarFileIg2" name="bazarFileIg2" accept=".jpg,.jpeg,.png,.pdf" />
+                      <label class="upload-trigger" for="bazarFileIg2">Pilih berkas (foto/PDF, maks 12MB)</label>
+                      <input type="file" id="bazarFileIg2" name="bazarFileIg2" accept="image/*,.pdf" />
                       <div class="filename" id="filename-bazar-ig2">Belum ada berkas dipilih.</div>
                     </div>
                     <div class="form-error">Screenshot follow @alifest.26 wajib diunggah.</div>
@@ -220,8 +220,8 @@ const DAFTAR_BAZAR_TEMPLATE = `
                 <label id="bazar-bukti-bayar-label">Bukti Pembayaran Sewa Stand</label>
                 <p class="hint" style="margin-top:-4px;" id="bazar-bukti-bayar-hint">Transfer biaya sewa stand sesuai jenis & jumlah lokasi yang dipilih, lalu unggah screenshot/foto bukti transfernya di sini.</p>
                 <div class="upload-field" id="upload-bazar-bukti">
-                  <label class="upload-trigger" for="bazarFileBukti">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-                  <input type="file" id="bazarFileBukti" name="bazarFileBukti" accept=".jpg,.jpeg,.png,.pdf" />
+                  <label class="upload-trigger" for="bazarFileBukti">Pilih berkas (foto/PDF, maks 12MB)</label>
+                  <input type="file" id="bazarFileBukti" name="bazarFileBukti" accept="image/*,.pdf" />
                   <div class="filename" id="filename-bazar-bukti">Belum ada berkas dipilih.</div>
                 </div>
                 <div class="form-error">Bukti pembayaran wajib diunggah.</div>
@@ -1115,11 +1115,14 @@ function initDaftarBazar() {
         return;
       }
       const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
-      const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
+      // Terima SEMUA jenis foto (cukup diawali "image/" -- otomatis
+      // mencakup HEIC/HEIF/WEBP/dll, bukan cuma JPG/PNG seperti dulu) atau
+      // PDF -- lihat catatan lengkap di config.js dekat ALLOWED_FILE_TYPES.
+      const typeOk = file.type.indexOf("image/") === 0 || file.type === "application/pdf";
       if (!sizeOk || !typeOk) {
         filenameEl.textContent = !sizeOk
           ? ("Berkas melebihi " + MAX_FILE_SIZE_MB + "MB. Pilih ulang berkas.")
-          : "Format tidak didukung. Gunakan JPG, PNG, atau PDF.";
+          : "Format tidak didukung. Gunakan foto (JPG/PNG/HEIC/dll) atau PDF.";
         box.classList.remove("has-file");
         input.value = "";
         return;
