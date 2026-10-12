@@ -196,8 +196,8 @@ const DAFTAR_TEMPLATE = `
             <label>Kartu Pelajar / Surat Keterangan Aktif Sekolah</label>
             <p class="hint" id="kartu-hint" style="margin-top:-4px;">Unggah salah satu: kartu pelajar, atau surat keterangan aktif sekolah kalau kartu pelajar belum ada.</p>
             <div class="upload-field" id="upload-kartu">
-              <label class="upload-trigger" for="fileKartu">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-              <input type="file" id="fileKartu" name="fileKartu" accept=".jpg,.jpeg,.png,.pdf" />
+              <label class="upload-trigger" for="fileKartu">Pilih berkas (foto/PDF, maks 12MB)</label>
+              <input type="file" id="fileKartu" name="fileKartu" accept="image/*,.pdf" />
               <div class="filename" id="filename-kartu">Belum ada berkas dipilih.</div>
             </div>
             <div class="form-error">Kartu Pelajar / Surat Keterangan Aktif Sekolah wajib diunggah.</div>
@@ -207,8 +207,8 @@ const DAFTAR_TEMPLATE = `
             <label>Surat Delegasi dari Sekolah</label>
             <p class="hint" style="margin-top:-4px;">Surat resmi dari sekolah yang menugaskan/mendelegasikan tim ini mengikuti lomba.</p>
             <div class="upload-field" id="upload-delegasi">
-              <label class="upload-trigger" for="fileDelegasi">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-              <input type="file" id="fileDelegasi" name="fileDelegasi" accept=".jpg,.jpeg,.png,.pdf" />
+              <label class="upload-trigger" for="fileDelegasi">Pilih berkas (foto/PDF, maks 12MB)</label>
+              <input type="file" id="fileDelegasi" name="fileDelegasi" accept="image/*,.pdf" />
               <div class="filename" id="filename-delegasi">Belum ada berkas dipilih.</div>
             </div>
             <div class="form-error">Surat Delegasi dari Sekolah wajib diunggah untuk lomba tim.</div>
@@ -221,8 +221,8 @@ const DAFTAR_TEMPLATE = `
               <div class="field" style="margin-bottom:0;">
                 <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @al.azzaam.id</label>
                 <div class="upload-field" id="upload-ig1">
-                  <label class="upload-trigger" for="fileIg1">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-                  <input type="file" id="fileIg1" name="fileIg1" accept=".jpg,.jpeg,.png,.pdf" />
+                  <label class="upload-trigger" for="fileIg1">Pilih berkas (foto/PDF, maks 12MB)</label>
+                  <input type="file" id="fileIg1" name="fileIg1" accept="image/*,.pdf" />
                   <div class="filename" id="filename-ig1">Belum ada berkas dipilih.</div>
                 </div>
                 <div class="form-error">Screenshot follow @al.azzaam.id wajib diunggah.</div>
@@ -230,8 +230,8 @@ const DAFTAR_TEMPLATE = `
               <div class="field" style="margin-bottom:0;">
                 <label style="font-weight:500;font-size:0.85rem;">Screenshot follow @alifest.26</label>
                 <div class="upload-field" id="upload-ig2">
-                  <label class="upload-trigger" for="fileIg2">Pilih berkas (JPG/PNG/PDF, maks 4MB)</label>
-                  <input type="file" id="fileIg2" name="fileIg2" accept=".jpg,.jpeg,.png,.pdf" />
+                  <label class="upload-trigger" for="fileIg2">Pilih berkas (foto/PDF, maks 12MB)</label>
+                  <input type="file" id="fileIg2" name="fileIg2" accept="image/*,.pdf" />
                   <div class="filename" id="filename-ig2">Belum ada berkas dipilih.</div>
                 </div>
                 <div class="form-error">Screenshot follow @alifest.26 wajib diunggah.</div>
@@ -647,11 +647,11 @@ function initDaftar() {
 
     if (selectedLomba && selectedLomba.tipe === "tim") {
       input.setAttribute("multiple", "multiple");
-      label.textContent = "Pilih berkas (boleh lebih dari satu, JPG/PNG/PDF, maks 4MB/file)";
+      label.textContent = "Pilih berkas (boleh lebih dari satu, foto/PDF, maks 12MB/file)";
       hint.textContent = "Unggah kartu pelajar/surat aktif sekolah SELURUH anggota tim sekaligus dalam satu kali pilih berkas (bisa pilih banyak file) — idealnya sejumlah anggota tim, satu berkas per anggota. Nama file yang tersimpan akan otomatis mencoba menyertakan nama yang tertera di kartu/suratnya (kalau berhasil terbaca), supaya panitia lebih mudah mengenali berkas siapa itu.";
     } else {
       input.removeAttribute("multiple");
-      label.textContent = "Pilih berkas (JPG/PNG/PDF, maks 4MB)";
+      label.textContent = "Pilih berkas (foto/PDF, maks 12MB)";
       hint.textContent = "Unggah salah satu: kartu pelajar, atau surat keterangan aktif sekolah kalau kartu pelajar belum ada.";
     }
   }
@@ -957,7 +957,10 @@ function initDaftar() {
         return;
       }
       const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
-      const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
+      // Terima SEMUA jenis foto (cukup diawali "image/" -- otomatis
+      // mencakup HEIC/HEIF/WEBP/dll, bukan cuma JPG/PNG seperti dulu) atau
+      // PDF -- lihat catatan lengkap di config.js dekat ALLOWED_FILE_TYPES.
+      const typeOk = file.type.indexOf("image/") === 0 || file.type === "application/pdf";
 
       if (!sizeOk) {
         filenameEl.textContent = "Ukuran berkas melebihi " + MAX_FILE_SIZE_MB + "MB. Pilih berkas lain.";
@@ -966,7 +969,7 @@ function initDaftar() {
         return;
       }
       if (!typeOk) {
-        filenameEl.textContent = "Format tidak didukung. Gunakan JPG, PNG, atau PDF.";
+        filenameEl.textContent = "Format tidak didukung. Gunakan foto (JPG/PNG/HEIC/dll) atau PDF.";
         box.classList.remove("has-file");
         input.value = "";
         return;
@@ -994,11 +997,11 @@ function initDaftar() {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const sizeOk = file.size <= MAX_FILE_SIZE_MB * 1024 * 1024;
-        const typeOk = ALLOWED_FILE_TYPES.indexOf(file.type) !== -1;
+        const typeOk = file.type.indexOf("image/") === 0 || file.type === "application/pdf";
         if (!sizeOk || !typeOk) {
           filenameEl.textContent = !sizeOk
             ? ('Berkas "' + file.name + '" melebihi ' + MAX_FILE_SIZE_MB + 'MB. Pilih ulang berkas.')
-            : ('Format "' + file.name + '" tidak didukung. Gunakan JPG, PNG, atau PDF.');
+            : ('Format "' + file.name + '" tidak didukung. Gunakan foto (JPG/PNG/HEIC/dll) atau PDF.');
           box.classList.remove("has-file");
           input.value = "";
           return;
@@ -1032,6 +1035,43 @@ function initDaftar() {
   function ekstensi(file) {
     const bagian = file.name.split(".");
     return bagian.length > 1 ? bagian.pop() : "bin";
+  }
+
+  // Kecilkan otomatis berkas FOTO sebelum diunggah (permintaan panitia --
+  // foto HP modern bisa 3-8MB, itu yang membuat pengunggahan lama/berat di
+  // sinyal lemah). HANYA untuk gambar (PDF dibiarkan apa adanya, tidak bisa
+  // "dikecilkan" lewat canvas) dan hanya kalau berkasnya memang sudah besar
+  // (<400KB dibiarkan apa adanya -- tidak ada untungnya dikompres ulang).
+  // Sisi terpanjang dibatasi 1600px (lebih dari cukup untuk dilihat di
+  // layar/dicetak kecil panitia) lalu dipadatkan ulang jadi JPEG kualitas
+  // 82% lewat `<canvas>` -- biasanya memangkas ukuran 80-90% tanpa terlihat
+  // kasar. Kalau GAGAL dibaca/dikompres (format aneh, dsb) atau hasilnya
+  // malah TIDAK lebih kecil, jatuh balik ke berkas ASLI apa adanya -- proses
+  // ini TIDAK PERNAH menggagalkan pendaftaran gara-gara kompresi gagal.
+  function kecilkanGambarJikaPerlu(file) {
+    if (!file || file.type.indexOf("image/") !== 0 || file.size < 400 * 1024) {
+      return Promise.resolve(file);
+    }
+    return new Promise(function (resolve) {
+      const img = new Image();
+      const urlSementara = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(urlSementara);
+        const MAKS_SISI = 1600;
+        const skala = Math.min(1, MAKS_SISI / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.round(img.naturalWidth * skala), h = Math.round(img.naturalHeight * skala);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob(function (blob) {
+          if (!blob || blob.size >= file.size) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+        }, "image/jpeg", 0.82);
+      };
+      img.onerror = function () { URL.revokeObjectURL(urlSementara); resolve(file); };
+      img.src = urlSementara;
+    });
   }
 
   // Nama tim dijadikan bagian dari nama file yang tersimpan di Storage,
@@ -1168,6 +1208,7 @@ function initDaftar() {
   }
 
   async function uploadKeStorage(file, label) {
+    file = await kecilkanGambarJikaPerlu(file);
     const path = "sementara/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensi(file);
     const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
       contentType: file.type,
