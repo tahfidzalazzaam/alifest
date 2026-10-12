@@ -1690,24 +1690,28 @@ async function loadTabNotifWaBazar() {
 }
 
 /* ==================== POSTER REKAP PENDAFTAR STAND (tab "Data Tenant") ====================
-   SENGAJA dibuat tema & tata letak yang BERBEDA dari poster rekap Lomba
-   (`gambarPosterRekap()` di view-admin.js) -- bukan cuma ganti warna, supaya
-   dua poster itu tidak terlihat seperti template yang sama diganti teks:
-     - Ukuran kanvas 1080x1350px (rasio 4:5, standar portrait Instagram) --
-       poster Lomba memakai 1200x1800px (rasio 2:3/"6:9"), jadi ukurannya
-       pun SENGAJA beda, bukan cuma temanya.
-     - Header gradasi TERAKOTA/JINGGA (bukan hijau) dengan motif "atap tenda
-       pasar" bergelombang (scalloped) di tepi bawahnya -- bukan bendera
-       bunting segitiga seperti punya Lomba.
-     - Logo ditaruh DI DALAM kartu putih bulat (badge), bukan langsung di
-       atas warna header apa adanya seperti punya Lomba.
-     - Pita ajakan "SEWA STAND SEKARANG" ditaruh miring di pojok KIRI ATAS
-       warna TEAL (bukan merah di kanan atas seperti punya Lomba).
-     - Kartu per JENIS STAND (A/B/C, bukan per cabang lomba) menampilkan
-       mini "peta petak" -- deretan kotak kecil yang mewakili tiap stand di
-       jenis itu (terisi = warna solid, kosong = garis putus-putus) -- ganti
-       total dari pola pil jenjang/gender milik Lomba (bazar tidak punya
-       jenjang/gender).
+   Desain "Editorial Gelap, Meriah" -- redesain total atas permintaan user
+   (desain lama berupa header terakota terang dengan badge logo bulat & mini
+   peta petak per stand sudah DIBUANG). SENGAJA dibuat beda total dari poster
+   rekap Lomba (`gambarPosterRekap()` di view-admin.js), dan beda total juga
+   dari poster Bazar versi sebelumnya:
+     - Latar GELAP gradasi radial coklat-kehitaman (bukan krem terang) dengan
+       bingkai garis emas tipis berlapis di tepi atas & bawah, ditaburi
+       lentera (🏮) & bintang (✦) kecil bertema pasar malam -- bukan konfeti
+       emoji pasar siang seperti versi lama.
+     - Logo PNG FLAT, TANPA badge/latar bulat apa pun (langsung di atas latar
+       gelap) -- user eksplisit minta "logo png saja tanpa background bulat",
+       beda dari versi lama yang menaruh logo di dalam badge kartu putih
+       bundar (lihat histori di git log kalau perlu bandingkan).
+     - Judul gradasi emas-jingga + pita miring "STAND TERUS BERTAMBAH!" warna
+       merah sebagai aksen meriah (ganti pita teal "SEWA STAND SEKARANG" di
+       pojok kiri atas versi lama).
+     - Angka TOTAL pendaftar besar dengan efek glow emas, rata kanan atas --
+       bukan di footer kecil seperti versi lama.
+     - Baris per JENIS STAND (A/B/C) menampilkan ikon + nama + angka
+       terpakai/total + progress bar gradasi warna jenis -- TIDAK ADA lagi
+       mini "peta petak" kotak-kotak kecil (user eksplisit minta "kotak
+       stand tidak perlu tampil").
    Helper global yang DIPAKAI ULANG dari view-admin.js (file itu dimuat
    lebih dulu di index.html, berbagi satu scope global yang sama -- lihat
    catatan panjang soal ini di seluruh proyek): `bukaModal()`, `kotakBulat()`,
@@ -1723,42 +1727,21 @@ const POSTER_BAZAR_TINGGI_PX = 1350;
 // dibedakan (`_POSTER` di sini) karena berbagi scope global yang sama.
 const WARNA_JENIS_POSTER = { A: "#e08a2e", B: "#3f7fb0", C: "#d1588f" };
 
-// Emoji bertema pasar/belanja untuk taburan dekoratif header -- pengganti
-// confetti bintang milik poster Lomba, posisinya TETAP (bukan acak) supaya
-// poster yang sama selalu identik tiap digambar ulang.
+// Taburan lentera (🏮) & bintang (✦) kecil bertema pasar malam di latar
+// gelap -- pengganti konfeti emoji pasar siang milik versi lama. Posisi
+// TETAP (bukan acak) supaya poster yang sama selalu identik tiap digambar
+// ulang.
 const KONFETI_HEADER_BAZAR = [
-  { x: 110, y: 95, e: "🏮", s: 34, o: 0.8 },
-  { x: 70, y: 230, e: "🛍️", s: 30, o: 0.75 },
-  { x: 150, y: 370, e: "🏷️", s: 28, o: 0.7 },
-  { x: 85, y: 500, e: "🧺", s: 30, o: 0.7 },
-  { x: 965, y: 95, e: "🛒", s: 32, o: 0.8 },
-  { x: 1000, y: 230, e: "🏷️", s: 26, o: 0.7 },
-  { x: 935, y: 370, e: "🏮", s: 30, o: 0.75 },
-  { x: 995, y: 500, e: "🛍️", s: 26, o: 0.7 }
+  { x: 950, y: 90, e: "🏮", s: 42, o: 0.9 },
+  { x: 870, y: 190, e: "✦", s: 22, o: 0.7, c: "#e0a44e" },
+  { x: 1000, y: 260, e: "🏮", s: 30, o: 0.7 },
+  { x: 930, y: 330, e: "✦", s: 16, o: 0.6, c: "#e06aa8" },
+  { x: 60, y: 520, e: "✦", s: 20, o: 0.55, c: "#4a9ad4" },
+  { x: 1010, y: 600, e: "✦", s: 18, o: 0.5, c: "#e0a44e" },
+  { x: 40, y: 780, e: "✦", s: 24, o: 0.5, c: "#e06aa8" },
+  { x: 1020, y: 900, e: "✦", s: 16, o: 0.45, c: "#4a9ad4" },
+  { x: 50, y: 1030, e: "✦", s: 20, o: 0.5, c: "#e0a44e" }
 ];
-
-// Motif "atap tenda pasar" bergelombang (scalloped) di tepi bawah header --
-// pengganti bendera bunting segitiga milik poster Lomba (`gambarBuntingAtas`
-// di view-admin.js), nama fungsi SENGAJA berbeda total.
-function gambarAtapTendaPasar(ctx, W, yDasar) {
-  ctx.save();
-  const lebarTenda = 72;
-  const tinggiTenda = 30;
-  let x = -lebarTenda / 2;
-  let i = 0;
-  const warnaTenda = ["#fff3e0", "#ffe0b2"];
-  while (x < W + lebarTenda) {
-    ctx.fillStyle = warnaTenda[i % 2];
-    ctx.beginPath();
-    ctx.moveTo(x, yDasar);
-    ctx.quadraticCurveTo(x + lebarTenda / 2, yDasar + tinggiTenda, x + lebarTenda, yDasar);
-    ctx.closePath();
-    ctx.fill();
-    x += lebarTenda;
-    i++;
-  }
-  ctx.restore();
-}
 
 function gambarKonfetiHeaderBazar(ctx) {
   ctx.save();
@@ -1766,40 +1749,39 @@ function gambarKonfetiHeaderBazar(ctx) {
   ctx.textBaseline = "middle";
   KONFETI_HEADER_BAZAR.forEach(function (k) {
     ctx.globalAlpha = k.o;
-    ctx.font = k.s + "px sans-serif";
+    if (k.e === "✦") {
+      ctx.fillStyle = k.c || "#e0a44e";
+      ctx.font = "900 " + k.s + "px sans-serif";
+    } else {
+      ctx.fillStyle = "#000000"; // tidak dipakai (emoji berwarna sendiri), cuma biar fillStyle konsisten
+      ctx.font = k.s + "px sans-serif";
+    }
     ctx.fillText(k.e, k.x, k.y);
   });
   ctx.restore();
 }
 
-// Pita ajakan "Sewa Stand Sekarang" -- miring di pojok KIRI ATAS, warna
-// teal (beda posisi & warna dari pita CTA merah-kanan-atas milik Lomba).
+// Pita miring "STAND TERUS BERTAMBAH!" -- aksen meriah di bawah judul,
+// ganti total dari pita CTA teal "SEWA STAND SEKARANG" pojok-kiri-atas
+// milik versi lama.
 function gambarPitaCTAPosterBazar(ctx) {
   ctx.save();
-  const cx = 150, cy = 150;
-  ctx.translate(cx, cy);
-  ctx.rotate(-18 * Math.PI / 180);
-  ctx.shadowColor = "rgba(0,0,0,0.25)";
-  ctx.shadowBlur = 14;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle = "#0e8a7d";
-  kotakBulat(ctx, -165, -56, 330, 112, 16);
+  ctx.translate(90, 430);
+  ctx.rotate(-3 * Math.PI / 180);
+  ctx.fillStyle = "#c23b3b";
+  kotakBulat(ctx, 0, 0, 340, 54, 27);
   ctx.fill();
-  ctx.shadowColor = "transparent";
   ctx.fillStyle = "#ffffff";
+  ctx.font = "800 21px 'Outfit', sans-serif";
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "800 30px 'Outfit', sans-serif";
-  ctx.fillText("SEWA STAND", 0, -16);
-  ctx.font = "800 34px 'Outfit', sans-serif";
-  ctx.fillStyle = "#ffe14d";
-  ctx.fillText("SEKARANG! 🏷️", 0, 24);
+  ctx.fillText("🎉 STAND TERUS BERTAMBAH!", 170, 34);
   ctx.restore();
 }
 
 // Hitung rekap per jenis stand (A/B/C) dari baris `bazar_tenant` (jumlah
-// pendaftar) + baris `bazar_stand` (total & terpakai per jenis, buat mini
-// peta petak di kartu).
+// pendaftar) + baris `bazar_stand` (total & terpakai per jenis). `kodeList`
+// tetap disimpan untuk kompatibilitas pemanggil lain yang mungkin
+// memakainya, walau poster sendiri sudah tidak menggambar mini peta petak.
 function hitungRekapUntukPosterBazar(standRows, tenantRows) {
   const perJenis = {};
   (standRows || []).forEach(function (s) {
@@ -1816,150 +1798,160 @@ function gambarPosterRekapBazar(canvas, logoImg, jenisStandInfo, perJenis, total
   canvas.height = POSTER_BAZAR_TINGGI_PX;
   const ctx = canvas.getContext("2d");
   const W = POSTER_BAZAR_LEBAR_PX, H = POSTER_BAZAR_TINGGI_PX;
-  const marginX = 60;
+  const marginX = 90;
 
-  // -------- Latar krem hangat + header gradasi terakota/jingga --------
-  const tinggiHeader = 470;
-  ctx.fillStyle = "#fffaf3";
+  // -------- Latar gradasi gelap (bukan solid rata, biar lebih hidup) --------
+  const bgGrad = ctx.createRadialGradient(W * 0.75, H * 0.08, 80, W * 0.5, H * 0.4, 1100);
+  bgGrad.addColorStop(0, "#2a1d14");
+  bgGrad.addColorStop(1, "#17100b");
+  ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, W, H);
-  const gradAtas = ctx.createLinearGradient(0, 0, 0, tinggiHeader);
-  gradAtas.addColorStop(0, "#c45a1f");
-  gradAtas.addColorStop(1, "#e08a2e");
-  ctx.fillStyle = gradAtas;
-  ctx.fillRect(0, 0, W, tinggiHeader);
+
+  // -------- Bingkai dekor garis emas ganda di tepi atas & bawah --------
+  ["top", "bottom"].forEach(function (pos) {
+    const baseY = pos === "top" ? 0 : H;
+    const dir = pos === "top" ? 1 : -1;
+    for (let i = 0; i < 4; i++) {
+      ctx.strokeStyle = "rgba(224,164,78," + (0.5 - i * 0.1) + ")";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, baseY + dir * (14 + i * 7));
+      ctx.lineTo(W, baseY + dir * (14 + i * 7));
+      ctx.stroke();
+    }
+  });
 
   gambarKonfetiHeaderBazar(ctx);
 
-  // -------- Logo dalam badge kartu putih bundar (BEDA dari Lomba yang
-  // taruh logo langsung di atas warna header apa adanya) --------
-  ctx.textAlign = "center";
-  const badgeR = 150;
-  const badgeCx = W / 2, badgeCy = 250;
+  // Lentera besar dekor pojok kanan bawah -- sangat tipis (opacity rendah)
+  // & SENGAJA ditaruh di pojok kanan-bawah (bukan kiri-bawah) supaya tidak
+  // pernah menimpa kartu jenis stand terakhir maupun teks footer.
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.2)";
-  ctx.shadowBlur = 20;
-  ctx.shadowOffsetY = 8;
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(badgeCx, badgeCy, badgeR, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.globalAlpha = 0.08;
+  ctx.font = "260px sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("🏮", W + 70, H + 50);
   ctx.restore();
 
-  const logoSize = badgeR * 1.55;
+  // -------- Logo PNG FLAT, TANPA badge/latar bulat (sesuai permintaan) -----
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  const logoMaxW = 150, logoMaxH = 150, logoCx = 120, logoCy = 150;
   if (logoImg) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(badgeCx, badgeCy, badgeR - 14, 0, Math.PI * 2);
-    ctx.clip();
-    const skala = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
+    const skala = Math.min(logoMaxW / logoImg.width, logoMaxH / logoImg.height);
     const lw = logoImg.width * skala, lh = logoImg.height * skala;
-    ctx.drawImage(logoImg, badgeCx - lw / 2, badgeCy - lh / 2, lw, lh);
-    ctx.restore();
+    ctx.drawImage(logoImg, logoCx - lw / 2, logoCy - lh / 2, lw, lh);
   } else {
-    ctx.fillStyle = "#e08a2e";
-    ctx.font = (badgeR * 1.1) + "px sans-serif";
+    ctx.save();
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("🏪", badgeCx, badgeCy + 8);
+    ctx.fillStyle = "#e0a44e";
+    ctx.font = "84px sans-serif";
+    ctx.fillText("🏪", logoCx, logoCy + 8);
+    ctx.restore();
   }
 
   // -------- Judul --------
-  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#f3e6d3";
+  ctx.font = "700 22px 'Outfit', sans-serif";
+  ctx.fillText("✦ ALIF 5.0 · AL AZZAAM ISLAMIC FAIR ✦", 90, 240);
+  ctx.font = "900 60px 'Outfit', sans-serif";
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 54px 'Outfit', sans-serif";
-  ctx.fillText("BAZAR ALIF 5.0", W / 2, 420);
-  ctx.font = "600 25px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar Stand", W / 2, 452);
+  ctx.fillText("Rekap Pendaftar", 90, 312);
+  const gradTeks = ctx.createLinearGradient(90, 0, 520, 0);
+  gradTeks.addColorStop(0, "#f3c26b");
+  gradTeks.addColorStop(1, "#e0804e");
+  ctx.fillStyle = gradTeks;
+  ctx.fillText("Stand Bazar 🎪", 90, 382);
 
-  gambarAtapTendaPasar(ctx, W, tinggiHeader + 10);
   gambarPitaCTAPosterBazar(ctx);
 
-  // -------- Kartu per jenis stand (A/B/C) --------
+  // -------- Angka total dengan GLOW emas di belakangnya --------
+  ctx.save();
+  ctx.shadowColor = "rgba(224,164,78,0.65)";
+  ctx.shadowBlur = 55;
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#e0a44e";
+  ctx.font = "900 260px 'Outfit', sans-serif";
+  ctx.fillText(String(totalPendaftar), W - 90, 700);
+  ctx.restore();
+  ctx.textAlign = "right";
+  ctx.font = "800 30px 'Outfit', sans-serif";
+  ctx.fillStyle = "#f3e6d3";
+  ctx.fillText("✦ PENDAFTAR STAND ✦", W - 90, 745);
+
+  // -------- Garis pemisah gradasi (bukan solid polos) --------
+  const gradGaris = ctx.createLinearGradient(90, 0, W - 90, 0);
+  gradGaris.addColorStop(0, "rgba(224,164,78,0)");
+  gradGaris.addColorStop(0.5, "rgba(224,164,78,0.6)");
+  gradGaris.addColorStop(1, "rgba(224,164,78,0)");
+  ctx.strokeStyle = gradGaris;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(90, 800);
+  ctx.lineTo(W - 90, 800);
+  ctx.stroke();
+
+  // -------- Baris per jenis stand (A/B/C) -- ikon + angka + progress bar
+  // gradasi warna jenis, TANPA mini peta petak kotak-kotak (dibuang sesuai
+  // permintaan user) --------
   const URUTAN_JENIS_POSTER = ["A", "B", "C"];
   const daftarJenis = URUTAN_JENIS_POSTER.filter(function (j) { return jenisStandInfo[j]; });
-  const atasKartu = tinggiHeader + 56;
-  const bawahKartu = H - 110;
-  const celahKartu = 16;
-  const tinggiTiapKartu = Math.floor((bawahKartu - atasKartu) / Math.max(daftarJenis.length, 1)) - celahKartu;
+  const ikonJenis = { A: "🏪", B: "🛍️", C: "🧺" };
+  // Jarak antar-baris TETAP 150px (bukan dihitung dinamis dari sisa ruang) --
+  // itu jarak yang sudah diverifikasi pas di sampel yang disetujui user.
+  // `URUTAN_JENIS_POSTER` di atas selalu cuma A/B/C (3 jenis, hardcode),
+  // jadi 3 baris x150px selalu muat di tinggi kanvas 1350px.
+  const tinggiBaris = 150;
 
-  let y = atasKartu;
-  ctx.textAlign = "left";
-
+  let y = 870;
   daftarJenis.forEach(function (j) {
     const info = jenisStandInfo[j] || {};
-    const d = perJenis[j] || { total: 0, terpakai: 0, kodeList: [] };
+    const d = perJenis[j] || { total: 0, terpakai: 0 };
     const warna = WARNA_JENIS_POSTER[j] || "#777777";
 
-    ctx.save();
-    ctx.shadowColor = "rgba(90, 50, 10, 0.12)";
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 6;
-    ctx.fillStyle = "#ffffff";
-    kotakBulat(ctx, marginX, y, W - marginX * 2, tinggiTiapKartu, 20);
-    ctx.fill();
-    ctx.restore();
-
-    // Garis aksen warna jenis di sisi kiri kartu.
+    ctx.textAlign = "left";
+    ctx.font = "44px sans-serif";
+    ctx.fillText(ikonJenis[j] || "🏪", 90, y + 16);
     ctx.fillStyle = warna;
-    kotakBulat(ctx, marginX, y, 10, tinggiTiapKartu, 5);
-    ctx.fill();
-
-    const padKiri = marginX + 32;
-    let ty = y + 42;
-
-    ctx.fillStyle = "#3a2a16";
-    ctx.font = "700 32px 'Outfit', sans-serif";
-    ctx.fillText("🏪 Jenis " + j + " — " + (info.nama || ("Jenis " + j)), padKiri, ty);
+    ctx.font = "800 38px 'Outfit', sans-serif";
+    ctx.fillText("Jenis " + j + " — " + (info.nama || ("Jenis " + j)), 150, y);
 
     ctx.textAlign = "right";
-    ctx.fillStyle = warna;
-    ctx.font = "800 36px 'Outfit', sans-serif";
-    ctx.fillText(d.terpakai + "/" + d.total, W - marginX - 30, ty);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 44px 'Outfit', sans-serif";
+    ctx.fillText(d.terpakai + "/" + d.total, W - 90, y);
+
+    const barY = y + 24, barW = W - 240;
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    kotakBulat(ctx, 150, barY, barW, 12, 6);
+    ctx.fill();
+    const proporsi = d.total > 0 ? Math.min(1, d.terpakai / d.total) : 0;
+    if (proporsi > 0) {
+      const gradBar = ctx.createLinearGradient(150, 0, 150 + barW, 0);
+      gradBar.addColorStop(0, warna);
+      gradBar.addColorStop(1, "#f3e6d3");
+      ctx.fillStyle = gradBar;
+      kotakBulat(ctx, 150, barY, barW * proporsi, 12, 6);
+      ctx.fill();
+    }
+
     ctx.textAlign = "left";
+    ctx.font = "500 20px 'Plus Jakarta Sans', sans-serif";
+    ctx.fillStyle = "#9a8a76";
+    ctx.fillText((info.ukuran || "-") + " · Rp" + Number(info.harga || 0).toLocaleString("id-ID"), 150, barY + 46);
 
-    ty += 34;
-    ctx.fillStyle = "#6b5a46";
-    ctx.font = "500 23px 'Plus Jakarta Sans', sans-serif";
-    ctx.fillText((info.ukuran || "-") + " · Rp" + Number(info.harga || 0).toLocaleString("id-ID") + " · Terisi " + d.terpakai + " dari " + d.total + " stand", padKiri, ty);
-
-    // -------- Mini "peta petak": satu kotak kecil per stand, terisi =
-    // warna solid, kosong = garis putus-putus -- gambaran cepat okupansi
-    // tanpa perlu buka denah penuh.
-    ty += 24;
-    const kotakSisi = 26, celahKotak = 7;
-    const kotakPerBaris = Math.max(1, Math.floor((W - marginX * 2 - padKiri + marginX) / (kotakSisi + celahKotak)));
-    d.kodeList.forEach(function (terisi, idx) {
-      const bx = padKiri + (idx % kotakPerBaris) * (kotakSisi + celahKotak);
-      const by = ty + Math.floor(idx / kotakPerBaris) * (kotakSisi + celahKotak);
-      if (by + kotakSisi > y + tinggiTiapKartu - 10) return; // kehabisan ruang kartu, sisanya cukup diwakili angka di atas
-      if (terisi) {
-        ctx.fillStyle = warna;
-        kotakBulat(ctx, bx, by, kotakSisi, kotakSisi, 5);
-        ctx.fill();
-      } else {
-        ctx.save();
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = warna;
-        ctx.globalAlpha = 0.45;
-        ctx.lineWidth = 1.6;
-        kotakBulat(ctx, bx, by, kotakSisi, kotakSisi, 5);
-        ctx.stroke();
-        ctx.restore();
-      }
-    });
-
-    y += tinggiTiapKartu + celahKartu;
+    y += tinggiBaris;
   });
 
   // -------- Footer --------
   ctx.textAlign = "center";
-  ctx.fillStyle = "#c45a1f";
-  ctx.font = "800 40px 'Outfit', sans-serif";
-  ctx.fillText("Total Pendaftar Stand: " + totalPendaftar, W / 2, H - 76);
-
+  ctx.fillStyle = "#b39a78";
+  ctx.font = "500 22px 'Plus Jakarta Sans', sans-serif";
   const tanggalCetak = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-  ctx.fillStyle = "#8a7a63";
-  ctx.font = "500 20px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 38);
+  ctx.fillText("✦ Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam ✦", W / 2, H - 50);
 }
 
 function buatCaptionPosterRekapBazar(jenisStandInfo, perJenis, totalPendaftar) {
