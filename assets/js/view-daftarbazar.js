@@ -369,7 +369,7 @@ function initDaftarBazar() {
 
   let jenisStandInfo = {};
   let denahBackgroundUrl = null;
-  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, direservasi_oleh, direservasi_sampai, pos_x, pos_y, lebar, tinggi, rotasi}
+  let standList = []; // semua baris bazar_stand: {id, jenis, area, nomor, kode, tenant_id, milik_panitia, direservasi_oleh, direservasi_sampai, pos_x, pos_y, lebar, tinggi, rotasi}
   let elemenList = []; // label konteks denah (Masjid/Sekretariat PSB/Asrama dkk) -- murni visual, read-only di sini
   let jenisTerpilih = null;
   // Jumlah stand yang dipesan -- ditentukan di Langkah 2 bareng jenisnya,
@@ -560,7 +560,11 @@ function initDaftarBazar() {
   function renderJenisChoices() {
     jenisChoicesEl.innerHTML = URUTAN_JENIS_STAND.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
       const info = jenisStandInfo[j];
-      const standJenisIni = standList.filter(function (s) { return s.jenis === j; });
+      // Stand "milik panitia" (migrasi 0049) dikeluarkan dari hitungan "dari
+      // N stand" di sini -- bukan bagian pool pendaftaran publik, tidak
+      // boleh ikut membuat jenis ini tampak lebih penuh dari yang
+      // sebenarnya tersedia untuk didaftar.
+      const standJenisIni = standList.filter(function (s) { return s.jenis === j && !s.milik_panitia; });
       const terpakai = standJenisIni.filter(function (s) { return !!s.tenant_id; }).length;
       const penuh = standJenisIni.length > 0 && terpakai === standJenisIni.length;
       return (
@@ -616,7 +620,7 @@ function initDaftarBazar() {
     // jenis, bukan ikut memperhitungkan reservasi sementara orang lain
     // (itu soal lain, dicek ulang di Langkah 3 & saat submit_bazar()).
     // Dibatasi maksimal 20 per pesanan supaya tetap wajar.
-    const tersedia = standList.filter(function (s) { return s.jenis === jenisTerpilih && !s.tenant_id; }).length;
+    const tersedia = standList.filter(function (s) { return s.jenis === jenisTerpilih && !s.tenant_id && !s.milik_panitia; }).length;
     jumlahMaksStepperBazar = Math.max(1, Math.min(tersedia, 20));
     if (jumlahDipesan > jumlahMaksStepperBazar) jumlahDipesan = jumlahMaksStepperBazar;
 
@@ -845,9 +849,12 @@ function initDaftarBazar() {
         kode: s.kode, jenis: s.jenis,
         x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
         w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
-        terisi: !!s.tenant_id,
+        // Stand "milik panitia" (migrasi 0049) ditampilkan SAMA seperti
+        // stand terisi di denah publik -- publik tidak perlu tahu alasannya,
+        // cukup tahu stand itu tidak bisa dipilih.
+        terisi: !!s.tenant_id || !!s.milik_panitia,
         direservasiOrangLain: direservasiOrangLain,
-        selectable: s.jenis === jenisTerpilih && !s.tenant_id && !direservasiOrangLain
+        selectable: s.jenis === jenisTerpilih && !s.tenant_id && !s.milik_panitia && !direservasiOrangLain
       });
       innerEl.appendChild(el);
       kotakStandElMap[s.kode] = el;
@@ -905,7 +912,7 @@ function initDaftarBazar() {
   async function muatPengaturanBazar() {
     const [{ data: settings }, { data: standData }, { data: elemenData }] = await Promise.all([
       supabaseClient.from("bazar_settings").select("pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening,denah_background_url").eq("id", 1).single(),
-      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,direservasi_oleh,direservasi_sampai,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
+      supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,milik_panitia,direservasi_oleh,direservasi_sampai,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("nomor"),
       supabaseClient.from("bazar_denah_elemen").select("*").order("urutan")
     ]);
 
@@ -915,7 +922,10 @@ function initDaftarBazar() {
     denahBackgroundUrl = (settings && settings.denah_background_url) || null;
     standList = standData || [];
     elemenList = elemenData || [];
-    const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
+    // Stand "milik panitia" dihitung SAMA seperti terisi untuk deteksi
+    // "sudah penuh semua" ini -- kalau sisanya cuma stand milik panitia,
+    // halaman ini memang seharusnya menganggap pendaftaran sudah penuh.
+    const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id || !!s.milik_panitia; });
 
     renderJenisChoices();
 
@@ -1565,7 +1575,7 @@ function initDaftarBazar() {
       // sebelum refresh.
       const kodeValid = kodeDisimpan.filter(function (kode) {
         const s = standList.find(function (x) { return x.kode === kode; });
-        return !!s && s.jenis === jenisTerpilih && !s.tenant_id;
+        return !!s && s.jenis === jenisTerpilih && !s.tenant_id && !s.milik_panitia;
       });
       if (kodeValid.length > 0 && kodeValid.length === jumlahDipesan && (Number(_draftBazarAwal.currentStep) || 1) >= 3) {
         kodeTerpilihSet = new Set(kodeValid);
