@@ -707,15 +707,25 @@ async function loadTabPendaftar() {
 
   /* -------- Rekap kartu (jumlah per lomba + jenis kelamin) --------
      Ditampilkan sebagai "terisi/kapasitas" per jenjang & gender (bukan
-     angka kuota yang sudah dibagi begitu saja) supaya tidak ambigu. */
+     angka kuota yang sudah dibagi begitu saja) supaya tidak ambigu.
+
+     Pendaftar berstatus "Ditolak" SENGAJA TIDAK ikut dihitung di sini --
+     pendaftar yang sudah ditolak tidak lagi dianggap mengisi slot/kuota,
+     jadi kartu rekap (dan kartu "KUOTA PENUH" yang dihitung dari totalnya)
+     tidak boleh ikut menghitungnya. `rows` yang sebenarnya (tanpa difilter)
+     tetap dipakai apa adanya untuk tabel pendaftar & unduhan XLSX di bawah --
+     admin tetap perlu melihat/mengunduh baris yang ditolak, cuma tidak ikut
+     masuk hitungan rekap. */
   function renderRekap() {
     const rekapEl = document.getElementById("rekap-grid");
     if (!rekapEl) return;
 
+    const rowsRekap = rows.filter(function (r) { return r.status !== "Ditolak"; });
+
     const perLomba = {};
     rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0, perJenjang: {} }; });
     let totalL = 0, totalP = 0;
-    rows.forEach(function (r) {
+    rowsRekap.forEach(function (r) {
       const d = perLomba[r.lomba_id];
       if (d) {
         d.total++;
@@ -731,7 +741,7 @@ async function loadTabPendaftar() {
 
     let html = '<div class="rekap-card' + (lombaFilter === "" ? " is-active" : "") + '" data-lomba="">' +
       '<div class="rekap-card__label">Semua Lomba</div>' +
-      '<div class="rekap-card__total">' + rows.length + '</div>' +
+      '<div class="rekap-card__total">' + rowsRekap.length + '</div>' +
       '<div class="rekap-card__gender"><span class="rekap-chip">L: ' + totalL + ' · P: ' + totalP + '</span></div>' +
     '</div>';
 
@@ -1199,12 +1209,15 @@ const POSTER_TINGGI_PX = 1800;
 // Hitung ulang rekap per lomba (total, laki-laki/perempuan, per jenjang) --
 // SENGAJA dihitung terpisah dari renderRekap() (bukan dipakai bersama)
 // supaya perubahan di salah satu fungsi tidak berisiko mematahkan fungsi
-// lain; keduanya memakai data `rows`/`rules` yang sama jadi hasilnya selalu
-// konsisten dengan kartu rekap yang terlihat di atas tabel.
+// lain; keduanya memakai data `rows`/`rules` yang sama (dan SAMA-SAMA
+// membuang baris berstatus "Ditolak" sebelum menghitung -- lihat komentar
+// di renderRekap() untuk alasannya) jadi hasilnya selalu konsisten dengan
+// kartu rekap yang terlihat di atas tabel.
 function hitungRekapUntukPoster(rules, rows) {
+  const rowsRekap = (rows || []).filter(function (r) { return r.status !== "Ditolak"; });
   const perLomba = {};
   rules.forEach(function (r) { perLomba[r.id] = { total: 0, l: 0, p: 0, perJenjang: {} }; });
-  rows.forEach(function (r) {
+  rowsRekap.forEach(function (r) {
     const d = perLomba[r.lomba_id];
     if (!d) return;
     d.total++;
@@ -1214,7 +1227,7 @@ function hitungRekapUntukPoster(rules, rows) {
     if (r.jenis_kelamin === "laki-laki") d.perJenjang[r.jenjang].l++;
     else if (r.jenis_kelamin === "perempuan") d.perJenjang[r.jenjang].p++;
   });
-  return { perLomba: perLomba, totalPendaftar: rows.length };
+  return { perLomba: perLomba, totalPendaftar: rowsRekap.length };
 }
 
 // Rounded-rect kompatibel browser lama yang belum punya ctx.roundRect bawaan.
@@ -1570,24 +1583,33 @@ async function bukaPosterRekap(rules, rows) {
     '<p class="hint">Memuat logo & menyiapkan poster...</p>'
   );
 
-  const { perLomba, totalPendaftar } = hitungRekapUntukPoster(rules, rows);
-  const { data: settingsData } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
-  const logoUrl = settingsData ? settingsData.logo_url : null;
+  // Seluruh proses dibungkus try/catch -- SEBELUMNYA kalau ADA SAJA langkah
+  // di bawah yang gagal/macet TANPA tertangkap (mis. query `site_settings`
+  // error, atau logo macet dimuat tanpa pernah memicu timeout/onerror-nya
+  // sendiri), popup akan diam selamanya di pesan "Memuat logo..." di atas
+  // TANPA pemberitahuan apa pun ke panitia (persis keluhan "diklik tapi
+  // macet, tidak terjadi apa-apa"). Sekarang begitu ada error apa pun,
+  // popup diganti pesan gagal + tombol "Coba Lagi" (bukan macet selamanya).
+  try {
+    const { perLomba, totalPendaftar } = hitungRekapUntukPoster(rules, rows);
+    const { data: settingsData, error: errSettings } = await supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single();
+    if (errSettings) console.warn("Gagal memuat site_settings untuk poster (dilanjutkan tanpa logo):", errSettings);
+    const logoUrl = settingsData ? settingsData.logo_url : null;
 
-  let logoImg = null;
-  if (logoUrl) {
-    try { logoImg = await muatGambar(logoUrl); }
-    catch (e) { console.warn("Logo situs gagal dimuat untuk poster, dipakai ikon bulan sebagai gantinya:", e); }
-  }
+    let logoImg = null;
+    if (logoUrl) {
+      try { logoImg = await muatGambar(logoUrl); }
+      catch (e) { console.warn("Logo situs gagal dimuat untuk poster, dipakai ikon bulan sebagai gantinya:", e); }
+    }
 
-  const caption = buatCaptionPosterRekap(rules, perLomba, totalPendaftar);
+    const caption = buatCaptionPosterRekap(rules, perLomba, totalPendaftar);
 
-  const overlay = document.getElementById("modal-overlay");
-  if (!overlay || overlay.style.display === "none") {
-    return; // modal sudah ditutup (mis. diklik di luar kotak) sebelum logo selesai dimuat
-  }
+    const overlay = document.getElementById("modal-overlay");
+    if (!overlay || overlay.style.display === "none") {
+      return; // modal sudah ditutup (mis. diklik di luar kotak) sebelum logo selesai dimuat
+    }
 
-  bukaModal(
+    bukaModal(
     "🖼️ Poster Rekap Pendaftar",
     '<p class="hint">Rasio 2:3 (setara "6:9"), resolusi ' + POSTER_LEBAR_PX + '×' + POSTER_TINGGI_PX + 'px — cukup tajam untuk diunggah ke Instagram/WhatsApp. Angkanya otomatis dari data "Data Pendaftar" saat ini.</p>' +
     '<div class="poster-rekap-preview-wrap">' +
@@ -1650,6 +1672,20 @@ async function bukaPosterRekap(rules, rows) {
     }
     setTimeout(function () { statusEl.textContent = ""; }, 3500);
   });
+  } catch (err) {
+    console.error("Poster Rekap gagal dibuat:", err);
+    const overlayGagal = document.getElementById("modal-overlay");
+    if (!overlayGagal || overlayGagal.style.display === "none") return; // sudah ditutup duluan
+    bukaModal(
+      "🖼️ Poster Rekap Pendaftar",
+      '<p>Gagal menyiapkan poster: ' + escapeHTML((err && err.message) || String(err)) + '</p>' +
+      '<p class="hint">Coba lagi -- biasanya ini karena koneksi lambat/putus sesaat saat memuat logo situs.</p>' +
+      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-coba-lagi-poster">🔄 Coba Lagi</button></div>'
+    );
+    document.getElementById("btn-coba-lagi-poster").addEventListener("click", function () {
+      bukaPosterRekap(rules, rows);
+    });
+  }
 }
 
 /* ==================== TAB 2: KELOLA LOMBA ==================== */
@@ -2237,12 +2273,19 @@ async function pastikanLibKartu() {
   libKartuSiap = true;
 }
 
-function muatGambar(url) {
+// `timeoutMs` (default 8 detik) -- jaga-jaga kalau `url`-nya macet dimuat
+// (jaringan lambat/putus di tengah, atau gagal tanpa pernah memicu
+// `onerror`-nya sendiri sama sekali) supaya pemanggil (mis. Poster Rekap)
+// TIDAK macet selamanya menunggu, melainkan lanjut pakai gambar pengganti.
+function muatGambar(url, timeoutMs) {
   return new Promise(function (resolve, reject) {
     const img = new Image();
     img.crossOrigin = "anonymous";
-    img.onload = function () { resolve(img); };
-    img.onerror = function () { reject(new Error("Gagal memuat gambar template.")); };
+    const batasWaktu = setTimeout(function () {
+      reject(new Error("Waktu memuat gambar habis (jaringan lambat/macet)."));
+    }, timeoutMs || 8000);
+    img.onload = function () { clearTimeout(batasWaktu); resolve(img); };
+    img.onerror = function () { clearTimeout(batasWaktu); reject(new Error("Gagal memuat gambar template.")); };
     img.src = url;
   });
 }
