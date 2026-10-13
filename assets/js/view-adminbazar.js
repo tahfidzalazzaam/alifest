@@ -315,6 +315,215 @@ async function loadTabTenant() {
       '<div class="pendapatan-bazar-rincian">' + barisJenisHTML + '</div>';
   }
 
+  // -------- Edit Pendaftar Stand (data + berkas) --------
+  // SEBELUMNYA panitia cuma bisa mengubah status Pembayaran/status
+  // pendaftaran lewat dropdown di tabel -- kalau ada typo nama
+  // usaha/salah ketik WA, atau ADA BERKAS YANG PERLU DIGANTI (foto
+  // buram, salah unggah, dll.), panitia tidak punya cara mengeditnya
+  // sendiri, harus edit manual lewat Table Editor Supabase/minta
+  // pendaftar daftar ulang. Tombol "Edit" ini membuka popup berisi
+  // SEMUA field teks + SEMUA 5 berkas (Logo, Poster, Bukti IG #1/#2,
+  // Bukti Bayar), masing-masing berkas bisa diganti SATU PER SATU lewat
+  // kotak unggah -- dikosongkan berarti berkas lama tetap dipakai, tidak
+  // wajib mengunggah ulang semuanya tiap kali edit.
+  //
+  // Jenis & lokasi stand (bazar_stand.tenant_id) SENGAJA TIDAK bisa
+  // diubah lewat form ini -- mengubah itu butuh melepas kode stand lama
+  // (kembalikan ke status kosong) & mengunci kode stand baru sekaligus,
+  // plus mengecek stand barunya belum ditempati tenant lain; itu alur
+  // tersendiri yang lebih cocok dikerjakan lewat SQL langsung oleh
+  // panitia/pengembang untuk sekarang, supaya form edit ini tetap aman
+  // dipakai tanpa risiko tenant lain kehilangan stand-nya karena
+  // kekeliruan input.
+  const BERKAS_SLOT_EDIT_BAZAR = [
+    { kunci: "logo", label: "Logo Usaha", field: "url_foto_produk", indeks: 0 },
+    { kunci: "poster", label: "Poster Promosi", field: "url_foto_produk", indeks: 1 },
+    { kunci: "ig1", label: "Bukti Follow IG #1", field: "url_bukti_follow_ig", indeks: 0 },
+    { kunci: "ig2", label: "Bukti Follow IG #2", field: "url_bukti_follow_ig", indeks: 1 },
+    { kunci: "bukti_bayar", label: "Bukti Pembayaran", field: "url_bukti_bayar", indeks: null }
+  ];
+
+  function urlSlotEditBazar(row, slot) {
+    if (slot.indeks === null) return row[slot.field] || null;
+    const arr = Array.isArray(row[slot.field]) ? row[slot.field] : [];
+    return arr[slot.indeks] || null;
+  }
+
+  // Unggah SATU berkas pengganti ke Storage (bucket & prefix "bazar/" SAMA
+  // dengan punya form publik view-daftarbazar.js, supaya berkas lama/baru
+  // tetap konsisten tempatnya) -- `upsert: true` aman dipakai di sini
+  // (beda dari sebelum migrasi 0047, waktu itu Storage RLS cuma punya
+  // policy INSERT, belum ada UPDATE/SELECT untuk bucket ini). Retry
+  // ringan (3x) untuk jaga-jaga koneksi panitia sempat putus sebentar --
+  // tidak sekompleks `uploadKeStorageBazar()` di view-daftarbazar.js
+  // (yang sampai 6x percobaan + timeout 15 detik per percobaan, karena
+  // itu untuk HP pendaftar di sinyal lapangan; di sini cukup untuk
+  // koneksi panitia yang biasanya lebih stabil).
+  async function unggahBerkasEditBazar(file, label) {
+    const bagianNama = file.name.split(".");
+    const ekstensiFile = bagianNama.length > 1 ? bagianNama.pop() : "bin";
+    const path = "bazar/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensiFile;
+    const MAKS_PERCOBAAN_EDIT = 3;
+    let error;
+    for (let percobaan = 1; percobaan <= MAKS_PERCOBAAN_EDIT; percobaan++) {
+      const hasil = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: true });
+      error = hasil.error;
+      if (!error) {
+        const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+        return data.publicUrl;
+      }
+      if (percobaan < MAKS_PERCOBAAN_EDIT) await new Promise(function (r) { setTimeout(r, 1000 * percobaan); });
+    }
+    throw new Error("Gagal mengunggah " + label + ": " + (error && error.message));
+  }
+
+  function bukaModalEditTenantBazar(id) {
+    const row = rows.find(function (r) { return r.id === id; });
+    if (!row) return;
+
+    function medanTeks(inputId, label, nilai) {
+      return (
+        '<div class="field">' +
+          '<label for="' + inputId + '">' + label + '</label>' +
+          '<input type="text" id="' + inputId + '" value="' + escapeHTMLBazarAdmin(nilai || "") + '" />' +
+        '</div>'
+      );
+    }
+
+    function medanBerkas(slot) {
+      const urlSekarang = urlSlotEditBazar(row, slot);
+      return (
+        '<div class="field">' +
+          '<label>' + slot.label + '</label>' +
+          (urlSekarang
+            ? '<div class="modal-berkas-row"><a class="modal-berkas-chip" href="' + urlSekarang + '" target="_blank" rel="noopener">📎 Lihat berkas saat ini</a></div>'
+            : '<div class="hint" style="margin-bottom:6px;">Belum ada berkas.</div>') +
+          '<input type="file" id="editbazar-file-' + slot.kunci + '" accept="image/*,.pdf" />' +
+          '<div class="hint" id="editbazar-filename-' + slot.kunci + '">Kosongkan kalau tidak ingin mengganti berkas ini.</div>' +
+        '</div>'
+      );
+    }
+
+    const kodeList = kodeStandPerTenant[row.id] || [];
+
+    const isiModal =
+      '<p class="hint">Mengubah data pendaftar stand <strong>' + escapeHTMLBazarAdmin(row.nama_usaha) + '</strong> (' + row.nomor_pendaftaran + ').</p>' +
+      medanTeks("editbazar-nama-usaha", "Nama Usaha", row.nama_usaha) +
+      medanTeks("editbazar-jenis-produk", "Jenis Produk", row.jenis_produk) +
+      medanTeks("editbazar-nama-pj", "Nama Penanggung Jawab", row.nama_penanggung_jawab) +
+      medanTeks("editbazar-whatsapp", "No. WhatsApp", row.whatsapp) +
+      '<div class="hint" style="margin:-6px 0 16px;">Jenis/Lokasi Stand: <strong>' + escapeHTMLBazarAdmin(row.jenis_stand || row.kategori_stand || "-") +
+        (kodeList.length ? (" (" + kodeList.join(", ") + ")") : "") + '</strong> — tidak bisa diubah lewat form ini, hubungi pengembang kalau perlu dipindah stand.</div>' +
+      '<div class="modal-section-title">Berkas</div>' +
+      BERKAS_SLOT_EDIT_BAZAR.map(medanBerkas).join("") +
+      '<div class="form-error" id="editbazar-error" style="display:none;"></div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;margin-top:4px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-simpan-edit-tenant">Simpan Perubahan</button>' +
+      '</div>';
+
+    bukaModal("✏️ Edit Pendaftar Stand", isiModal);
+
+    BERKAS_SLOT_EDIT_BAZAR.forEach(function (slot) {
+      const inputFile = document.getElementById("editbazar-file-" + slot.kunci);
+      const hintEl = document.getElementById("editbazar-filename-" + slot.kunci);
+      inputFile.addEventListener("change", function () {
+        hintEl.textContent = inputFile.files[0]
+          ? "Berkas baru dipilih: " + inputFile.files[0].name
+          : "Kosongkan kalau tidak ingin mengganti berkas ini.";
+      });
+    });
+
+    document.getElementById("btn-simpan-edit-tenant").addEventListener("click", async function () {
+      const btn = this;
+      const errEl = document.getElementById("editbazar-error");
+      errEl.style.display = "none";
+
+      const namaUsahaBaru = document.getElementById("editbazar-nama-usaha").value.trim();
+      const jenisProdukBaru = document.getElementById("editbazar-jenis-produk").value.trim();
+      const namaPjBaru = document.getElementById("editbazar-nama-pj").value.trim();
+      const whatsappBaru = document.getElementById("editbazar-whatsapp").value.trim();
+
+      if (!namaUsahaBaru || !jenisProdukBaru || !namaPjBaru || !whatsappBaru) {
+        errEl.textContent = "Nama Usaha, Jenis Produk, Nama Penanggung Jawab, dan No. WhatsApp wajib diisi.";
+        errEl.style.display = "block";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Menyimpan...";
+
+      try {
+        // Unggah tiap berkas yang DIGANTI (kotak file-nya terisi) satu per
+        // satu (bukan Promise.all -- jumlahnya cuma sampai 5 & jarang semua
+        // diganti sekaligus, jadi bergantian lebih aman buat koneksi
+        // panitia yang pas-pasan, sama alasannya dengan form publik).
+        // URL LAMA tiap slot yang diganti disimpan dulu supaya bisa
+        // dihapus dari Storage SETELAH update DB berhasil.
+        const urlBaruPerSlot = {};
+        const urlLamaDigantiPerSlot = {};
+        for (const slot of BERKAS_SLOT_EDIT_BAZAR) {
+          const inputFile = document.getElementById("editbazar-file-" + slot.kunci);
+          const file = inputFile.files[0];
+          if (!file) continue;
+          const urlLama = urlSlotEditBazar(row, slot);
+          const urlBaru = await unggahBerkasEditBazar(file, slot.kunci);
+          urlBaruPerSlot[slot.kunci] = urlBaru;
+          if (urlLama) urlLamaDigantiPerSlot[slot.kunci] = urlLama;
+        }
+
+        // Susun ulang array dari NILAI SEKARANG row, index yang diganti
+        // ditimpa URL baru -- index yang TIDAK diganti tetap persis sama
+        // (tidak menghapus berkas yang tidak disentuh panitia).
+        const fotoBaru = Array.isArray(row.url_foto_produk) ? row.url_foto_produk.slice() : [];
+        const igBaru = Array.isArray(row.url_bukti_follow_ig) ? row.url_bukti_follow_ig.slice() : [];
+        if (urlBaruPerSlot.logo) fotoBaru[0] = urlBaruPerSlot.logo;
+        if (urlBaruPerSlot.poster) fotoBaru[1] = urlBaruPerSlot.poster;
+        if (urlBaruPerSlot.ig1) igBaru[0] = urlBaruPerSlot.ig1;
+        if (urlBaruPerSlot.ig2) igBaru[1] = urlBaruPerSlot.ig2;
+        const buktiBayarBaru = urlBaruPerSlot.bukti_bayar || row.url_bukti_bayar;
+
+        const payload = {
+          nama_usaha: namaUsahaBaru,
+          jenis_produk: jenisProdukBaru,
+          nama_penanggung_jawab: namaPjBaru,
+          whatsapp: whatsappBaru,
+          url_foto_produk: fotoBaru,
+          url_bukti_follow_ig: igBaru,
+          url_bukti_bayar: buktiBayarBaru
+        };
+
+        const { error } = await supabaseClient.from("bazar_tenant").update(payload).eq("id", id);
+        if (error) throw error;
+
+        // Data lokal & tabel di belakang modal disegarkan LANGSUNG (tanpa
+        // reload tab) supaya perubahan langsung terlihat begitu modal
+        // ditutup.
+        Object.assign(row, payload);
+        renderBarisBazar();
+
+        // Hapus berkas LAMA yang sudah diganti dari Storage -- best-effort,
+        // DIJALANKAN SETELAH update DB berhasil (bukan sebelum/bersamaan)
+        // supaya kalau update DB-nya gagal, berkas lama yang masih
+        // dipakai baris ini tidak ikut terhapus. Gagal hapus berkas lama
+        // tidak membatalkan perubahan yang sudah tersimpan (cuma dicatat
+        // di console), karena datanya sendiri sudah benar tersimpan.
+        const pathLamaDiganti = Object.values(urlLamaDigantiPerSlot).map(ekstrakPathBerkasBazar).filter(Boolean);
+        if (pathLamaDiganti.length > 0) {
+          supabaseClient.storage.from("berkas-pendaftaran").remove(pathLamaDiganti).then(function (hasilHapus) {
+            if (hasilHapus.error) console.error("Sebagian/semua berkas lama (yang baru saja diganti) gagal dihapus:", hasilHapus.error);
+          });
+        }
+
+        tutupModal();
+      } catch (err) {
+        errEl.textContent = "Gagal menyimpan: " + ((err && err.message) || String(err));
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Simpan Perubahan";
+      }
+    });
+  }
+
   let filterAktif = "";
 
   // Warna baris menyesuaikan status (lihat ".status-row--..." di
@@ -348,10 +557,24 @@ async function loadTabTenant() {
     }
 
     tbody.innerHTML = tampil.map(function (r) {
+      // BUG LAMA yang diperbaiki di sini: kolom "Berkas" cuma pernah
+      // menampilkan `url_foto_produk` (Logo Usaha + Poster Promosi) dan
+      // `url_bukti_bayar` -- `url_bukti_follow_ig` (migrasi 0042, array 2
+      // URL) TIDAK PERNAH ikut ditampilkan sama sekali, walau datanya sudah
+      // tersimpan benar di database. Sekarang SEMUA 5 berkas (Logo, Poster,
+      // Bukti IG #1, Bukti IG #2, Bukti Bayar) ikut ditautkan di sini, label
+      // masing-masing dibuat jelas (bukan generik "Foto #1/#2" lagi) sesuai
+      // urutan index yang dipakai submit_bazar() (lihat migrasi 0042: index 0
+      // url_foto_produk = Logo Usaha, index 1 = Poster Promosi).
       const fotoList = Array.isArray(r.url_foto_produk) ? r.url_foto_produk : [];
-      const berkasCell =
-        fotoList.map(function (u, i) { return '<a href="' + u + '" target="_blank" rel="noopener">Foto #' + (i + 1) + '</a>'; }).join(" · ") +
-        (r.url_bukti_bayar ? ((fotoList.length ? " · " : "") + '<a href="' + r.url_bukti_bayar + '" target="_blank" rel="noopener">Bukti Bayar</a>') : "");
+      const igList = Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig : [];
+      const labelBerkas = ["Logo", "Poster"];
+      const labelIG = ["Bukti IG #1", "Bukti IG #2"];
+      const berkasCell = [
+        fotoList.map(function (u, i) { return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + (labelBerkas[i] || ("Foto #" + (i + 1))) + '</a>' : ""; }).filter(Boolean).join(" · "),
+        igList.map(function (u, i) { return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + (labelIG[i] || ("Bukti IG #" + (i + 1))) + '</a>' : ""; }).filter(Boolean).join(" · "),
+        r.url_bukti_bayar ? '<a href="' + r.url_bukti_bayar + '" target="_blank" rel="noopener">Bukti Bayar</a>' : ""
+      ].filter(Boolean).join(" · ");
 
       const kodeList = kodeStandPerTenant[r.id] || [];
       return (
@@ -372,7 +595,7 @@ async function loadTabTenant() {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
           '</select><span class="hint wa-status-note-bazar" data-note-for="' + r.id + '"></span></td>' +
-          '<td><button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
+          '<td><button type="button" class="btn-link btn-edit-tenant" data-id="' + r.id + '">Edit</button> · <button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
     }).join("");
@@ -413,19 +636,32 @@ async function loadTabTenant() {
       });
     });
 
+    tbody.querySelectorAll(".btn-edit-tenant").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        bukaModalEditTenantBazar(btn.getAttribute("data-id"));
+      });
+    });
+
     tbody.querySelectorAll(".btn-hapus-tenant").forEach(function (btn) {
       btn.addEventListener("click", async function () {
         const id = btn.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
         const label = row ? (row.nama_usaha + " (" + row.nomor_pendaftaran + ")") : "";
-        if (!confirm('Hapus pendaftaran tenant "' + label + '"? Berkas yang sudah diunggah (foto produk, bukti bayar) juga akan ikut terhapus permanen. Tindakan ini tidak bisa dibatalkan.')) return;
+        if (!confirm('Hapus pendaftaran tenant "' + label + '"? Berkas yang sudah diunggah (logo, poster, bukti follow IG, bukti bayar) juga akan ikut terhapus permanen. Tindakan ini tidak bisa dibatalkan.')) return;
 
         btn.disabled = true;
         btn.textContent = "Menghapus...";
 
         if (row) {
+          // BUG LAMA yang diperbaiki di sini juga: `url_bukti_follow_ig`
+          // (migrasi 0042) TIDAK PERNAH ikut dihapus dari Storage saat
+          // tenant dihapus -- cuma url_foto_produk & url_bukti_bayar yang
+          // dibersihkan, jadi berkas bukti follow IG jadi "yatim" (tetap
+          // ada di Storage walau tenantnya sudah tidak ada) setiap kali ada
+          // tenant dihapus. Sekarang ikut dikumpulkan & dihapus juga.
           const fotoList = Array.isArray(row.url_foto_produk) ? row.url_foto_produk : [];
-          const pathBerkas = fotoList.concat([row.url_bukti_bayar])
+          const igList = Array.isArray(row.url_bukti_follow_ig) ? row.url_bukti_follow_ig : [];
+          const pathBerkas = fotoList.concat(igList).concat([row.url_bukti_bayar])
             .filter(Boolean)
             .map(ekstrakPathBerkasBazar)
             .filter(Boolean);
@@ -598,7 +834,7 @@ async function loadTabDenahBazar() {
   }
 
   const [{ data: standData, error }, { data: tenantData }, { data: elemenData, error: errorElemen }, { data: settingsData }] = await Promise.all([
-    supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("area").order("nomor"),
+    supabaseClient.from("bazar_stand").select("id,jenis,area,nomor,kode,tenant_id,milik_panitia,pos_x,pos_y,lebar,tinggi,rotasi").order("jenis").order("area").order("nomor"),
     supabaseClient.from("bazar_tenant").select("id,nama_usaha,nomor_pendaftaran,status"),
     supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
     supabaseClient.from("bazar_settings").select("denah_background_url").eq("id", 1).single()
@@ -622,14 +858,21 @@ async function loadTabDenahBazar() {
   const tenantById = {};
   (tenantData || []).forEach(function (t) { tenantById[t.id] = t; });
 
-  const totalTerisi = standList.filter(function (s) { return !!s.tenant_id; }).length;
+  // Stand "milik panitia" (migrasi 0049) DIKELUARKAN dari total/terisi di
+  // sini -- bukan bagian pendaftaran publik, lihat komentar panjang di
+  // migrasi 0049 & di hitungRekapUntukPosterBazar().
+  const standListPendaftaran = standList.filter(function (s) { return !s.milik_panitia; });
+  const jumlahPanitia = standList.length - standListPendaftaran.length;
+  const totalTerisi = standListPendaftaran.filter(function (s) { return !!s.tenant_id; }).length;
 
   content.innerHTML =
     '<div class="admin-tabs" style="margin-bottom:16px;">' +
       '<button type="button" class="admin-tab is-active" data-subtab="daftar" style="font-size:14px;">📋 Tampilan Daftar</button>' +
       '<button type="button" class="admin-tab" data-subtab="visual" style="font-size:14px;">🖼️ Edit Denah Visual</button>' +
     '</div>' +
-    '<p class="hint">' + totalTerisi + ' dari ' + standList.length + ' stand terisi. Stand otomatis dibebaskan lagi begitu status tenant penyewanya diubah jadi "Ditolak".</p>' +
+    '<p class="hint">' + totalTerisi + ' dari ' + standListPendaftaran.length + ' stand terisi. Stand otomatis dibebaskan lagi begitu status tenant penyewanya diubah jadi "Ditolak".' +
+      (jumlahPanitia > 0 ? (' (' + jumlahPanitia + ' stand lain ditandai "Milik Panitia", tidak dihitung di sini.)') : '') +
+    '</p>' +
     '<div id="denah-bazar-subcontent"></div>';
 
   const subEl = document.getElementById("denah-bazar-subcontent");
@@ -650,21 +893,29 @@ async function loadTabDenahBazar() {
 
         const areaHTML = areaUrut.map(function (area) {
           const standArea = standJenis.filter(function (s) { return s.area === area; });
-          const sisa = standArea.filter(function (s) { return !s.tenant_id; }).length;
+          // Stand "milik panitia" dikeluarkan dari hitungan sisa/total area
+          // ini (bukan bagian pool pendaftaran publik) -- lihat migrasi 0049.
+          const standAreaPendaftaran = standArea.filter(function (s) { return !s.milik_panitia; });
+          const sisa = standAreaPendaftaran.filter(function (s) { return !s.tenant_id; }).length;
           return (
             '<div style="margin-bottom:14px;">' +
-              '<p class="hint" style="margin:0 0 6px;font-weight:700;color:#1C2541;">' + escapeHTMLBazarAdmin(area) + ' <span style="font-weight:400;">(sisa ' + sisa + '/' + standArea.length + ')</span></p>' +
+              '<p class="hint" style="margin:0 0 6px;font-weight:700;color:#1C2541;">' + escapeHTMLBazarAdmin(area) + ' <span style="font-weight:400;">(sisa ' + sisa + '/' + standAreaPendaftaran.length + ')</span></p>' +
               '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
                 standArea.map(function (s) {
                   const tenant = s.tenant_id ? tenantById[s.tenant_id] : null;
                   const terisi = !!s.tenant_id;
+                  const panitia = !terisi && !!s.milik_panitia;
                   return (
-                    '<div style="padding:8px 12px;border:1.5px solid ' + (terisi ? "#FBD9DA" : "#F6E3A8") + ';border-radius:8px;background:' + (terisi ? "#FDF3F3" : "#FFFFFF") + ';font-size:13px;min-width:120px;">' +
+                    '<div style="padding:8px 12px;border:1.5px solid ' + (terisi ? "#FBD9DA" : (panitia ? "#D8D4C8" : "#F6E3A8")) + ';border-radius:8px;background:' + (terisi ? "#FDF3F3" : (panitia ? "#F3F1EA" : "#FFFFFF")) + ';font-size:13px;min-width:120px;">' +
                       '<div style="font-weight:700;color:#1C2541;">' + escapeHTMLBazarAdmin(s.kode) + '</div>' +
                       (terisi
                         ? ('<div class="hint" style="margin:2px 0;">' + escapeHTMLBazarAdmin(tenant ? tenant.nama_usaha : "-") + '</div>' +
                            '<button type="button" class="btn-kosongkan-stand" data-id="' + s.id + '" style="font-size:12px;padding:4px 8px;margin-top:4px;">Kosongkan</button>')
-                        : '<div class="hint" style="margin:2px 0;color:#1E7A4C;">Tersedia</div>') +
+                        : (panitia
+                            ? ('<div class="hint" style="margin:2px 0;color:#6b5f3e;">🏷️ Milik Panitia</div>' +
+                               '<button type="button" class="btn-batal-panitia-stand" data-id="' + s.id + '" style="font-size:12px;padding:4px 8px;margin-top:4px;">Batalkan</button>')
+                            : ('<div class="hint" style="margin:2px 0;color:#1E7A4C;">Tersedia</div>' +
+                               '<button type="button" class="btn-tandai-panitia-stand" data-id="' + s.id + '" style="font-size:12px;padding:4px 8px;margin-top:4px;">Tandai Panitia</button>'))) +
                     '</div>'
                   );
                 }).join("") +
@@ -698,6 +949,48 @@ async function loadTabDenahBazar() {
             return;
           }
           stand.tenant_id = null;
+          render();
+        });
+      });
+
+      groupsEl.querySelectorAll(".btn-tandai-panitia-stand").forEach(function (btn) {
+        btn.addEventListener("click", async function () {
+          const id = btn.getAttribute("data-id");
+          const stand = standList.find(function (s) { return s.id === id; });
+          if (!stand) return;
+          if (!confirm('Tandai stand "' + stand.kode + '" sebagai milik panitia? Stand ini akan disembunyikan dari pendaftaran publik dan tidak ikut dihitung di rekap/poster pendaftaran, sampai ditandai ulang.')) return;
+
+          btn.disabled = true;
+          btn.textContent = "Menandai...";
+          const { error: errTandai } = await supabaseClient.from("bazar_stand").update({ milik_panitia: true }).eq("id", id);
+          if (errTandai) {
+            alert("Gagal menandai stand: " + errTandai.message);
+            btn.disabled = false;
+            btn.textContent = "Tandai Panitia";
+            return;
+          }
+          stand.milik_panitia = true;
+          render();
+        });
+      });
+
+      groupsEl.querySelectorAll(".btn-batal-panitia-stand").forEach(function (btn) {
+        btn.addEventListener("click", async function () {
+          const id = btn.getAttribute("data-id");
+          const stand = standList.find(function (s) { return s.id === id; });
+          if (!stand) return;
+          if (!confirm('Batalkan tanda "Milik Panitia" pada stand "' + stand.kode + '"? Stand ini akan terbuka lagi untuk pendaftaran publik.')) return;
+
+          btn.disabled = true;
+          btn.textContent = "Membatalkan...";
+          const { error: errBatal } = await supabaseClient.from("bazar_stand").update({ milik_panitia: false }).eq("id", id);
+          if (errBatal) {
+            alert("Gagal membatalkan tanda panitia: " + errBatal.message);
+            btn.disabled = false;
+            btn.textContent = "Batalkan";
+            return;
+          }
+          stand.milik_panitia = false;
           render();
         });
       });
@@ -1291,13 +1584,19 @@ async function loadTabDenahBazar() {
       });
       standList.forEach(function (s) {
         const warna = WARNA_JENIS_DENAH[s.jenis] || "#777777";
+        // Stand "milik panitia" (migrasi 0049, hanya bisa ditandai/dibatalkan
+        // lewat sub-tampilan "Tampilan Daftar") ditampilkan abu-abu kusam di
+        // sini, berbeda dari warna jenis normal maupun merah "terisi" --
+        // cuma pembeda visual, tidak bisa diklik-toggle dari kanvas ini.
+        const warnaBg = s.tenant_id ? "#fde8e8" : (s.milik_panitia ? "#d8d4c8" : warna);
+        const warnaTeks = s.tenant_id ? "#b91c1c" : (s.milik_panitia ? "#5c5440" : "#ffffff");
         const el = buatKotak({
           id: s.id, tipe: "stand",
           x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
           w: s.lebar || 54, h: s.tinggi || 40,
           rotasi: s.rotasi,
-          warnaBg: s.tenant_id ? "#fde8e8" : warna,
-          warnaTeks: s.tenant_id ? "#b91c1c" : "#ffffff",
+          warnaBg: warnaBg,
+          warnaTeks: warnaTeks,
           label: labelRingkasKodeBazarAdmin(s.kode), kodeAsli: s.kode, bisaResize: true
         });
         innerEl.appendChild(el);
@@ -1873,9 +2172,13 @@ function gambarPitaCTAPosterBazar(ctx) {
 // pendaftar) + baris `bazar_stand` (total & terpakai per jenis). `kodeList`
 // tetap disimpan untuk kompatibilitas pemanggil lain yang mungkin
 // memakainya, walau poster sendiri sudah tidak menggambar mini peta petak.
+// Stand `milik_panitia` (migrasi 0049) SENGAJA dilewati total -- bukan
+// bagian dari pendaftaran publik, jadi tidak boleh ikut menambah "total"
+// maupun "terpakai" per jenis di rekap/poster ini.
 function hitungRekapUntukPosterBazar(standRows, tenantRows) {
   const perJenis = {};
   (standRows || []).forEach(function (s) {
+    if (s.milik_panitia) return;
     if (!perJenis[s.jenis]) perJenis[s.jenis] = { total: 0, terpakai: 0, kodeList: [] };
     perJenis[s.jenis].total++;
     if (s.tenant_id) perJenis[s.jenis].terpakai++;
@@ -2077,7 +2380,7 @@ async function bukaPosterRekapBazar(tenantRows) {
   const [{ data: settingsData }, { data: siteSettingsData }, { data: standRows }] = await Promise.all([
     supabaseClient.from("bazar_settings").select("jenis_stand_info").eq("id", 1).single(),
     supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single(),
-    supabaseClient.from("bazar_stand").select("jenis,kode,tenant_id").order("jenis").order("nomor")
+    supabaseClient.from("bazar_stand").select("jenis,kode,tenant_id,milik_panitia").order("jenis").order("nomor")
   ]);
 
   const jenisStandInfo = (settingsData && settingsData.jenis_stand_info) || {};
@@ -2137,7 +2440,7 @@ async function bukaPosterRekapBazar(tenantRows) {
   document.getElementById("btn-ulang-poster-rekap-bazar").addEventListener("click", async function () {
     const [{ data: tenantBaru }, { data: standBaru }] = await Promise.all([
       supabaseClient.from("bazar_tenant").select("*"),
-      supabaseClient.from("bazar_stand").select("jenis,kode,tenant_id").order("jenis").order("nomor")
+      supabaseClient.from("bazar_stand").select("jenis,kode,tenant_id,milik_panitia").order("jenis").order("nomor")
     ]);
     const ulang = hitungRekapUntukPosterBazar(standBaru || [], tenantBaru || tenantRows);
     gambarPosterRekapBazar(canvas, logoImg, jenisStandInfo, ulang.perJenis, ulang.totalPendaftar);
