@@ -251,7 +251,10 @@ async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
       kode: s.kode, jenis: s.jenis,
       x: s.pos_x != null ? s.pos_x : 20, y: s.pos_y != null ? s.pos_y : 20,
       w: s.lebar || 54, h: s.tinggi || 40, rotasi: s.rotasi || 0,
-      terisi: !!s.tenant_id,
+      // Stand "milik panitia" (migrasi 0049) ditampilkan terisi di denah
+      // info publik ini juga -- konsisten dengan status "tidak bisa
+      // didaftar" di halaman "/daftar-bazar".
+      terisi: !!s.tenant_id || !!s.milik_panitia,
       namaUsaha: namaTenantByKode[s.kode] || null
     }));
   });
@@ -274,7 +277,7 @@ async function renderDenahInfo(jenis, standList, elemenList, namaTenantByKode) {
 async function initBazar() {
   const [{ data: settings }, { data: standData }, { data: elemenData }, { data: tenantPublik }] = await Promise.all([
     supabaseClient.from("bazar_settings").select("profil_judul,profil_deskripsi,pendaftaran_dibuka,jenis_stand_info,info_biaya,info_rekening,denah_background_url").eq("id", 1).single(),
-    supabaseClient.from("bazar_stand").select("jenis,area,kode,tenant_id,pos_x,pos_y,lebar,tinggi,rotasi"),
+    supabaseClient.from("bazar_stand").select("jenis,area,kode,tenant_id,milik_panitia,pos_x,pos_y,lebar,tinggi,rotasi"),
     supabaseClient.from("bazar_denah_elemen").select("*").order("urutan"),
     supabaseClient.rpc("bazar_denah_publik")
   ]);
@@ -291,7 +294,9 @@ async function initBazar() {
   const jenisStandInfo = (settings && settings.jenis_stand_info) || {};
   denahBackgroundUrlInfo = (settings && settings.denah_background_url) || null;
   const standList = standData || [];
-  const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id; });
+  // Stand "milik panitia" dihitung SAMA seperti terisi untuk deteksi "sudah
+  // penuh semua" ini (lihat migrasi 0049).
+  const semuaPenuh = standList.length > 0 && standList.every(function (s) { return !!s.tenant_id || !!s.milik_panitia; });
 
   // -------- Jenis & Lokasi Stand (migrasi 0037) -- satu kartu per jenis
   // (A/B/C), menampilkan ukuran, harga, daftar area & jumlah TERPAKAI tiap
@@ -303,7 +308,9 @@ async function initBazar() {
   if (jenisListEl) {
     jenisListEl.innerHTML = URUTAN_JENIS_STAND_INFO.filter(function (j) { return jenisStandInfo[j]; }).map(function (j) {
       const info = jenisStandInfo[j];
-      const standJenisIni = standList.filter(function (s) { return s.jenis === j; });
+      // Stand "milik panitia" dikeluarkan dari rekap "terpakai/total" publik
+      // ini juga -- tidak termasuk pendaftaran, lihat migrasi 0049.
+      const standJenisIni = standList.filter(function (s) { return s.jenis === j && !s.milik_panitia; });
       const areaList = [];
       standJenisIni.forEach(function (s) { if (areaList.indexOf(s.area) === -1) areaList.push(s.area); });
       const rincianArea = areaList.map(function (area) {
