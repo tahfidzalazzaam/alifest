@@ -2614,7 +2614,7 @@ const STATUS_WA_LIST = ["Diterima", "Ditolak", "Perlu Verifikasi Usia", "Perlu T
 // alasan penolakan yang dipilih panitia lewat dropdown wajib, TAPI HANYA
 // kalau statusnya "Ditolak" (kosong untuk status lain).
 const WA_PLACEHOLDER_HINT =
-  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu), <code>{link_lengkapi}</code> (link khusus buat pendamping tim melengkapi nomor punggung — cuma terisi kalau statusnya "Perlu Tambah Nomor Punggung", kosong untuk status lain, butuh "URL Situs" di bawah sudah diisi), <code>{alasan}</code> (alasan penolakan yang dipilih panitia — cuma terisi kalau statusnya "Ditolak", kosong untuk status lain).';
+  'Placeholder yang bisa dipakai (otomatis diganti saat dikirim): <code>{nama}</code>, <code>{nomor}</code>, <code>{lomba}</code>, <code>{status}</code>, <code>{grup}</code> (link grup WA di bawah — cuma terisi kalau statusnya "Diterima", kosong untuk status lain; khusus pendaftar Lomba Futsal otomatis dialihkan ke "Link Grup WA (khusus Futsal)" di bawah kalau sudah diisi), <code>{anggota_usia}</code> (khusus lomba tim: nama anggota yang perlu verifikasi usia, dipisah koma — kosong untuk pendaftar individu), <code>{link_lengkapi}</code> (link khusus buat pendamping tim melengkapi nomor punggung — cuma terisi kalau statusnya "Perlu Tambah Nomor Punggung", kosong untuk status lain, butuh "URL Situs" di bawah sudah diisi), <code>{alasan}</code> (alasan penolakan yang dipilih panitia — cuma terisi kalau statusnya "Ditolak", kosong untuk status lain).';
 
 async function loadTabNotifWa() {
   const content = document.getElementById("admin-content");
@@ -2622,12 +2622,13 @@ async function loadTabNotifWa() {
 
   const { data: settingsData } = await supabaseClient
     .from("site_settings")
-    .select("wa_notif_template, wa_template_per_status, link_grup_wa, site_url, alasan_penolakan_list")
+    .select("wa_notif_template, wa_template_per_status, link_grup_wa, link_grup_wa_futsal, site_url, alasan_penolakan_list")
     .eq("id", 1).single();
 
   const templateLama = (settingsData && settingsData.wa_notif_template) || "";
   const templatePerStatus = (settingsData && settingsData.wa_template_per_status) || {};
   const linkGrupDefault = (settingsData && settingsData.link_grup_wa) || "";
+  const linkGrupFutsalDefault = (settingsData && settingsData.link_grup_wa_futsal) || "";
   const siteUrlDefault = (settingsData && settingsData.site_url) || "";
   const alasanList = Array.isArray(settingsData && settingsData.alasan_penolakan_list)
     ? settingsData.alasan_penolakan_list
@@ -2657,7 +2658,12 @@ async function loadTabNotifWa() {
       '<div class="field" style="margin-top:22px;">' +
         '<label for="wa-link-grup">Link Grup WA</label>' +
         '<input type="text" id="wa-link-grup" value="' + escapeHTML(linkGrupDefault) + '" placeholder="https://chat.whatsapp.com/..." />' +
-        '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, tapi HANYA untuk pendaftar yang statusnya diubah jadi "Diterima" — pendaftar yang Ditolak (atau status lain) tidak pernah menerima link ini.</div>' +
+        '<div class="hint">Dikirim lewat placeholder <code>{grup}</code> di atas, tapi HANYA untuk pendaftar yang statusnya diubah jadi "Diterima" — pendaftar yang Ditolak (atau status lain) tidak pernah menerima link ini. Berlaku untuk semua lomba individu, serta pendaftar Futsal kalau kotak khusus Futsal di bawah masih dikosongkan.</div>' +
+      '</div>' +
+      '<div class="field">' +
+        '<label for="wa-link-grup-futsal">Link Grup WA (khusus Futsal) ⚽</label>' +
+        '<input type="text" id="wa-link-grup-futsal" value="' + escapeHTML(linkGrupFutsalDefault) + '" placeholder="https://chat.whatsapp.com/... (opsional)" />' +
+        '<div class="hint">Grup WA TERPISAH khusus untuk pendamping/tim yang mendaftar <strong>Lomba Futsal</strong> (koordinasi tim biasanya beda dari peserta perorangan) — kalau diisi, pendaftar Futsal yang diterima akan menerima link INI (bukan "Link Grup WA" umum di atas) lewat placeholder <code>{grup}</code>. Kosongkan kalau pendaftar Futsal cukup digabung ke grup WA umum seperti lomba lain.</div>' +
       '</div>' +
       '<div class="field">' +
         '<label for="wa-site-url">URL Situs</label>' +
@@ -2708,13 +2714,14 @@ async function loadTabNotifWa() {
     }
 
     const linkGrup = document.getElementById("wa-link-grup").value.trim();
+    const linkGrupFutsal = document.getElementById("wa-link-grup-futsal").value.trim();
     const siteUrl = document.getElementById("wa-site-url").value.trim().replace(/\/+$/, "");
 
     btn.disabled = true;
     btn.textContent = "Menyimpan...";
     const { error } = await supabaseClient
       .from("site_settings")
-      .update({ wa_template_per_status: templateBaruPerStatus, link_grup_wa: linkGrup || null, site_url: siteUrl || null })
+      .update({ wa_template_per_status: templateBaruPerStatus, link_grup_wa: linkGrup || null, link_grup_wa_futsal: linkGrupFutsal || null, site_url: siteUrl || null })
       .eq("id", 1);
     btn.disabled = false;
     btn.textContent = "Simpan";
