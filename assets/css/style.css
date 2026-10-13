@@ -884,6 +884,61 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .rekap-card__gender { font-size: 0.72rem; color: var(--ink-400); margin-top: 2px; }
 
+/* Rekap Total Pendapatan (tab "Data Tenant" bazar) — kotak ringkasan uang
+   masuk, terpisah dari .rekap-grid kartu jumlah di atasnya supaya angka
+   uang (yang paling penting buat bendahara/panitia) tidak tenggelam di
+   antara kartu jumlah tenant biasa. */
+.pendapatan-bazar-box {
+  background: var(--white);
+  border: 1.5px solid #e3e0d3;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.pendapatan-bazar-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #f0eee4;
+}
+.pendapatan-bazar-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--ink-600);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+.pendapatan-bazar-total {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.7rem;
+  color: var(--green-900);
+  line-height: 1.15;
+}
+.pendapatan-bazar-total--kecil { font-size: 1.15rem; color: var(--ink-600); }
+.pendapatan-bazar-sisa { text-align: right; }
+.pendapatan-bazar-rincian { display: flex; flex-direction: column; gap: 8px; }
+.pendapatan-bazar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 0.8rem;
+}
+.pendapatan-bazar-row__label { font-weight: 600; color: var(--ink-900); min-width: 150px; }
+.pendapatan-bazar-row__detail { color: var(--ink-400); flex: 1; }
+.pendapatan-bazar-row__subtotal { font-weight: 700; color: var(--green-700); }
+@media (max-width: 640px) {
+  .pendapatan-bazar-sisa { text-align: left; }
+  .pendapatan-bazar-row__label { min-width: 100%; }
+}
+
 .admin-filters {
   display: flex;
   gap: 10px;
