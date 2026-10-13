@@ -182,9 +182,10 @@ async function loadTabTenant() {
   const content = document.getElementById("adminbazar-content");
   content.innerHTML = '<p class="hint">Memuat data tenant...</p>';
 
-  const [{ data, error }, { data: standData }] = await Promise.all([
+  const [{ data, error }, { data: standData }, { data: settingsPendapatan }] = await Promise.all([
     supabaseClient.from("bazar_tenant").select("*").order("created_at", { ascending: false }),
-    supabaseClient.from("bazar_stand").select("kode,tenant_id").not("tenant_id", "is", null)
+    supabaseClient.from("bazar_stand").select("kode,tenant_id").not("tenant_id", "is", null),
+    supabaseClient.from("bazar_settings").select("jenis_stand_info").eq("id", 1).single()
   ]);
   if (error) {
     content.innerHTML = "<p>Gagal memuat data tenant: " + error.message + "</p>";
@@ -192,6 +193,7 @@ async function loadTabTenant() {
   }
 
   let rows = data || [];
+  const jenisStandInfoPendapatan = (settingsPendapatan && settingsPendapatan.jenis_stand_info) || {};
 
   // Kode stand yang ditempati tiap tenant (migrasi 0037) -- satu tenant bisa
   // punya LEBIH DARI SATU kode kalau menyewa beberapa stand sekaligus,
@@ -204,6 +206,7 @@ async function loadTabTenant() {
 
   content.innerHTML =
     '<div class="rekap-grid" id="bazar-rekap-grid"></div>' +
+    '<div class="pendapatan-bazar-box" id="bazar-pendapatan-box"></div>' +
     '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' +
       '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap-bazar">🖼️ Buat Poster Rekap Stand</button>' +
       '<button type="button" class="btn btn--ghost" id="btn-unduh-xlsx-tenant">⬇️ Unduh Data Tenant (XLSX)</button>' +
@@ -225,6 +228,91 @@ async function loadTabTenant() {
       '<div class="rekap-card is-active" data-filter=""><div class="rekap-card__label">Semua Tenant</div><div class="rekap-card__total">' + rows.length + '</div></div>' +
       '<div class="rekap-card" data-filter="lunas"><div class="rekap-card__label">💰 Lunas</div><div class="rekap-card__total">' + lunas + '</div></div>' +
       '<div class="rekap-card" data-filter="diterima"><div class="rekap-card__label">✅ Diterima</div><div class="rekap-card__total">' + diterima + '</div></div>';
+  }
+
+  // -------- Rekap Total Pendapatan --------
+  // "Pendapatan" (uang yang SUDAH diterima panitia) dihitung HANYA dari
+  // tenant berstatus pembayaran "Lunas" -- tenant "Belum Lunas" belum
+  // menyetor uangnya sama sekali, jadi tidak boleh ikut dihitung sebagai
+  // pendapatan walau baris bazar_stand-nya sudah terisi/dikunci. Status
+  // pendaftaran (Menunggu Verifikasi/Diterima/Ditolak) SENGAJA TIDAK ikut
+  // jadi syarat di sini -- murni soal uangnya sudah masuk atau belum, bukan
+  // soal pendaftarannya sudah diverifikasi atau belum (beda urusan dari
+  // pengecualian status "Ditolak" di kartu rekap Lomba, lihat view-admin.js).
+  //
+  // Harga per stand = harga jenis itu (A/B/C, dari `bazar_settings.
+  // jenis_stand_info`) -- satu tenant bisa menyewa LEBIH DARI SATU stand
+  // sejenis (migrasi 0037), jadi totalnya per tenant = jumlah kode stand
+  // miliknya × harga jenisnya, dijumlah ke subtotal per jenis + grand total.
+  // "Potensi" (kolom kedua) = total KALAU SEMUA tenant yang sudah menempati
+  // stand (lunas maupun belum) dianggap lunas -- buat panitia memperkirakan
+  // sisa uang yang masih harus ditagih.
+  function hitungPendapatanBazar() {
+    const perJenis = { A: { jumlahLunas: 0, subtotalLunas: 0, jumlahPotensi: 0, subtotalPotensi: 0 },
+                        B: { jumlahLunas: 0, subtotalLunas: 0, jumlahPotensi: 0, subtotalPotensi: 0 },
+                        C: { jumlahLunas: 0, subtotalLunas: 0, jumlahPotensi: 0, subtotalPotensi: 0 } };
+    let totalLunas = 0, totalPotensi = 0;
+
+    rows.forEach(function (r) {
+      const jenis = r.jenis_stand;
+      if (!jenis || !perJenis[jenis]) return; // tenant lama (kategori_stand bebas, sebelum migrasi 0037) dilewati -- tidak punya jenis A/B/C baku
+      const harga = Number((jenisStandInfoPendapatan[jenis] && jenisStandInfoPendapatan[jenis].harga) || 0);
+      const jumlahStand = (kodeStandPerTenant[r.id] || []).length;
+      if (jumlahStand === 0 || harga === 0) return;
+      const subtotal = jumlahStand * harga;
+
+      perJenis[jenis].jumlahPotensi += jumlahStand;
+      perJenis[jenis].subtotalPotensi += subtotal;
+      totalPotensi += subtotal;
+
+      if (r.status_pembayaran === "Lunas") {
+        perJenis[jenis].jumlahLunas += jumlahStand;
+        perJenis[jenis].subtotalLunas += subtotal;
+        totalLunas += subtotal;
+      }
+    });
+
+    return { perJenis: perJenis, totalLunas: totalLunas, totalPotensi: totalPotensi };
+  }
+
+  function formatRupiahBazar(angka) {
+    return "Rp" + Math.round(angka || 0).toLocaleString("id-ID");
+  }
+
+  function renderPendapatanBazar() {
+    const box = document.getElementById("bazar-pendapatan-box");
+    if (!box) return;
+    const hasil = hitungPendapatanBazar();
+    const URUTAN_JENIS_PENDAPATAN = ["A", "B", "C"];
+    const sisaBelumLunas = hasil.totalPotensi - hasil.totalLunas;
+
+    const barisJenisHTML = URUTAN_JENIS_PENDAPATAN
+      .filter(function (j) { return jenisStandInfoPendapatan[j]; })
+      .map(function (j) {
+        const info = jenisStandInfoPendapatan[j] || {};
+        const d = hasil.perJenis[j];
+        return (
+          '<div class="pendapatan-bazar-row">' +
+            '<span class="pendapatan-bazar-row__label">Jenis ' + j + ' — ' + escapeHTMLBazarAdmin(info.nama || "") + '</span>' +
+            '<span class="pendapatan-bazar-row__detail">' + d.jumlahLunas + ' stand lunas × ' + formatRupiahBazar(info.harga) + '</span>' +
+            '<span class="pendapatan-bazar-row__subtotal">' + formatRupiahBazar(d.subtotalLunas) + '</span>' +
+          '</div>'
+        );
+      }).join("");
+
+    box.innerHTML =
+      '<div class="pendapatan-bazar-head">' +
+        '<div>' +
+          '<div class="pendapatan-bazar-label">💵 Total Pendapatan (Lunas)</div>' +
+          '<div class="pendapatan-bazar-total">' + formatRupiahBazar(hasil.totalLunas) + '</div>' +
+        '</div>' +
+        '<div class="pendapatan-bazar-sisa">' +
+          '<div class="pendapatan-bazar-label">Potensi bila semua lunas</div>' +
+          '<div class="pendapatan-bazar-total pendapatan-bazar-total--kecil">' + formatRupiahBazar(hasil.totalPotensi) + '</div>' +
+          (sisaBelumLunas > 0 ? '<div class="hint">Masih ada ' + formatRupiahBazar(sisaBelumLunas) + ' yang belum lunas/disetor.</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="pendapatan-bazar-rincian">' + barisJenisHTML + '</div>';
   }
 
   let filterAktif = "";
@@ -304,6 +392,7 @@ async function loadTabTenant() {
         const row = rows.find(function (r) { return r.id === id; });
         if (row) row[field] = nilaiBaru;
         renderRekapBazar();
+        renderPendapatanBazar(); // status_pembayaran (atau status) berubah -- rekap pendapatan ikut disegarkan
 
         // Warna baris langsung diperbarui di tempat begitu status BERHASIL
         // tersimpan -- cuma untuk kolom status pendaftaran (bukan status
@@ -361,11 +450,13 @@ async function loadTabTenant() {
         rows = rows.filter(function (r) { return r.id !== id; });
         renderBarisBazar();
         renderRekapBazar();
+        renderPendapatanBazar(); // tenant dihapus -- stand-nya (kalau lunas) ikut keluar dari hitungan pendapatan
       });
     });
   }
 
   renderRekapBazar();
+  renderPendapatanBazar();
   renderBarisBazar();
   document.getElementById("filter-cari-bazar").addEventListener("input", renderBarisBazar);
 
