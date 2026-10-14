@@ -1468,20 +1468,19 @@ function initDaftarBazar() {
           resultPanel.classList.add("is-visible");
           resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 
-          // Pemberitahuan WA "pendaftar baru" ke grup/nomor panitia (migrasi
-          // 0046) -- BEST-EFFORT, sengaja TIDAK di-await dan TIDAK pernah
-          // menampilkan eror ke pendaftar: kalau Fonnte/secret panitia belum
-          // disetel atau gagal terkirim, pendaftaran itu sendiri TETAP sukses
-          // (sudah tersimpan di database lewat submit_bazar di atas) --
-          // notifikasi ini murni pemberitahuan tambahan, bukan bagian dari
-          // alur pendaftaran yang wajib berhasil. `data.id` (uuid baris
-          // bazar_tenant yang baru) ditambahkan di submit_bazar() sejak
-          // migrasi ini supaya Edge Function bisa mengambil data lengkapnya
-          // sendiri dari database (bukan dari body request).
-          if (data.id) {
-            supabaseClient.functions.invoke("notifikasi-bazar-baru", { body: { id: data.id } })
-              .catch(function (err) { console.error("Gagal mengirim notifikasi WA ke panitia:", err); });
-          }
+          // Pemberitahuan "pendaftar baru" ke panitia (dulu migrasi 0046,
+          // lewat Edge Function `notifikasi-bazar-baru`/Fonnte) SUDAH TIDAK
+          // DIPANGGIL LAGI DARI SINI sejak migrasi 0051 -- wa.me TIDAK BISA
+          // dipakai untuk arah ini (wajib ada panitia yang mengklik link-nya,
+          // dan saat pendaftar baru masuk dari halaman publik seperti ini
+          // tidak ada panitia yang "mengklik" apa pun saat itu). Diganti
+          // notifikasi REALTIME di halaman "/adminbazar" sendiri (Supabase
+          // Realtime + Web Notifications API, lihat view-adminbazar.js fungsi
+          // aktifkanRealtimePendaftarBaruBazar()) yang otomatis mendeteksi
+          // baris baru ini begitu tersimpan ke `bazar_tenant` lewat
+          // submit_bazar() di atas -- tidak perlu memanggil Edge Function apa
+          // pun dari sini lagi. Edge Function `notifikasi-bazar-baru` itu
+          // sendiri TIDAK dihapus, cuma sudah tidak dipanggil.
         } else {
           // Salah satu stand yang dipilih baru saja diambil pendaftar lain
           // meski sudah sempat direservasi (kedaluwarsa, atau race
