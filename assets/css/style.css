@@ -1274,6 +1274,46 @@ tr.row-clickable:hover { background: var(--green-100); }
   white-space: nowrap;
 }
 
+/* Tombol "Kirim WA" (migrasi 0051) -- wrapper span yang diisi async oleh
+   renderTombolWALomba()/renderTombolWABazar(), ditaruh tepat setelah
+   dropdown status (popup detail Lomba & kolom status tabel Bazar). */
+.wa-kirim-wrap,
+.wa-kirim-wrap-bazar {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.78rem;
+  vertical-align: middle;
+}
+.btn-kirim-wa,
+.btn-kirim-wa-bazar {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Banner notifikasi realtime pendaftar/tenant baru (migrasi 0051) -- muncul
+   di atas konten tab aktif begitu ada baris baru masuk ke `pendaftaran`/
+   `bazar_tenant` SELAMA halaman Panitia/Panitia Bazar ini terbuka (lihat
+   aktifkanRealtimePendaftarBaruLomba()/aktifkanRealtimePendaftarBaruBazar()
+   di view-admin.js/view-adminbazar.js). Dipakai BERSAMA oleh kedua halaman
+   (nama class sama, akhiran "Lomba"/"Bazar" cuma pada id elemennya). */
+.banner-pendaftar-baru {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--yellow-100, #fff6d8);
+  border: 1px solid var(--yellow-500, #e0b400);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 0.92rem;
+  color: var(--green-900, #16321f);
+}
+.banner-pendaftar-baru .btn-link {
+  font-weight: 600;
+}
+
 /* Popup/modal (dipakai untuk detail tim di halaman Panitia) */
 .modal-overlay {
   position: fixed;
