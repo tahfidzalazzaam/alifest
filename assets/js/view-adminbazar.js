@@ -223,7 +223,7 @@ async function loadTabTenant() {
     '</div>' +
     '<p class="hint" id="jumlah-hint-bazar"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-tenant"><thead><tr>' +
-      '<th>Nomor</th><th>Nama Usaha</th><th>Jenis Produk</th><th>Jenis/Lokasi Stand</th><th>PJ / WA</th><th>Berkas</th><th>Pembayaran</th><th>Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama Usaha</th><th>Jenis/Lokasi Stand</th><th class="col-status">Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   function renderRekapBazar() {
@@ -537,6 +537,141 @@ async function loadTabTenant() {
     });
   }
 
+  /* ==================== POPUP DETAIL TENANT (tabel diringkas) ====================
+     Dibuka dengan mengetuk baris di tabel "Data Tenant" -- menampung field
+     yang dipindah dari tabel (Jenis Produk, PJ/WA, Berkas) PLUS dropdown
+     ubah Status Pembayaran & Status Pendaftaran yang dulu ada langsung di
+     kolom tabel (sekarang kolom itu murni pil baca-saja), ditambah tombol
+     "Edit" & "Tandai Panitia" yang dulu ada di kolom Aksi. Sama gaya & pola
+     persis dengan popup detail Lomba (bukaModalIndividu/bukaModalTim,
+     statusSelectPopupHTML, pasangListenerStatusPopup) di view-admin.js --
+     Bazar cuma punya SATU bentuk popup (tidak ada individu/tim), jadi tidak
+     perlu fungsi "bukaUlangPopupDetail" terpisah, cukup panggil ulang
+     bukaModalDetailTenantBazar(row) begitu datanya berubah. */
+
+  function selectPembayaranBazarHTML(row) {
+    return '<select id="modal-bazar-status-pembayaran" class="status-select">' +
+      ["Belum Lunas", "Lunas"].map(function (s) {
+        return '<option value="' + s + '"' + (s === row.status_pembayaran ? " selected" : "") + '>' + s + "</option>";
+      }).join("") +
+    '</select>';
+  }
+
+  function selectStatusBazarHTML(row) {
+    return '<select id="modal-bazar-status" class="status-select">' +
+      ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
+        return '<option value="' + s + '"' + (s === row.status ? " selected" : "") + '>' + s + "</option>";
+      }).join("") +
+    '</select> <span class="wa-kirim-wrap-bazar" data-id="' + escapeHTMLBazarAdmin(row.id) + '"></span>';
+  }
+
+  // Benar-benar menyimpan perubahan Status Pembayaran/Status Pendaftaran ke
+  // database -- dipanggil dari listener dropdown di popup. `field` adalah
+  // "status_pembayaran" atau "status".
+  async function commitPerubahanTenantBazar(row, field, nilaiBaru) {
+    const payload = {};
+    payload[field] = nilaiBaru;
+    // Setiap kali status pendaftaran (bukan status pembayaran) berubah,
+    // `wa_terkirim` direset ke false (migrasi 0051) -- supaya tombol "Kirim
+    // WA" di popup selalu tampil "belum terkirim" lagi untuk status baru.
+    if (field === "status") payload.wa_terkirim = false;
+
+    const { error } = await supabaseClient.from("bazar_tenant").update(payload).eq("id", row.id);
+    if (error) {
+      alert("Gagal mengubah " + field + ": " + error.message);
+      bukaModalDetailTenantBazar(row); // kembali ke detail, nilai belum berubah
+      return;
+    }
+
+    row[field] = nilaiBaru;
+    if (field === "status") row.wa_terkirim = false;
+
+    // Menyegarkan tabel & rekap DI BELAKANG popup, sama pola dengan Lomba.
+    renderRekapBazar();
+    renderPendapatanBazar();
+    renderBarisBazar();
+
+    // Popup dibuka ULANG dengan data terbaru (pil status, dropdown, &
+    // tombol "Kirim WA" ikut menampilkan nilai yang baru saja tersimpan).
+    bukaModalDetailTenantBazar(row);
+  }
+
+  // Tandai/batalkan pendaftaran ini sebagai "Milik Panitia" (migrasi 0050) --
+  // dulu tombol terpisah di kolom Aksi tabel, sekarang di dalam popup detail.
+  // Logikanya (konfirmasi + sinkronisasi ke bazar_stand) TIDAK berubah sama
+  // sekali dari versi sebelumnya, cuma tombolnya yang berpindah tempat.
+  async function toggleMilikPanitiaBazar(row) {
+    const btn = document.getElementById("btn-modal-toggle-panitia");
+    const labelAwal = btn ? btn.textContent : "";
+    const nilaiBaru = !row.milik_panitia;
+    const kodeList = kodeStandPerTenant[row.id] || [];
+    const konfirmasi = nilaiBaru
+      ? ('Tandai pendaftaran "' + row.nama_usaha + '" (' + (kodeList.length ? kodeList.join(", ") : "tidak ada kode stand") + ') sebagai MILIK PANITIA? Datanya tetap ada di tabel ini, tapi akan dikeluarkan dari kartu rekap jumlah, Total Pendapatan, dan poster rekap pendaftaran.')
+      : ('Batalkan tanda "Milik Panitia" pada pendaftaran "' + row.nama_usaha + '"? Pendaftaran ini akan ikut dihitung lagi di rekap/poster pendaftaran.');
+    if (!confirm(konfirmasi)) return;
+
+    if (btn) { btn.disabled = true; btn.textContent = "Menyimpan..."; }
+
+    const { error: errTenant } = await supabaseClient.from("bazar_tenant").update({ milik_panitia: nilaiBaru }).eq("id", row.id);
+    if (errTenant) {
+      alert("Gagal menandai: " + errTenant.message);
+      if (btn) { btn.disabled = false; btn.textContent = labelAwal; }
+      return;
+    }
+
+    // Sinkronkan ke bazar_stand -- best-effort, sama seperti sebelumnya.
+    if (kodeList.length > 0) {
+      const { error: errStand } = await supabaseClient.from("bazar_stand").update({ milik_panitia: nilaiBaru }).eq("tenant_id", row.id);
+      if (errStand) {
+        alert("Tanda panitia tersimpan di data tenant, tapi gagal disinkronkan ke stand terkait (" + kodeList.join(", ") + "): " + errStand.message + " -- rekap berbasis stand/poster mungkin belum konsisten, coba lagi.");
+      }
+    }
+
+    row.milik_panitia = nilaiBaru;
+    renderBarisBazar();
+    renderRekapBazar();
+    renderPendapatanBazar();
+    bukaModalDetailTenantBazar(row); // popup dibuka ulang dengan badge/label tombol terbaru
+  }
+
+  function bukaModalDetailTenantBazar(row) {
+    const kodeList = kodeStandPerTenant[row.id] || [];
+    const infoHTML =
+      '<div class="modal-field-grid">' +
+        '<div class="modal-field modal-field--full"><span class="modal-field__label">Nama Usaha</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.nama_usaha) + (row.milik_panitia ? ' <span class="lp-badge">🏷️ Milik Panitia</span>' : '') + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">Jenis Produk</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.jenis_produk) + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">Jenis/Lokasi Stand</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.jenis_stand || row.kategori_stand || "-") + (kodeList.length ? (' (' + kodeList.join(", ") + ')') : '') + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">Penanggung Jawab</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.nama_penanggung_jawab) + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">No. WhatsApp</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.whatsapp) + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTMLBazarAdmin(row.nomor_pendaftaran) + '</span></div>' +
+        '<div class="modal-field"><span class="modal-field__label">Status Pembayaran (ketuk untuk ubah)</span><span class="modal-field__value">' + selectPembayaranBazarHTML(row) + '</span></div>' +
+        '<div class="modal-field modal-field--full"><span class="modal-field__label">Status Pendaftaran (ketuk untuk ubah)</span><span class="modal-field__value">' + selectStatusBazarHTML(row) + '</span></div>' +
+      '</div>' +
+      '<p class="modal-section-title">Berkas</p>' +
+      '<div class="modal-berkas-row">' +
+        BERKAS_SLOT_EDIT_BAZAR.map(function (slot) { return chipBerkasHTML(slot.label, urlSlotEditBazar(row, slot)); }).join("") +
+      '</div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;">' +
+        '<button type="button" class="btn btn--ghost" id="btn-modal-edit-tenant">✏️ Edit Data &amp; Berkas</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-modal-toggle-panitia">' + (row.milik_panitia ? "Batalkan Panitia" : "🏷️ Tandai Panitia") + '</button>' +
+      '</div>';
+
+    bukaModal("Detail Tenant — " + row.nama_usaha, infoHTML);
+
+    const selPembayaran = document.getElementById("modal-bazar-status-pembayaran");
+    const selStatus = document.getElementById("modal-bazar-status");
+    if (selPembayaran) selPembayaran.addEventListener("change", function () { commitPerubahanTenantBazar(row, "status_pembayaran", selPembayaran.value); });
+    if (selStatus) selStatus.addEventListener("change", function () { commitPerubahanTenantBazar(row, "status", selStatus.value); });
+
+    // Tombol "Kirim WA" (migrasi 0051) dirangkai ASYNC setiap kali popup ini
+    // dibuka/dibuka ulang, sama pola dengan pasangListenerStatusPopup() di
+    // view-admin.js.
+    renderTombolWABazar(row);
+
+    document.getElementById("btn-modal-edit-tenant").addEventListener("click", function () { bukaModalEditTenantBazar(row.id); });
+    document.getElementById("btn-modal-toggle-panitia").addEventListener("click", function () { toggleMilikPanitiaBazar(row); });
+  }
+
   let filterAktif = "";
 
   // Warna baris menyesuaikan status (lihat ".status-row--..." di
@@ -549,6 +684,19 @@ async function loadTabTenant() {
     if (status === "Diterima") return "status-row--success";
     if (status === "Ditolak") return "status-row--danger";
     return "status-row--pending"; // "Menunggu Verifikasi"
+  }
+
+  // Pil status berwarna, dipakai di kolom "Status" tabel (tampilan baca-saja)
+  // DAN di popup detail (lihat bukaModalDetailTenantBazar) -- sama gaya &
+  // palet dengan pilStatusLombaHTML() di view-admin.js (ganti awalan
+  // "status-row--" jadi "status-pill--").
+  function pilStatusBazarHTML(status) {
+    const sufiks = kelasBarisStatusBazar(status).replace("status-row--", "");
+    return '<span class="status-pill status-pill--' + sufiks + '">' + escapeHTMLBazarAdmin(status) + '</span>';
+  }
+  function pilPembayaranBazarHTML(statusPembayaran) {
+    const sufiks = statusPembayaran === "Lunas" ? "success" : "pending";
+    return '<span class="status-pill status-pill--' + sufiks + '">' + escapeHTMLBazarAdmin(statusPembayaran) + '</span>';
   }
 
   function renderBarisBazar() {
@@ -565,160 +713,40 @@ async function loadTabTenant() {
 
     const tbody = document.querySelector("#tabel-tenant tbody");
     if (tampil.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9">Tidak ada data yang cocok.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5">Tidak ada data yang cocok.</td></tr>';
       return;
     }
 
+    // Tabel diringkas (permintaan panitia, kolom & tombol terlalu padat) --
+    // Jenis Produk, PJ/WA, Berkas, serta tombol Edit/Tandai Panitia/Kirim WA
+    // DIPINDAH ke popup detail (bukaModalDetailTenantBazar, dibuka dengan
+    // mengetuk barisnya) persis gaya yang sudah dipakai Lomba di
+    // view-admin.js. Kolom Status di tabel sekarang MURNI tampilan (pil
+    // warna status pembayaran + status pendaftaran berdampingan, tidak bisa
+    // diklik) -- ubah status dilakukan dari popup.
     tbody.innerHTML = tampil.map(function (r) {
-      // BUG LAMA yang diperbaiki di sini: kolom "Berkas" cuma pernah
-      // menampilkan `url_foto_produk` (Logo Usaha + Poster Promosi) dan
-      // `url_bukti_bayar` -- `url_bukti_follow_ig` (migrasi 0042, array 2
-      // URL) TIDAK PERNAH ikut ditampilkan sama sekali, walau datanya sudah
-      // tersimpan benar di database. Sekarang SEMUA 5 berkas (Logo, Poster,
-      // Bukti IG #1, Bukti IG #2, Bukti Bayar) ikut ditautkan di sini, label
-      // masing-masing dibuat jelas (bukan generik "Foto #1/#2" lagi) sesuai
-      // urutan index yang dipakai submit_bazar() (lihat migrasi 0042: index 0
-      // url_foto_produk = Logo Usaha, index 1 = Poster Promosi).
-      const fotoList = Array.isArray(r.url_foto_produk) ? r.url_foto_produk : [];
-      const igList = Array.isArray(r.url_bukti_follow_ig) ? r.url_bukti_follow_ig : [];
-      const labelBerkas = ["Logo", "Poster"];
-      const labelIG = ["Bukti IG #1", "Bukti IG #2"];
-      const berkasCell = [
-        fotoList.map(function (u, i) { return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + (labelBerkas[i] || ("Foto #" + (i + 1))) + '</a>' : ""; }).filter(Boolean).join(" · "),
-        igList.map(function (u, i) { return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + (labelIG[i] || ("Bukti IG #" + (i + 1))) + '</a>' : ""; }).filter(Boolean).join(" · "),
-        r.url_bukti_bayar ? '<a href="' + r.url_bukti_bayar + '" target="_blank" rel="noopener">Bukti Bayar</a>' : ""
-      ].filter(Boolean).join(" · ");
-
       const kodeList = kodeStandPerTenant[r.id] || [];
       return (
-        '<tr class="' + kelasBarisStatusBazar(r.status) + '">' +
+        '<tr class="row-clickable ' + kelasBarisStatusBazar(r.status) + '" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
-          '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.nama_usaha) + '">' + (r.milik_panitia ? '🏷️ ' : '') + escapeHTMLBazarAdmin(r.nama_usaha) + '</td>' +
-          '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.jenis_produk) + '">' + escapeHTMLBazarAdmin(r.jenis_produk) + '</td>' +
+          '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.nama_usaha) + '">' + (r.milik_panitia ? '🏷️ ' : '') + escapeHTMLBazarAdmin(r.nama_usaha) + ' <span class="lp-badge">ketuk untuk detail</span></td>' +
           '<td>' + escapeHTMLBazarAdmin(r.jenis_stand || r.kategori_stand || "-") + (kodeList.length ? ('<br/><span class="hint">' + kodeList.join(", ") + '</span>') : '') + '</td>' +
-          '<td>' + escapeHTMLBazarAdmin(r.nama_penanggung_jawab) + '<br/>' + escapeHTMLBazarAdmin(r.whatsapp) + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
-          '<td>' + (berkasCell || "-") + '</td>' +
-          '<td><select class="status-select" data-field="status_pembayaran" data-id="' + r.id + '">' +
-            ["Belum Lunas", "Lunas"].map(function (s) {
-              return '<option value="' + s + '"' + (s === r.status_pembayaran ? " selected" : "") + '>' + s + "</option>";
-            }).join("") +
-          '</select></td>' +
-          '<td><select class="status-select" data-field="status" data-id="' + r.id + '">' +
-            ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
-              return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
-            }).join("") +
-          '</select><span class="wa-kirim-wrap-bazar" data-id="' + r.id + '"></span></td>' +
-          '<td><button type="button" class="btn-link btn-edit-tenant" data-id="' + r.id + '">Edit</button> · ' +
-            '<button type="button" class="btn-link btn-toggle-panitia-tenant" data-id="' + r.id + '">' + (r.milik_panitia ? "Batalkan Panitia" : "Tandai Panitia") + '</button> · ' +
-            '<button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
+          '<td class="col-status">' + pilPembayaranBazarHTML(r.status_pembayaran) + ' ' + pilStatusBazarHTML(r.status) + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
+          '<td><button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
     }).join("");
 
-    // Isi tombol "Kirim WA" (migrasi 0051) untuk SETIAP baris yang baru
-    // dirender -- async, mengisi `.wa-kirim-wrap-bazar[data-id=...]` satu
-    // per satu (lihat renderTombolWABazar() di bawah file ini).
-    tampil.forEach(function (r) { renderTombolWABazar(r); });
-
-    tbody.querySelectorAll(".status-select").forEach(function (sel) {
-      sel.addEventListener("change", async function () {
-        const id = sel.getAttribute("data-id");
-        const field = sel.getAttribute("data-field");
-        const nilaiBaru = sel.value;
-        const payload = {};
-        payload[field] = nilaiBaru;
-        // Setiap kali status pendaftaran (bukan status pembayaran) berubah,
-        // `wa_terkirim` direset ke false (migrasi 0051) -- supaya panitia
-        // selalu diminta klik ulang "Kirim WA" untuk status yang baru,
-        // persis seperti versi Lomba di view-admin.js.
-        if (field === "status") payload.wa_terkirim = false;
-        const { error } = await supabaseClient.from("bazar_tenant").update(payload).eq("id", id);
-        if (error) {
-          alert("Gagal mengubah " + field + ": " + error.message);
-          return;
-        }
-        const row = rows.find(function (r) { return r.id === id; });
-        if (row) {
-          row[field] = nilaiBaru;
-          if (field === "status") row.wa_terkirim = false;
-        }
-        renderRekapBazar();
-        renderPendapatanBazar(); // status_pembayaran (atau status) berubah -- rekap pendapatan ikut disegarkan
-
-        // Warna baris langsung diperbarui di tempat begitu status BERHASIL
-        // tersimpan -- cuma untuk kolom status pendaftaran (bukan status
-        // pembayaran, yang tidak punya pemetaan warna baris sendiri), sama
-        // seperti versi Lomba di view-admin.js, supaya tidak perlu memuat
-        // ulang tabel/halaman untuk melihat warnanya berubah.
-        if (field === "status") {
-          const trStatusBazar = sel.closest("tr");
-          if (trStatusBazar) trStatusBazar.className = kelasBarisStatusBazar(nilaiBaru);
-
-          // Notifikasi WA ke tenant TIDAK LAGI terkirim otomatis lewat
-          // Fonnte (migrasi 0051) -- diganti tombol "Kirim WA" manual
-          // (wa.me) yang dirangkai & disegarkan di sini, memakai template
-          // yang sama dari `bazar_settings`.
-          if (row) renderTombolWABazar(row);
-        }
-      });
-    });
-
-    tbody.querySelectorAll(".btn-edit-tenant").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        bukaModalEditTenantBazar(btn.getAttribute("data-id"));
-      });
-    });
-
-    // Tandai/batalkan pendaftaran ini sebagai "Milik Panitia" (migrasi 0050,
-    // menggantikan toggle yang SALAH TEMPAT di migrasi 0049 -- lihat komentar
-    // panjang di migrasi itu). Dipakai untuk stand yang SUDAH terdaftar
-    // tapi sebenarnya dipakai sendiri oleh panitia (bukan tenant luar),
-    // supaya pendaftarannya TETAP tercatat lengkap di tabel ini tapi
-    // dikeluarkan dari rekap/poster pendaftaran. Begitu disimpan, nilainya
-    // disinkronkan juga ke SEMUA baris `bazar_stand` milik tenant ini --
-    // itu yang membuat pengecualian rekap berbasis stand (poster, tab
-    // "Denah Stand", halaman publik) ikut berlaku otomatis tanpa logika
-    // terpisah.
-    tbody.querySelectorAll(".btn-toggle-panitia-tenant").forEach(function (btn) {
-      btn.addEventListener("click", async function () {
-        const id = btn.getAttribute("data-id");
+    // Semua baris bisa diketuk di mana saja untuk membuka popup detail --
+    // kecuali kalau yang diketuk adalah tombol di dalam baris itu sendiri
+    // (Hapus), sama pola & alasannya dengan view-admin.js.
+    tbody.querySelectorAll("tr.row-clickable").forEach(function (tr) {
+      tr.addEventListener("click", function (e) {
+        if (e.target.closest("select, button, a")) return;
+        const id = tr.getAttribute("data-id");
         const row = rows.find(function (r) { return r.id === id; });
         if (!row) return;
-        const labelAwal = btn.textContent;
-        const nilaiBaru = !row.milik_panitia;
-        const kodeList = kodeStandPerTenant[id] || [];
-        const konfirmasi = nilaiBaru
-          ? ('Tandai pendaftaran "' + row.nama_usaha + '" (' + (kodeList.length ? kodeList.join(", ") : "tidak ada kode stand") + ') sebagai MILIK PANITIA? Datanya tetap ada di tabel ini, tapi akan dikeluarkan dari kartu rekap jumlah, Total Pendapatan, dan poster rekap pendaftaran.')
-          : ('Batalkan tanda "Milik Panitia" pada pendaftaran "' + row.nama_usaha + '"? Pendaftaran ini akan ikut dihitung lagi di rekap/poster pendaftaran.');
-        if (!confirm(konfirmasi)) return;
-
-        btn.disabled = true;
-        btn.textContent = "Menyimpan...";
-
-        const { error: errTenant } = await supabaseClient.from("bazar_tenant").update({ milik_panitia: nilaiBaru }).eq("id", id);
-        if (errTenant) {
-          alert("Gagal menandai: " + errTenant.message);
-          btn.disabled = false;
-          btn.textContent = labelAwal;
-          return;
-        }
-
-        // Sinkronkan ke bazar_stand -- best-effort: kalau ini gagal, data
-        // tenant sudah tersimpan tapi rekap berbasis stand bisa belum
-        // konsisten, jadi panitia diberi tahu secara eksplisit (bukan
-        // dianggap gagal total, supaya tidak perlu mengulang dari awal).
-        if (kodeList.length > 0) {
-          const { error: errStand } = await supabaseClient.from("bazar_stand").update({ milik_panitia: nilaiBaru }).eq("tenant_id", id);
-          if (errStand) {
-            alert("Tanda panitia tersimpan di data tenant, tapi gagal disinkronkan ke stand terkait (" + kodeList.join(", ") + "): " + errStand.message + " -- rekap berbasis stand/poster mungkin belum konsisten, coba lagi.");
-          }
-        }
-
-        row.milik_panitia = nilaiBaru;
-        btn.disabled = false;
-        renderBarisBazar();
-        renderRekapBazar();
-        renderPendapatanBazar();
+        bukaModalDetailTenantBazar(row);
       });
     });
 
