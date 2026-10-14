@@ -1000,6 +1000,15 @@ textarea { resize: vertical; min-height: 80px; }
 .admin-table th.col-status, .admin-table td.col-status {
   min-width: 170px;
 }
+/* Kolom Status tabel "Data Tenant" Bazar (lihat renderBarisBazar() di
+   view-adminbazar.js) menampung DUA pil berdampingan (Status Pembayaran +
+   Status Pendaftaran, keduanya cuma tampilan baca-saja sejak tabelnya
+   diringkas) -- ".status-pill" sudah "display: inline-block" (lihat di
+   bawah), jadi dua pil yang dipisah spasi di markup akan membungkus sendiri
+   ke baris baru kalau kolomnya sempit, tanpa perlu mengubah "display" sel
+   tabelnya sendiri (mengubah itu berisiko merusak perataan lebar kolom
+   tabel bawaan browser).
+*/
 /* Kolom yang bisa panjang (nama, sekolah) dipotong dengan "..." — teks
    lengkapnya muncul lewat tooltip (atribut title) saat kursor diarahkan. */
 .admin-table td.col-truncate {
