@@ -105,6 +105,7 @@ async function renderDashboardBazar(root, session) {
     '<div class="admin-header">' +
       '<div><h1>Panel Panitia Bazar</h1><p>Masuk sebagai ' + session.user.email + '</p></div>' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<button type="button" id="btn-notif-realtime-bazar"></button>' +
         '<button type="button" id="btn-toggle-pendaftaran-bazar"></button>' +
         '<button type="button" class="btn btn--ghost" id="btn-logout-bazar">Keluar</button>' +
       '</div>' +
@@ -148,6 +149,12 @@ async function renderDashboardBazar(root, session) {
     await supabaseClient.auth.signOut();
     renderLoginBazar(root);
   });
+
+  // Notifikasi realtime tenant baru (migrasi 0051) -- lihat blok besar di
+  // bawah file ini untuk detail lengkapnya.
+  perbaruiTombolNotifikasiBazar();
+  document.getElementById("btn-notif-realtime-bazar").addEventListener("click", aktifkanNotifikasiBazar);
+  aktifkanRealtimePendaftarBaruBazar();
 
   const tabs = root.querySelectorAll(".admin-tab");
   tabs.forEach(function (tab) {
@@ -589,7 +596,7 @@ async function loadTabTenant() {
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.nama_usaha) + '">' + (r.milik_panitia ? '🏷️ ' : '') + escapeHTMLBazarAdmin(r.nama_usaha) + '</td>' +
           '<td class="col-truncate" title="' + escapeHTMLBazarAdmin(r.jenis_produk) + '">' + escapeHTMLBazarAdmin(r.jenis_produk) + '</td>' +
           '<td>' + escapeHTMLBazarAdmin(r.jenis_stand || r.kategori_stand || "-") + (kodeList.length ? ('<br/><span class="hint">' + kodeList.join(", ") + '</span>') : '') + '</td>' +
-          '<td>' + escapeHTMLBazarAdmin(r.nama_penanggung_jawab) + '<br/>' + escapeHTMLBazarAdmin(r.whatsapp) + '</td>' +
+          '<td>' + escapeHTMLBazarAdmin(r.nama_penanggung_jawab) + '<br/>' + escapeHTMLBazarAdmin(r.whatsapp) + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
           '<td>' + (berkasCell || "-") + '</td>' +
           '<td><select class="status-select" data-field="status_pembayaran" data-id="' + r.id + '">' +
             ["Belum Lunas", "Lunas"].map(function (s) {
@@ -600,13 +607,18 @@ async function loadTabTenant() {
             ["Menunggu Verifikasi", "Diterima", "Ditolak"].map(function (s) {
               return '<option value="' + s + '"' + (s === r.status ? " selected" : "") + '>' + s + "</option>";
             }).join("") +
-          '</select><span class="hint wa-status-note-bazar" data-note-for="' + r.id + '"></span></td>' +
+          '</select><span class="wa-kirim-wrap-bazar" data-id="' + r.id + '"></span></td>' +
           '<td><button type="button" class="btn-link btn-edit-tenant" data-id="' + r.id + '">Edit</button> · ' +
             '<button type="button" class="btn-link btn-toggle-panitia-tenant" data-id="' + r.id + '">' + (r.milik_panitia ? "Batalkan Panitia" : "Tandai Panitia") + '</button> · ' +
             '<button type="button" class="btn-remove btn-hapus-tenant" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
     }).join("");
+
+    // Isi tombol "Kirim WA" (migrasi 0051) untuk SETIAP baris yang baru
+    // dirender -- async, mengisi `.wa-kirim-wrap-bazar[data-id=...]` satu
+    // per satu (lihat renderTombolWABazar() di bawah file ini).
+    tampil.forEach(function (r) { renderTombolWABazar(r); });
 
     tbody.querySelectorAll(".status-select").forEach(function (sel) {
       sel.addEventListener("change", async function () {
@@ -615,13 +627,21 @@ async function loadTabTenant() {
         const nilaiBaru = sel.value;
         const payload = {};
         payload[field] = nilaiBaru;
+        // Setiap kali status pendaftaran (bukan status pembayaran) berubah,
+        // `wa_terkirim` direset ke false (migrasi 0051) -- supaya panitia
+        // selalu diminta klik ulang "Kirim WA" untuk status yang baru,
+        // persis seperti versi Lomba di view-admin.js.
+        if (field === "status") payload.wa_terkirim = false;
         const { error } = await supabaseClient.from("bazar_tenant").update(payload).eq("id", id);
         if (error) {
           alert("Gagal mengubah " + field + ": " + error.message);
           return;
         }
         const row = rows.find(function (r) { return r.id === id; });
-        if (row) row[field] = nilaiBaru;
+        if (row) {
+          row[field] = nilaiBaru;
+          if (field === "status") row.wa_terkirim = false;
+        }
         renderRekapBazar();
         renderPendapatanBazar(); // status_pembayaran (atau status) berubah -- rekap pendapatan ikut disegarkan
 
@@ -634,12 +654,11 @@ async function loadTabTenant() {
           const trStatusBazar = sel.closest("tr");
           if (trStatusBazar) trStatusBazar.className = kelasBarisStatusBazar(nilaiBaru);
 
-          // Notifikasi WA ke tenant HANYA dipicu saat status dipilih jadi
-          // "Diterima" (permintaan panitia) -- pesannya menyertakan Link
-          // Grup WA (placeholder {grup}, diatur di tab "Notifikasi WA").
-          // Edge Function sendiri MEMBACA ULANG status dari database
-          // (bukan percaya nilai ini), jadi aman walau klik ganda/nyasar.
-          if (nilaiBaru === "Diterima") kirimNotifikasiWABazar(id);
+          // Notifikasi WA ke tenant TIDAK LAGI terkirim otomatis lewat
+          // Fonnte (migrasi 0051) -- diganti tombol "Kirim WA" manual
+          // (wa.me) yang dirangkai & disegarkan di sini, memakai template
+          // yang sama dari `bazar_settings`.
+          if (row) renderTombolWABazar(row);
         }
       });
     });
@@ -775,10 +794,15 @@ async function loadTabTenant() {
   });
 }
 
-/* -------- Kirim notifikasi WA (Fonnte) ke TENANT, lewat Edge Function,
-   dipanggil saat status pendaftaran stand diubah jadi "Diterima" -- pola &
-   nama fungsi sengaja disamakan dengan kirimNotifikasiWA() di view-admin.js
-   (akhiran "Bazar" supaya tidak bentrok, satu scope global JS yang sama) -------- */
+/* -------- (TIDAK DIPAKAI LAGI sejak migrasi 0051, dibiarkan tanpa dihapus
+   atas permintaan pengelola) Kirim notifikasi WA (Fonnte) ke TENANT, lewat
+   Edge Function, dulu dipanggil otomatis saat status pendaftaran stand
+   diubah jadi "Diterima" -- pola & nama fungsi sengaja disamakan dengan
+   kirimNotifikasiWA() di view-admin.js (akhiran "Bazar" supaya tidak
+   bentrok, satu scope global JS yang sama). Selektor `.wa-status-note-bazar`
+   di bawah sudah tidak ada lagi di markup tabel (diganti
+   `.wa-kirim-wrap-bazar`, lihat renderTombolWABazar()), jadi fungsi ini
+   sekarang jadi no-op kalau entah bagaimana masih terpanggil. -------- */
 async function kirimNotifikasiWABazar(id) {
   const noteEl = document.querySelector('.wa-status-note-bazar[data-note-for="' + id + '"]');
   if (noteEl) noteEl.textContent = " · mengirim WA...";
@@ -797,6 +821,188 @@ async function kirimNotifikasiWABazar(id) {
       noteEl.title = (err && err.message) || String(err);
     }
   }
+}
+
+/* ==================== NOTIFIKASI WA TENANT via wa.me (migrasi 0051) ====================
+   Menggantikan kirimNotifikasiWABazar() di atas -- bukan lagi dikirim
+   otomatis dari server (Fonnte), tapi tombol "Kirim WA" manual yang
+   membuka link `https://wa.me/<nomor>?text=<pesan>` di browser panitia
+   sendiri. Pesannya direplikasi PERSIS dari Edge Function
+   kirim-notifikasi-wa-bazar/index.ts (placeholder {usaha}/{nomor}/
+   {penanggung_jawab}/{grup}), cuma HANYA untuk status "Diterima" (lebih
+   sederhana dari versi Lomba yang punya 4 status notifiable) -- gaya
+   penamaan fungsi (akhiran "Bazar") & pola sengaja disamakan dengan
+   view-admin.js. */
+
+// "08..." -> "628..." -- sama persis normalisasiNomorWA() di Edge Function.
+function normalisasiNomorWABazar(nomor) {
+  let bersih = String(nomor || "").replace(/[^0-9]/g, "");
+  if (bersih.indexOf("0") === 0) bersih = "62" + bersih.slice(1);
+  if (bersih.indexOf("8") === 0) bersih = "62" + bersih;
+  return bersih;
+}
+
+function terapkanTemplateWABazar(template, data) {
+  return String(template || "").replace(/\{(\w+)\}/g, function (m, key) {
+    return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : m;
+  });
+}
+
+function buatLinkWaMeBazar(nomor, pesan) {
+  const tujuan = normalisasiNomorWABazar(nomor);
+  if (!tujuan) return null;
+  return "https://wa.me/" + tujuan + "?text=" + encodeURIComponent(pesan);
+}
+
+// Cache sederhana di level modul, sama pola dengan _cacheSiteSettingsWALomba
+// -- dikosongkan lagi begitu panitia menyimpan template baru di tab
+// "Notifikasi WA" (lihat loadTabNotifWaBazar), supaya tombol "Kirim WA"
+// langsung memakai versi terbaru tanpa perlu memuat ulang halaman.
+let _cacheBazarSettingsWABazar = null;
+async function ambilBazarSettingsWABazar() {
+  if (_cacheBazarSettingsWABazar) return _cacheBazarSettingsWABazar;
+  const { data } = await supabaseClient
+    .from("bazar_settings")
+    .select("wa_template_diterima, link_grup_wa")
+    .eq("id", 1).single();
+  _cacheBazarSettingsWABazar = data || {};
+  return _cacheBazarSettingsWABazar;
+}
+
+// Merangkai teks pesan WA untuk tenant `row` -- replikasi PERSIS template
+// default & placeholder dari kirim-notifikasi-wa-bazar/index.ts.
+async function bangunPesanWABazar(row) {
+  const settings = await ambilBazarSettingsWABazar();
+  const template = (settings && settings.wa_template_diterima) ||
+    "Assalamu'alaikum {penanggung_jawab}, pendaftaran stand bazar Anda ({usaha}, nomor {nomor}) telah Diterima. Silakan bergabung ke grup WA: {grup}";
+  return terapkanTemplateWABazar(template, {
+    usaha: row.nama_usaha || "-",
+    nomor: row.nomor_pendaftaran || "-",
+    penanggung_jawab: row.nama_penanggung_jawab || "-",
+    grup: (settings && settings.link_grup_wa) || ""
+  });
+}
+
+// Mengisi `.wa-kirim-wrap-bazar[data-id=...]` (lihat renderBarisBazar()) --
+// kosong kalau status tenant ini BUKAN "Diterima" (satu-satunya status
+// notifiable untuk Bazar, beda dengan Lomba yang punya 4). Tombolnya SELALU
+// bisa diklik ulang -- `wa_terkirim` cuma mengubah labelnya, sama seperti
+// versi Lomba.
+async function renderTombolWABazar(row) {
+  const wrap = document.querySelector('.wa-kirim-wrap-bazar[data-id="' + row.id + '"]');
+  if (!wrap) return;
+  if (row.status !== "Diterima") { wrap.innerHTML = ""; return; }
+
+  wrap.innerHTML = '<span class="hint">Menyiapkan tautan WA...</span>';
+  let link;
+  try {
+    const pesan = await bangunPesanWABazar(row);
+    link = buatLinkWaMeBazar(row.whatsapp, pesan);
+  } catch (e) {
+    wrap.innerHTML = '<span class="hint">⚠️ Gagal menyiapkan tautan WA.</span>';
+    console.error("Gagal merangkai pesan WA bazar:", e);
+    return;
+  }
+  if (!link) {
+    wrap.innerHTML = '<span class="hint">⚠️ Nomor WhatsApp tidak valid, tidak bisa membuat tautan WA.</span>';
+    return;
+  }
+
+  // Dicek ulang (bukan dianggap masih ada) karena fungsi ini ASYNC -- tabel
+  // bisa saja sudah dirender ulang (filter/pencarian) selagi menunggu query
+  // di atas, jadi `wrap` lama bisa sudah lepas dari DOM.
+  const wrapTerkini = document.querySelector('.wa-kirim-wrap-bazar[data-id="' + row.id + '"]');
+  if (!wrapTerkini) return;
+  wrapTerkini.innerHTML =
+    '<a href="' + link + '" target="_blank" rel="noopener" class="btn-link btn-kirim-wa-bazar" data-id="' + escapeHTMLBazarAdmin(row.id) + '">' +
+      (row.wa_terkirim ? "✅ Kirim Ulang WA" : "📲 Kirim WA") +
+    '</a>';
+
+  wrapTerkini.querySelector(".btn-kirim-wa-bazar").addEventListener("click", async function () {
+    // Link wa.me tetap dibuka APA ADANYA oleh browser (target="_blank") --
+    // listener ini cuma menandai `wa_terkirim = true` SECARA PARALEL, tidak
+    // pernah mem-preventDefault apa pun.
+    if (row.wa_terkirim) return; // sudah ditandai sebelumnya, tidak perlu update lagi
+    const { error } = await supabaseClient.from("bazar_tenant").update({ wa_terkirim: true }).eq("id", row.id);
+    if (!error) {
+      row.wa_terkirim = true;
+      renderTombolWABazar(row);
+    }
+  });
+}
+
+/* ==================== NOTIFIKASI REALTIME TENANT BARU (migrasi 0051) ====================
+   Sama persis polanya dengan aktifkanRealtimePendaftarBaruLomba() di
+   view-admin.js (lihat komentar lengkap di sana) -- cuma berlangganan ke
+   tabel `bazar_tenant`, bukan `pendaftaran`. Juga BUKAN notifikasi push ala
+   PWA -- hanya aktif selama tab "/adminbazar" ini terbuka. */
+let _realtimeChannelBazar = null;
+
+function perbaruiTombolNotifikasiBazar() {
+  const btn = document.getElementById("btn-notif-realtime-bazar");
+  if (!btn) return;
+  if (typeof Notification === "undefined") {
+    btn.textContent = "🔕 Notifikasi tidak didukung browser ini";
+    btn.className = "btn btn--ghost";
+    btn.disabled = true;
+    return;
+  }
+  if (Notification.permission === "granted") {
+    btn.textContent = "🔔 Notifikasi Tenant Baru: Aktif";
+    btn.className = "btn btn--ghost";
+  } else if (Notification.permission === "denied") {
+    btn.textContent = "🔕 Notifikasi diblokir (ubah di setelan situs browser)";
+    btn.className = "btn btn--ghost";
+  } else {
+    btn.textContent = "🔔 Aktifkan Notifikasi Tenant Baru";
+    btn.className = "btn btn--primary";
+  }
+}
+
+async function aktifkanNotifikasiBazar() {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch (e) { /* abaikan, beberapa browser lama memakai API callback */ }
+  }
+  perbaruiTombolNotifikasiBazar();
+}
+
+function tampilkanBannerPendaftarBaruBazar(teks) {
+  const lama = document.getElementById("banner-pendaftar-baru-bazar");
+  if (lama) lama.remove();
+  const banner = document.createElement("div");
+  banner.id = "banner-pendaftar-baru-bazar";
+  banner.className = "banner-pendaftar-baru";
+  banner.innerHTML =
+    '<span>🔔 ' + escapeHTMLBazarAdmin(teks) + '</span>' +
+    '<span>' +
+      '<button type="button" class="btn-link" id="btn-muat-ulang-banner-bazar">Muat Ulang</button> · ' +
+      '<button type="button" class="btn-link" id="btn-tutup-banner-bazar">Tutup</button>' +
+    '</span>';
+  const content = document.getElementById("adminbazar-content");
+  if (content && content.parentNode) content.parentNode.insertBefore(banner, content);
+  document.getElementById("btn-tutup-banner-bazar").addEventListener("click", function () { banner.remove(); });
+  document.getElementById("btn-muat-ulang-banner-bazar").addEventListener("click", function () {
+    banner.remove();
+    loadTabTenant();
+  });
+}
+
+// Dipanggil SATU KALI per sesi dashboard terbuka (renderDashboardBazar) --
+// cek `_realtimeChannelBazar` dulu supaya tidak dobel subscribe.
+function aktifkanRealtimePendaftarBaruBazar() {
+  if (_realtimeChannelBazar) return;
+  _realtimeChannelBazar = supabaseClient
+    .channel("realtime-pendaftar-baru-bazar")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "bazar_tenant" }, function (payload) {
+      const r = payload.new || {};
+      const teks = "Tenant baru: " + (r.nama_usaha || "-") + " (" + (r.nomor_pendaftaran || "-") + ")";
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try { new Notification("ALIF 5.0 — Tenant Bazar Baru", { body: teks }); } catch (e) { console.warn("Gagal menampilkan notifikasi browser:", e); }
+      }
+      tampilkanBannerPendaftarBaruBazar(teks);
+    })
+    .subscribe();
 }
 
 /* -------- Unduh Data Tenant sebagai XLSX (murni client-side) --------
@@ -2008,8 +2214,8 @@ async function loadTabNotifWaBazar() {
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
-      '<h3>💬 Notifikasi WA ke Tenant (saat Diterima)</h3>' +
-      '<p>Dikirim otomatis ke nomor WhatsApp penanggung jawab tenant setiap kali status stand-nya dipilih jadi <strong>Diterima</strong> di tab "Data Tenant".</p>' +
+      '<h3>💬 Notifikasi WA ke Tenant (tombol "Kirim WA")</h3>' +
+      '<p>Pesan DISUSUN otomatis begitu status stand dipilih jadi <strong>Diterima</strong> di tab "Data Tenant", tapi TIDAK terkirim sendiri: muncul tombol <strong>"📲 Kirim WA"</strong> yang membuka WhatsApp (app/web) lewat link <code>wa.me</code> dengan nomor & pesan penanggung jawab tenant yang sudah terisi — panitia sendiri yang menekan kirim di sana.</p>' +
       '<div class="field">' +
         '<label for="wabazar-template-diterima">Pesan</label>' +
         '<textarea id="wabazar-template-diterima" rows="8">' + escapeHTMLBazarAdmin(templateDiterima) + '</textarea>' +
@@ -2027,8 +2233,8 @@ async function loadTabNotifWaBazar() {
       '<p class="hint" id="wabazar-diterima-status" style="margin-top:10px;"></p>' +
     '</div>' +
     '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
-      '<h3>📥 Notifikasi WA ke Panitia (pendaftar baru)</h3>' +
-      '<p>Dikirim otomatis ke grup/nomor panitia setiap kali ADA pendaftar stand bazar baru masuk (langsung begitu formulir publik berhasil dikirim).</p>' +
+      '<h3>📥 Notifikasi Panitia (pendaftar baru) — sekarang lewat Notifikasi Browser</h3>' +
+      '<p>Sejak pembaruan ini, pesan WA otomatis ke panitia saat ada pendaftar stand bazar baru TIDAK dikirim lagi — diganti <strong>Notifikasi Browser real-time</strong> (tombol 🔔 di pojok kanan atas halaman ini) yang langsung muncul selama tab "/adminbazar" ini terbuka, tanpa perlu instal apa pun. Kotak pesan di bawah ini DIBIARKAN tersimpan (tidak dihapus) kalau suatu saat ingin diaktifkan lagi, tapi untuk saat ini tidak dipakai/dikirim ke mana pun.</p>' +
       '<div class="field">' +
         '<label for="wabazar-template-panitia">Pesan</label>' +
         '<textarea id="wabazar-template-panitia" rows="7">' + escapeHTMLBazarAdmin(templatePanitiaBaru) + '</textarea>' +
@@ -2041,8 +2247,8 @@ async function loadTabNotifWaBazar() {
       '<p class="hint" id="wabazar-panitia-status" style="margin-top:10px;"></p>' +
     '</div>' +
     '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
-      '<h3>⚙️ Tujuan Notifikasi Panitia & Setup Fonnte</h3>' +
-      '<p class="hint">Nomor WA atau ID grup TUJUAN notifikasi "pendaftar baru" di atas SENGAJA tidak diatur di halaman ini (supaya tidak tersimpan di tempat yang bisa dibaca publik) -- diisi lewat secret Edge Function <code>FONNTE_TARGET_PANITIA</code> (Project Settings → Edge Functions → Secrets), sama tempatnya dengan <code>FONNTE_TOKEN</code> yang sudah ada. Pastikan Edge Function <code>kirim-notifikasi-wa-bazar</code> dan <code>notifikasi-bazar-baru</code> sudah ter-deploy. Lihat README.md bagian "Setup Notifikasi WhatsApp (Fonnte)" untuk langkah lengkapnya.</p>' +
+      '<h3>⚙️ Tentang Fonnte</h3>' +
+      '<p class="hint">Sejak pembaruan ini, notifikasi WA TIDAK LAGI butuh layanan Fonnte untuk pemakaian normal — notifikasi ke tenant memakai tombol "Kirim WA" (link <code>wa.me</code> langsung dari browser panitia), dan notifikasi pendaftar baru ke panitia memakai Notifikasi Browser real-time (bukan WA). Edge Function <code>kirim-notifikasi-wa-bazar</code>, <code>notifikasi-bazar-baru</code>, serta secret <code>FONNTE_TOKEN</code>/<code>FONNTE_TARGET_PANITIA</code> sengaja dibiarkan ada (tidak dihapus) kalau suatu saat ingin diaktifkan lagi, tapi tidak dipanggil dari halaman ini. Lihat README.md bagian "Setup Notifikasi WhatsApp" untuk detail arsitektur barunya.</p>' +
     '</div>';
 
   document.getElementById("btn-simpan-wabazar-diterima").addEventListener("click", async function () {
@@ -2073,6 +2279,7 @@ async function loadTabNotifWaBazar() {
       errEl.style.display = "block";
       return;
     }
+    _cacheBazarSettingsWABazar = null; // supaya link "Kirim WA" berikutnya langsung pakai template/link grup baru, tanpa perlu reload halaman
     statusEl.textContent = "Tersimpan.";
     setTimeout(function () { statusEl.textContent = ""; }, 3000);
   });
