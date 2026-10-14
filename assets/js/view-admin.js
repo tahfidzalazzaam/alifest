@@ -123,6 +123,7 @@ async function renderDashboard(root, session) {
     '<div class="admin-header">' +
       '<div><h1>Panel Panitia</h1><p>Masuk sebagai ' + session.user.email + '</p></div>' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+        '<button type="button" id="btn-notif-realtime-lomba"></button>' +
         '<button type="button" id="btn-toggle-pendaftaran"></button>' +
         '<button type="button" class="btn btn--ghost" id="btn-logout">Keluar</button>' +
       '</div>' +
@@ -169,6 +170,12 @@ async function renderDashboard(root, session) {
     renderLogin(root);
   });
 
+  // Notifikasi realtime pendaftar baru (migrasi 0051) -- lihat blok besar
+  // di bawah file ini untuk detail lengkapnya.
+  perbaruiTombolNotifikasiLomba();
+  document.getElementById("btn-notif-realtime-lomba").addEventListener("click", aktifkanNotifikasiLomba);
+  aktifkanRealtimePendaftarBaruLomba();
+
   const tabs = root.querySelectorAll(".admin-tab");
   tabs.forEach(function (tab) {
     tab.addEventListener("click", function () {
@@ -185,6 +192,95 @@ async function renderDashboard(root, session) {
   });
 
   loadTabPendaftar();
+}
+
+/* ==================== NOTIFIKASI REALTIME PENDAFTAR BARU (migrasi 0051) ====================
+   Menggantikan Edge Function Fonnte untuk memberi tahu panitia ada
+   pendaftar BARU -- wa.me TIDAK BISA dipakai untuk arah ini (wa.me wajib
+   diklik seseorang, dan saat pendaftar baru masuk dari halaman publik
+   tidak ada panitia yang "mengklik" apa pun saat itu). Sebagai gantinya,
+   selama tab "/admin" ini TERBUKA, halaman berlangganan (subscribe) lewat
+   Supabase Realtime ke tabel `pendaftaran` (publication diaktifkan di
+   migrasi 0051) dan menampilkan Notifikasi Browser (Web Notifications API)
+   + banner di dalam halaman begitu ada baris baru masuk.
+
+   PENTING: ini BUKAN notifikasi push ala PWA -- tidak perlu "Add to Home
+   Screen"/instal apa pun, tapi juga TIDAK bisa membangunkan notifikasi
+   saat tab ini TERTUTUP (beda dari push notification aplikasi native/PWA
+   yang didaftarkan lewat service worker). Hanya aktif selama tab ini
+   terbuka & izin notifikasi browser sudah diberikan -- persis seperti
+   notifikasi instan aplikasi desktop biasa (bukan PWA) selagi aplikasinya
+   berjalan. */
+let _realtimeChannelLomba = null;
+
+function perbaruiTombolNotifikasiLomba() {
+  const btn = document.getElementById("btn-notif-realtime-lomba");
+  if (!btn) return;
+  if (typeof Notification === "undefined") {
+    btn.textContent = "🔕 Notifikasi tidak didukung browser ini";
+    btn.className = "btn btn--ghost";
+    btn.disabled = true;
+    return;
+  }
+  if (Notification.permission === "granted") {
+    btn.textContent = "🔔 Notifikasi Pendaftar Baru: Aktif";
+    btn.className = "btn btn--ghost";
+  } else if (Notification.permission === "denied") {
+    btn.textContent = "🔕 Notifikasi diblokir (ubah di setelan situs browser)";
+    btn.className = "btn btn--ghost";
+  } else {
+    btn.textContent = "🔔 Aktifkan Notifikasi Pendaftar Baru";
+    btn.className = "btn btn--primary";
+  }
+}
+
+async function aktifkanNotifikasiLomba() {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch (e) { /* abaikan, beberapa browser lama memakai API callback */ }
+  }
+  perbaruiTombolNotifikasiLomba();
+}
+
+function tampilkanBannerPendaftarBaruLomba(teks) {
+  const lama = document.getElementById("banner-pendaftar-baru-lomba");
+  if (lama) lama.remove();
+  const banner = document.createElement("div");
+  banner.id = "banner-pendaftar-baru-lomba";
+  banner.className = "banner-pendaftar-baru";
+  banner.innerHTML =
+    '<span>🔔 ' + escapeHTML(teks) + '</span>' +
+    '<span>' +
+      '<button type="button" class="btn-link" id="btn-muat-ulang-banner-lomba">Muat Ulang</button> · ' +
+      '<button type="button" class="btn-link" id="btn-tutup-banner-lomba">Tutup</button>' +
+    '</span>';
+  const content = document.getElementById("admin-content");
+  if (content && content.parentNode) content.parentNode.insertBefore(banner, content);
+  document.getElementById("btn-tutup-banner-lomba").addEventListener("click", function () { banner.remove(); });
+  document.getElementById("btn-muat-ulang-banner-lomba").addEventListener("click", function () {
+    banner.remove();
+    loadTabPendaftar();
+  });
+}
+
+// Dipanggil SATU KALI per sesi dashboard terbuka (renderDashboard) -- cek
+// `_realtimeChannelLomba` dulu supaya tidak dobel subscribe kalau fungsi ini
+// entah bagaimana terpanggil lagi (mis. panitia logout lalu login ulang
+// tanpa memuat ulang halaman penuh).
+function aktifkanRealtimePendaftarBaruLomba() {
+  if (_realtimeChannelLomba) return;
+  _realtimeChannelLomba = supabaseClient
+    .channel("realtime-pendaftar-baru-lomba")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "pendaftaran" }, function (payload) {
+      const r = payload.new || {};
+      const nama = r.tipe === "tim" ? (r.nama_tim || r.nama_lengkap) : r.nama_lengkap;
+      const teks = "Pendaftar baru: " + (nama || "-") + " (" + (r.lomba_nama || r.lomba_id || "-") + ")";
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try { new Notification("ALIF 5.0 — Pendaftar Baru", { body: teks }); } catch (e) { console.warn("Gagal menampilkan notifikasi browser:", e); }
+      }
+      tampilkanBannerPendaftarBaruLomba(teks);
+    })
+    .subscribe();
 }
 
 /* ==================== MODAL (dipakai untuk popup detail tim) ==================== */
@@ -370,7 +466,11 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
     }
   }
 
-  const payload = { status: statusBaru };
+  // `wa_terkirim` (migrasi 0051) direset ke false setiap kali status
+  // berganti -- supaya tombol "Kirim WA" selalu tampil "belum terkirim"
+  // lagi untuk status yang baru, tidak peduli status sebelumnya sudah
+  // pernah dikirim atau belum.
+  const payload = { status: statusBaru, wa_terkirim: false };
   if (statusBaru === "Ditolak") payload.alasan_penolakan = alasanPenolakan;
 
   const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", row.id);
@@ -385,6 +485,7 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   // dibuka) -- jadi cukup diubah di sini, otomatis ikut ter-update di
   // array itu juga tanpa perlu dicari ulang.
   row.status = statusBaru;
+  row.wa_terkirim = false;
   if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
 
   // Menyegarkan tabel DI BELAKANG popup (warna baris & kartu rekap) --
@@ -394,21 +495,13 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   if (typeof renderBarisPendaftarRef === "function") renderBarisPendaftarRef();
 
   // Popup detail dibuka ULANG dengan data terbaru (dropdown status & pil
-  // warnanya ikut menampilkan status yang baru saja tersimpan) -- SEBELUM
-  // mengirim notifikasi WA, supaya elemen ".wa-status-note" yang dicari
-  // kirimNotifikasiWA() sudah ada lagi di DOM popup yang baru.
+  // warnanya ikut menampilkan status yang baru saja tersimpan). Sejak
+  // migrasi 0051, notifikasi WA TIDAK LAGI terkirim otomatis dari sini
+  // (dulu lewat Fonnte) -- panitia mengirimnya sendiri secara manual lewat
+  // tombol "Kirim WA" (link wa.me) yang akan muncul di popup yang dibuka
+  // ulang ini, lihat renderTombolWALomba() yang dipanggil dari
+  // pasangListenerStatusPopup().
   bukaUlangPopupDetailLomba(row, isTim, rule);
-
-  // "Perlu Verifikasi Usia" dan "Perlu Tambah Nomor Punggung" juga mengirim
-  // notifikasi WA (sama seperti Diterima/Ditolak) begitu status ini
-  // tersimpan -- untuk lomba tim (Futsal), pesannya otomatis menyebut nama
-  // anggota yang usianya di luar syarat lewat placeholder {anggota_usia},
-  // atau link lengkapi nomor punggung lewat placeholder {link_lengkapi},
-  // atau (khusus "Ditolak") alasan penolakan lewat placeholder {alasan}
-  // (dihitung di Edge Function kirim-notifikasi-wa, lihat file itu).
-  if (statusBaru === "Diterima" || statusBaru === "Ditolak" || statusBaru === "Perlu Verifikasi Usia" || statusBaru === "Perlu Tambah Nomor Punggung") {
-    kirimNotifikasiWA(row.id);
-  }
 }
 
 // Popup WAJIB pilih alasan penolakan, dibuka saat panitia memilih "Ditolak"
@@ -483,8 +576,9 @@ async function bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule) {
 // Dropdown status yang dipasang di popup detail (menggantikan dropdown yang
 // dulu ada di kolom Status tabel) -- "isTim" menentukan daftar opsinya
 // (tim/Futsal punya opsi tambahan "Perlu Tambah Nomor Punggung"). Diikuti
-// span ".wa-status-note" untuk pesan "mengirim WA.../✅ terkirim/⚠️ gagal"
-// yang sama persis perilakunya dengan sebelumnya (lihat kirimNotifikasiWA()).
+// span ".wa-kirim-wrap" yang diisi ASYNC oleh renderTombolWALomba() (migrasi
+// 0051) dengan tombol "Kirim WA" (link wa.me) -- menggantikan ".wa-status-
+// note" lama yang dulu menampilkan status kirim OTOMATIS lewat Fonnte.
 function statusSelectPopupHTML(id, status, isTim) {
   const opsi = isTim
     ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
@@ -494,7 +588,7 @@ function statusSelectPopupHTML(id, status, isTim) {
       opsi.map(function (s) {
         return '<option value="' + s + '"' + (s === status ? " selected" : "") + '>' + s + "</option>";
       }).join("") +
-    '</select> <span class="wa-status-note" data-note-for="' + escapeHTML(id) + '"></span>'
+    '</select> <span class="wa-kirim-wrap" data-id="' + escapeHTML(id) + '"></span>'
   );
 }
 
@@ -516,6 +610,13 @@ function pasangListenerStatusPopup(row, isTim, rule) {
 
     commitPerubahanStatusLomba(row, statusBaru, null, isTim, rule);
   });
+
+  // Tombol "Kirim WA" (migrasi 0051) dirangkai ASYNC setiap kali popup ini
+  // dibuka/dibuka ulang (termasuk sesudah status berganti, lewat
+  // bukaUlangPopupDetailLomba() -> bukaModalTim/bukaModalIndividu ->
+  // pasangListenerStatusPopup lagi) supaya selalu menampilkan pesan & status
+  // "sudah terkirim" yang sesuai dengan `row` TERBARU.
+  renderTombolWALomba(row, rule);
 }
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
@@ -646,8 +747,10 @@ function bukaModalIndividu(row) {
   pasangListenerStatusPopup(row, false, null);
 }
 
-/* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function, dipanggil saat
-   status pendaftaran diubah jadi "Diterima" atau "Ditolak" -------- */
+/* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function -- TIDAK DIPAKAI
+   LAGI sejak migrasi 0051 (diganti tombol "Kirim WA"/wa.me manual di bawah),
+   fungsi ini SENGAJA DIBIARKAN (tidak dihapus) kalau suatu saat Fonnte mau
+   dipakai lagi -- lihat catatan di migrasi 0051. -------- */
 async function kirimNotifikasiWA(id, selEl) {
   const noteEl = document.querySelector('.wa-status-note[data-note-for="' + id + '"]');
   if (noteEl) noteEl.textContent = " · mengirim WA...";
@@ -666,6 +769,179 @@ async function kirimNotifikasiWA(id, selEl) {
       noteEl.title = (err && err.message) || String(err);
     }
   }
+}
+
+/* ==================== KIRIM WA LEWAT wa.me (migrasi 0051) ====================
+   Menggantikan pengiriman OTOMATIS lewat Fonnte di atas -- pesan dirangkai
+   di BROWSER panitia sendiri (bukan Edge Function), memakai template yang
+   SAMA (site_settings.wa_template_per_status/wa_notif_template, diedit di
+   tab "Notifikasi WA"), lalu dijadikan link `https://wa.me/<nomor>?text=...`
+   yang panitia klik manual untuk membuka WhatsApp & mengirim sendiri. Logika
+   placeholder {nama}/{nomor}/{lomba}/{status}/{grup}/{anggota_usia}/
+   {link_lengkapi}/{alasan} SENGAJA direplikasi PERSIS dari Edge Function
+   kirim-notifikasi-wa/index.ts (lihat komentar di sana) supaya isi pesannya
+   tidak berubah, cuma cara kirimnya yang berubah. */
+
+// "08..." -> "628..." -- sama persis normalisasiNomorWA() di Edge Function.
+function normalisasiNomorWALomba(nomor) {
+  let bersih = String(nomor || "").replace(/[^0-9]/g, "");
+  if (bersih.indexOf("0") === 0) bersih = "62" + bersih.slice(1);
+  if (bersih.indexOf("8") === 0) bersih = "62" + bersih;
+  return bersih;
+}
+
+function terapkanTemplateWALomba(template, data) {
+  return String(template || "").replace(/\{(\w+)\}/g, function (m, key) {
+    return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : m;
+  });
+}
+
+function buatLinkWaMeLomba(nomor, pesan) {
+  const tujuan = normalisasiNomorWALomba(nomor);
+  if (!tujuan) return null;
+  return "https://wa.me/" + tujuan + "?text=" + encodeURIComponent(pesan);
+}
+
+// Cache sederhana di level modul -- template/link grup/URL situs jarang
+// berubah dalam satu sesi panitia terbuka, jadi tidak perlu query ulang
+// setiap kali tombol "Kirim WA" dibangun (mis. tiap kali popup detail
+// dibuka). Dikosongkan lagi (lihat loadTabNotifWa) begitu panitia menyimpan
+// perubahan template di tab "Notifikasi WA", supaya tombol langsung
+// memakai versi terbaru tanpa perlu memuat ulang halaman.
+let _cacheSiteSettingsWALomba = null;
+async function ambilSiteSettingsWALomba() {
+  if (_cacheSiteSettingsWALomba) return _cacheSiteSettingsWALomba;
+  const { data } = await supabaseClient
+    .from("site_settings")
+    .select("wa_notif_template, wa_template_per_status, link_grup_wa, link_grup_wa_futsal, site_url")
+    .eq("id", 1).single();
+  _cacheSiteSettingsWALomba = data || {};
+  return _cacheSiteSettingsWALomba;
+}
+
+// Usia pada tanggal acuan -- SAMA PERSIS rumusnya dengan hitungUsia() di
+// Edge Function kirim-notifikasi-wa/index.ts (migrasi 0018).
+function hitungUsiaWALomba(tanggalLahir, tanggalAcuan) {
+  try {
+    const lahir = new Date(tanggalLahir + "T00:00:00Z");
+    const acuan = new Date(tanggalAcuan + "T00:00:00Z");
+    if (isNaN(lahir.getTime()) || isNaN(acuan.getTime())) return null;
+    let usia = acuan.getUTCFullYear() - lahir.getUTCFullYear();
+    const belumUlangTahun =
+      acuan.getUTCMonth() < lahir.getUTCMonth() ||
+      (acuan.getUTCMonth() === lahir.getUTCMonth() && acuan.getUTCDate() < lahir.getUTCDate());
+    if (belumUlangTahun) usia--;
+    return usia;
+  } catch (e) {
+    return null;
+  }
+}
+
+// {anggota_usia}: replikasi PERSIS logika Edge Function -- cuma relevan
+// untuk pendaftaran tim (Futsal) berstatus "Perlu Verifikasi Usia".
+async function hitungAnggotaUsiaTextWALomba(row, rule) {
+  if (row.tipe !== "tim") return "";
+  const syaratJenjang = rule && rule.usia_per_jenjang ? rule.usia_per_jenjang[row.jenjang] : null;
+  if (!syaratJenjang || syaratJenjang.min == null || syaratJenjang.max == null) return "";
+  const tanggalAcuan = (rule && rule.tanggal_pelaksanaan) || new Date().toISOString().slice(0, 10);
+  const { data: anggotaList } = await supabaseClient
+    .from("anggota_tim")
+    .select("nama, tanggal_lahir")
+    .eq("nomor_pendaftaran", row.nomor_pendaftaran);
+  const namaDiLuarSyarat = (anggotaList || [])
+    .filter(function (a) {
+      if (!a.tanggal_lahir) return false;
+      const usia = hitungUsiaWALomba(a.tanggal_lahir, tanggalAcuan);
+      return usia != null && (usia < syaratJenjang.min || usia > syaratJenjang.max);
+    })
+    .map(function (a) { return a.nama; });
+  return namaDiLuarSyarat.join(", ");
+}
+
+// Merangkai teks pesan WA untuk status `row.status` SAAT INI -- replikasi
+// PERSIS gating {grup}/{link_lengkapi}/{alasan} dari Edge Function
+// kirim-notifikasi-wa/index.ts (migrasi 0028/0032/0036/0048).
+async function bangunPesanWALomba(row, rule) {
+  const settings = await ambilSiteSettingsWALomba();
+  const templatePerStatus = settings.wa_template_per_status ? settings.wa_template_per_status[row.status] : null;
+  const template = templatePerStatus || settings.wa_notif_template ||
+    "Assalamu'alaikum {nama}, status pendaftaran Anda di {lomba} ALIF 5.0 (nomor {nomor}) kini: {status}.";
+
+  const namaTampil = row.tipe === "tim" ? (row.nama_tim || row.nama_lengkap) : row.nama_lengkap;
+  const anggotaUsiaText = await hitungAnggotaUsiaTextWALomba(row, rule);
+
+  const grupUntukStatusIni = row.status === "Diterima"
+    ? ((row.lomba_id === "futsal" && settings.link_grup_wa_futsal) || settings.link_grup_wa || "")
+    : "";
+
+  const linkLengkapiUntukStatusIni =
+    (row.status === "Perlu Tambah Nomor Punggung" && row.token_lengkapi && settings.site_url)
+      ? (settings.site_url + "/#/lengkapi?token=" + row.token_lengkapi)
+      : "";
+
+  const alasanUntukStatusIni = (row.status === "Ditolak" && row.alasan_penolakan) || "";
+
+  return terapkanTemplateWALomba(template, {
+    nama: namaTampil || "-",
+    nomor: row.nomor_pendaftaran || "-",
+    lomba: row.lomba_nama || "-",
+    status: row.status || "-",
+    grup: grupUntukStatusIni,
+    anggota_usia: anggotaUsiaText,
+    link_lengkapi: linkLengkapiUntukStatusIni,
+    alasan: alasanUntukStatusIni
+  });
+}
+
+// Mengisi `.wa-kirim-wrap[data-id=...]` (lihat statusSelectPopupHTML()) --
+// kosong kalau status saat ini bukan salah satu dari 4 status yang memang
+// butuh notifikasi (STATUS_WA_LIST, didefinisikan di bawah di tab
+// "Notifikasi WA"). Tombolnya SELALU aktif/bisa diklik lagi (bukan
+// dinonaktifkan permanen) supaya panitia tetap bisa kirim ULANG kalau perlu
+// -- `wa_terkirim` cuma mengubah labelnya, bukan menghilangkan tombolnya.
+async function renderTombolWALomba(row, rule) {
+  const wrap = document.querySelector('.wa-kirim-wrap[data-id="' + row.id + '"]');
+  if (!wrap) return;
+  if (STATUS_WA_LIST.indexOf(row.status) === -1) { wrap.innerHTML = ""; return; }
+
+  wrap.innerHTML = '<span class="hint">Menyiapkan tautan WA...</span>';
+  let link;
+  try {
+    const pesan = await bangunPesanWALomba(row, rule);
+    link = buatLinkWaMeLomba(row.whatsapp, pesan);
+  } catch (e) {
+    wrap.innerHTML = '<span class="hint">⚠️ Gagal menyiapkan tautan WA.</span>';
+    console.error("Gagal merangkai pesan WA:", e);
+    return;
+  }
+  if (!link) {
+    wrap.innerHTML = '<span class="hint">⚠️ Nomor WhatsApp tidak valid, tidak bisa membuat tautan WA.</span>';
+    return;
+  }
+
+  // Elemen yang sama dicek ulang (bukan dianggap masih ada) karena fungsi
+  // ini ASYNC -- popup bisa saja sudah ditutup/dibuka ulang selagi menunggu
+  // query di atas, jadi `wrap` lama bisa sudah lepas dari DOM.
+  const wrapTerkini = document.querySelector('.wa-kirim-wrap[data-id="' + row.id + '"]');
+  if (!wrapTerkini) return;
+  wrapTerkini.innerHTML =
+    '<a href="' + link + '" target="_blank" rel="noopener" class="btn-link btn-kirim-wa" data-id="' + escapeHTML(row.id) + '">' +
+      (row.wa_terkirim ? "✅ Kirim Ulang WA" : "📲 Kirim WA") +
+    '</a>';
+
+  wrapTerkini.querySelector(".btn-kirim-wa").addEventListener("click", async function () {
+    // Link wa.me tetap dibuka APA ADANYA oleh browser (target="_blank") --
+    // listener ini cuma menandai `wa_terkirim = true` SECARA PARALEL, tidak
+    // pernah mem-preventDefault apa pun, supaya panitia tidak lupa sudah
+    // mengklik tombol ini untuk status saat ini.
+    if (row.wa_terkirim) return; // sudah ditandai sebelumnya, tidak perlu update lagi
+    const { error } = await supabaseClient.from("pendaftaran").update({ wa_terkirim: true }).eq("id", row.id);
+    if (!error) {
+      row.wa_terkirim = true;
+      if (typeof renderBarisPendaftarRef === "function") renderBarisPendaftarRef();
+      renderTombolWALomba(row, rule);
+    }
+  });
 }
 
 async function loadTabPendaftar() {
@@ -856,7 +1132,7 @@ async function loadTabPendaftar() {
           '<td>' + lahirUsia + '</td>' +
           '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
           '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
-          '<td>' + r.whatsapp + '</td>' +
+          '<td>' + r.whatsapp + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
           '<td class="col-status">' + pilStatusLombaHTML(r.status) + '</td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
@@ -2651,8 +2927,8 @@ async function loadTabNotifWa() {
 
   content.innerHTML =
     '<div class="form-shell" style="max-width:640px;">' +
-      '<h3>💬 Notifikasi WhatsApp (Fonnte)</h3>' +
-      '<p>Pesan otomatis dikirim ke nomor WhatsApp pendaftar setiap kali status pendaftarannya dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, <strong>Perlu Verifikasi Usia</strong>, atau <strong>Perlu Tambah Nomor Punggung</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Sejak pembaruan ini, pesan tiap status bisa diedit terpisah di bawah.</p>' +
+      '<h3>💬 Notifikasi WhatsApp (tombol "Kirim WA")</h3>' +
+      '<p>Pesan DISUSUN otomatis begitu status pendaftaran dipilih jadi <strong>Diterima</strong>, <strong>Ditolak</strong>, <strong>Perlu Verifikasi Usia</strong>, atau <strong>Perlu Tambah Nomor Punggung</strong> di dropdown tab "Data Pendaftar" — berlaku untuk <strong>semua lomba</strong>, individu maupun tim. Tapi pesannya TIDAK terkirim sendiri: muncul tombol <strong>"📲 Kirim WA"</strong> yang, kalau diklik, membuka WhatsApp (app/web) dengan nomor & pesan yang sudah terisi lewat link <code>wa.me</code> — panitia sendiri yang menekan kirim di sana. Pesan tiap status bisa diedit terpisah di bawah.</p>' +
       kotakStatusHTML +
       '<div class="hint" style="margin-top:14px;">' + WA_PLACEHOLDER_HINT + '</div>' +
       '<div class="field" style="margin-top:22px;">' +
@@ -2690,8 +2966,8 @@ async function loadTabNotifWa() {
       '<p class="hint" id="alasan-penolakan-list-status" style="margin-top:10px;"></p>' +
     '</div>' +
     '<div class="form-shell" style="max-width:640px;margin-top:20px;">' +
-      '<h3>⚙️ Setup Fonnte</h3>' +
-      '<p class="hint">Notifikasi dikirim lewat layanan Fonnte. Pastikan token Fonnte sudah diisi sebagai secret Edge Function <code>FONNTE_TOKEN</code> lewat dashboard Supabase (Project Settings → Edge Functions → Secrets), dan Edge Function <code>kirim-notifikasi-wa</code> sudah di-deploy. Lihat README.md bagian "Setup Notifikasi WhatsApp (Fonnte)" untuk langkah lengkapnya.</p>' +
+      '<h3>⚙️ Tentang Fonnte</h3>' +
+      '<p class="hint">Sejak pembaruan ini, notifikasi WA TIDAK LAGI butuh layanan Fonnte untuk pemakaian normal — tombol "Kirim WA" di atas memakai link <code>wa.me</code> langsung dari browser panitia, tanpa API berbayar apa pun. Edge Function <code>kirim-notifikasi-wa</code> & secret <code>FONNTE_TOKEN</code> sengaja dibiarkan ada (tidak dihapus) kalau suatu saat ingin diaktifkan lagi, tapi tidak dipanggil dari halaman ini. Lihat README.md bagian "Setup Notifikasi WhatsApp" untuk detail arsitektur barunya.</p>' +
     '</div>';
 
   document.getElementById("btn-simpan-wa-template").addEventListener("click", async function () {
@@ -2731,6 +3007,7 @@ async function loadTabNotifWa() {
       errEl.style.display = "block";
       return;
     }
+    _cacheSiteSettingsWALomba = null; // supaya link "Kirim WA" berikutnya langsung pakai template baru, tanpa perlu reload halaman
     statusEl.textContent = "Tersimpan.";
     setTimeout(function () { statusEl.textContent = ""; }, 3000);
   });
