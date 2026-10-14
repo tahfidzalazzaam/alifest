@@ -414,6 +414,17 @@ function chipBerkasHTML(label, url) {
   return '<a href="' + url + '" target="_blank" rel="noopener" class="modal-berkas-chip">📎 ' + escapeHTML(label) + '</a>';
 }
 
+// Label "Tipe Pendaftar" (migrasi 0005) -- dulu ikon 🏫/🎓 di kolom "Tipe"
+// tabel Data Pendaftar (sudah dipindah ke popup detail supaya tabel lebih
+// ringkas, lihat renderBaris()), dipakai BERSAMA oleh bukaModalIndividu()
+// dan bukaModalTim() supaya informasinya tetap ada untuk kedua jenis
+// pendaftar (field ini berlaku untuk individu maupun tim/Futsal).
+function labelTipePendaftarHTML(row) {
+  return row.tipe_pendaftar === "lembaga"
+    ? ("🏫 Perwakilan Lembaga" + (row.penanggung_jawab_lembaga ? " · PJ: " + escapeHTML(row.penanggung_jawab_lembaga) : ""))
+    : "🎓 Peserta Individu";
+}
+
 /* ==================== Ubah status pendaftaran -- SEKARANG DIPINDAH ke
    dalam popup detail (dulu lewat dropdown langsung di baris tabel) ====================
    Tombol/dropdown "ubah status" yang dulu ada di kolom Status tabel Data
@@ -631,6 +642,8 @@ async function bukaModalTim(row, rule) {
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Nama Tim/Sekolah</span><span class="modal-field__value">' + escapeHTML(row.nama_tim) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nama Pendamping</span><span class="modal-field__value">' + escapeHTML(row.pembina || "-") + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">No. WA Pendamping</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Asal Sekolah</span><span class="modal-field__value">' + escapeHTML(row.asal_sekolah || "-") + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, true) + '</span></div>' +
     '</div>' +
@@ -729,6 +742,7 @@ function bukaModalIndividu(row) {
       '<div class="modal-field"><span class="modal-field__label">No. WhatsApp</span><span class="modal-field__value">' + escapeHTML(row.whatsapp) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Email</span><span class="modal-field__value">' + escapeHTML(row.email || "-") + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, false) + '</span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
@@ -971,7 +985,7 @@ async function loadTabPendaftar() {
     '</div>' +
     '<p class="hint" id="jumlah-hint"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendaftar"><thead><tr>' +
-      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th>Jenjang/Kelas</th><th>Lahir/Usia</th><th>Tipe</th><th>Sekolah</th><th>WA</th><th class="col-status">Status</th><th></th>' +
+      '<th>Nomor</th><th>Nama</th><th>Lomba</th><th class="col-status">Status</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   /* -------- Kuota efektif per sel (jenjang x gender), sama dengan rumus di server -------- */
@@ -1096,44 +1110,25 @@ async function loadTabPendaftar() {
 
     const tbody = document.querySelector("#tabel-pendaftar tbody");
     if (tampil.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="10">Tidak ada data yang cocok.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5">Tidak ada data yang cocok.</td></tr>';
       return;
     }
 
+    // Tabel diringkas lebih jauh (permintaan panitia) -- kolom Jenjang/Kelas,
+    // Lahir/Usia, Tipe (ikon lembaga/individu), Sekolah, & WA SUDAH DIPINDAH
+    // ke popup detail (lihat bukaModalIndividu/bukaModalTim di bawah, field
+    // "Tipe Pendaftar" & "Asal Sekolah" ditambahkan ke SANA supaya tidak ada
+    // informasi yang hilang). Kolom "Berkas" sendiri sudah dipindah lebih
+    // dulu (lihat catatan lama di bawah). Tabel sekarang cuma menyisakan
+    // info untuk SCAN CEPAT/CARI (Nomor, Nama, Lomba, Status) + Aksi Hapus --
+    // detail lengkap lainnya semua di popup, satu ketuk saja.
     tbody.innerHTML = tampil.map(function (r) {
-      const isTim = r.tipe === "tim";
-      const tombolTim = isTim
-        ? ' <span class="lp-badge lp-badge--tim">TIM · ketuk baris</span>'
-        : ' <span class="lp-badge">ketuk untuk detail</span>';
-      const lpBadge = r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-";
-      const tipeIkon = r.tipe_pendaftar === "lembaga" ? "🏫" : "🎓";
-      const tipeJudul = r.tipe_pendaftar === "lembaga"
-        ? ("Perwakilan Lembaga" + (r.penanggung_jawab_lembaga ? " · PJ: " + r.penanggung_jawab_lembaga : ""))
-        : "Peserta Individu";
-      const lahirUsia = isTim ? "-" : (formatTanggalLahir(r.tanggal_lahir) + (r.usia != null ? " (" + r.usia + "th)" : ""));
-      const kelasLabel = isTim ? "-" : (r.jenjang + '/' + r.kelas);
-
-      // Kolom "Berkas" terpisah SUDAH DIHAPUS dari tabel ini (permintaan
-      // panitia, supaya kolom Status bisa dilebarkan & tabel tidak terlalu
-      // ramai) -- semua link berkas (Kartu Pelajar/Surat Delegasi/Bukti IG/
-      // Kartu Anggota) tetap bisa dilihat lewat popup detail yang terbuka
-      // begitu barisnya diketuk (bukaModalIndividu/bukaModalTim di bawah),
-      // jadi tidak ada informasi yang hilang -- cuma dipindah dari tabel ke
-      // popup. Baris TETAP bisa diketuk di mana saja (row-clickable) untuk
-      // membuka popup itu, jadi tombol "Lihat berkas" terpisah yang dulu ada
-      // di kolom ini juga tidak diperlukan lagi.
-
       return (
         '<tr class="row-clickable ' + kelasBarisStatusLomba(r.status) + '" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
-          '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + lpBadge + '</span>' + tombolTim + '</td>' +
+          '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + (r.tipe === "tim" ? "TIM" : (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-")) + '</span> <span class="lp-badge">ketuk untuk detail</span></td>' +
           '<td>' + r.lomba_nama + '</td>' +
-          '<td>' + kelasLabel + '</td>' +
-          '<td>' + lahirUsia + '</td>' +
-          '<td title="' + tipeJudul + '">' + tipeIkon + '</td>' +
-          '<td class="col-truncate" title="' + r.asal_sekolah + '">' + r.asal_sekolah + '</td>' +
-          '<td>' + r.whatsapp + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
-          '<td class="col-status">' + pilStatusLombaHTML(r.status) + '</td>' +
+          '<td class="col-status">' + pilStatusLombaHTML(r.status) + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
         '</tr>'
       );
