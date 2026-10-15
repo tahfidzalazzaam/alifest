@@ -469,12 +469,24 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   // baris ini diubah, supaya begitu notifikasi WA dikirim, tokennya sudah
   // pasti tersedia buat dirangkai jadi {link_lengkapi} di Edge Function.
   if (statusBaru === "Perlu Tambah Nomor Punggung") {
-    const { error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: row.id });
+    const { data: tokenBaru, error: tokenError } = await supabaseClient.rpc("pastikan_token_lengkapi", { p_id: row.id });
     if (tokenError) {
       alert("Gagal menyiapkan link lengkapi nomor punggung: " + tokenError.message);
       bukaUlangPopupDetailLomba(row, isTim, rule); // kembali ke detail, status belum berubah
       return;
     }
+    // BUG (migrasi 0051) yang diperbaiki di sini: token yang DIKEMBALIKAN RPC
+    // ini TIDAK PERNAH disimpan ke `row.token_lengkapi` secara lokal --
+    // untuk pendaftar yang BARU PERTAMA KALI masuk status ini (token-nya
+    // baru dibuat RPC di atas, belum ada di `row` hasil query awal
+    // loadTabPendaftar()), akibatnya bangunPesanWALomba() (cek
+    // `row.token_lengkapi && settings.site_url`) selalu menganggap belum ada
+    // token, jadi placeholder {link_lengkapi} ikut KOSONG di pesan "Kirim
+    // WA" -- tombolnya tetap muncul tapi link lengkapi-nya tidak pernah
+    // ikut terkirim. `row` disegarkan di sini supaya tombol "Kirim WA" yang
+    // dirangkai begitu popup dibuka ulang (bukaUlangPopupDetailLomba di
+    // bawah) selalu punya token yang benar.
+    row.token_lengkapi = tokenBaru;
   }
 
   // `wa_terkirim` (migrasi 0051) direset ke false setiap kali status
