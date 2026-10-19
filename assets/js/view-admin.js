@@ -451,7 +451,7 @@ function bukaUlangPopupDetailLomba(row, isTim, rule) {
   if (isTim) {
     bukaModalTim(row, rule);
   } else {
-    bukaModalIndividu(row);
+    bukaModalIndividu(row, rule);
   }
 }
 
@@ -463,6 +463,8 @@ function bukaUlangPopupDetailLomba(row, isTim, rule) {
 // menimpa alasan lama kalau panitia pernah menolak lalu mengubah lagi ke
 // status lain, biar riwayatnya tetap ada kalau nanti ditolak ulang).
 async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTim, rule) {
+  const statusLama = row.status;
+
   // "Perlu Tambah Nomor Punggung" butuh token link /lengkapi -- dipastikan
   // (dibuat kalau belum ada) LEBIH DULU lewat RPC pastikan_token_lengkapi
   // (migrasi 0032, SECURITY DEFINER, khusus panitia) sebelum status di
@@ -493,12 +495,23 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   // berganti -- supaya tombol "Kirim WA" selalu tampil "belum terkirim"
   // lagi untuk status yang baru, tidak peduli status sebelumnya sudah
   // pernah dikirim atau belum.
-  const payload = { status: statusBaru, wa_terkirim: false };
-  if (statusBaru === "Ditolak") payload.alasan_penolakan = alasanPenolakan;
+  //
+  // Sejak migrasi 0052: status TIDAK LAGI disimpan lewat .update() langsung
+  // di sini, tapi lewat RPC ubah_status_pendaftaran() (SECURITY DEFINER) --
+  // supaya pembebasan/pemulihan nomor_pendaftaran (lihat catatan panjang di
+  // migrasi itu: nomor peserta yang DITOLAK "dibebaskan" dengan menambahkan
+  // akhiran yang membuatnya tidak lagi dianggap "terpakai" oleh
+  // ambil_nomor_berikutnya(), supaya bisa dipakai pendaftar lain) selalu
+  // ikut dikerjakan ATOMIK bersama perubahan status itu sendiri, termasuk
+  // menyamakan salinan nomor_pendaftaran di anggota_tim untuk pendaftar tim.
+  const { data, error } = await supabaseClient.rpc("ubah_status_pendaftaran", {
+    p_id: row.id,
+    p_status_baru: statusBaru,
+    p_alasan_penolakan: statusBaru === "Ditolak" ? alasanPenolakan : null
+  });
 
-  const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", row.id);
-  if (error) {
-    alert("Gagal mengubah status: " + error.message);
+  if (error || !data || data.success === false) {
+    alert("Gagal mengubah status: " + ((data && data.message) || (error && error.message) || "Kesalahan tidak dikenal."));
     bukaUlangPopupDetailLomba(row, isTim, rule);
     return;
   }
@@ -510,6 +523,26 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   row.status = statusBaru;
   row.wa_terkirim = false;
   if (statusBaru === "Ditolak") row.alasan_penolakan = alasanPenolakan;
+
+  // Nomor pendaftaran bisa saja ikut berubah di sini: dibebaskan (ditandai,
+  // BUKAN dihapus) begitu status jadi "Ditolak", atau dipulihkan/diganti
+  // baru begitu dipulihkan DARI "Ditolak" ke status lain (lihat migrasi
+  // 0052) -- `row` disegarkan supaya tabel, popup yang dibuka ulang, dan
+  // query anggota_tim (bukaModalTim, dicocokkan lewat nomor_pendaftaran)
+  // di bawah selalu memakai nilai TERBARU.
+  if (data.nomor_berubah && data.nomor_pendaftaran) {
+    row.nomor_pendaftaran = data.nomor_pendaftaran;
+  }
+
+  // Kasus langka yang PERLU diberi tahu panitia secara eksplisit: pendaftar
+  // ini dipulihkan dari "Ditolak" dan nomor lamanya SUDAH kadung dipakai
+  // pendaftar lain sejak dibebaskan, jadi baris ini dapat nomor pendaftaran
+  // BARU -- panitia perlu tahu supaya bisa menginformasikan nomor barunya
+  // ke pendaftar. (Pembebasan nomor saat DITOLAK sendiri tetap SENYAP/
+  // otomatis seperti sebelumnya, tidak perlu pemberitahuan apa pun.)
+  if (statusLama === "Ditolak" && statusBaru !== "Ditolak" && data.nomor_berubah) {
+    alert('Status dipulihkan. Nomor pendaftaran untuk "' + (row.nama_tim || row.nama_lengkap) + '" sekarang: ' + data.nomor_pendaftaran + '. Mohon informasikan ke pendaftar kalau nomor sebelumnya berubah.');
+  }
 
   // Menyegarkan tabel DI BELAKANG popup (warna baris & kartu rekap) --
   // lewat referensi yang diisi loadTabPendaftar(), bukan dengan menduga-duga
@@ -675,10 +708,16 @@ async function bukaModalTim(row, rule) {
       renderDaftarBerkasTim(row.url_berkas_tim, "Kartu Anggota") +
     '</div>' +
     '<p class="modal-section-title" style="margin-top:18px;">Anggota Tim</p>' +
-    '<div id="modal-tim-anggota"><p class="hint">Memuat data anggota tim...</p></div>';
+    '<div id="modal-tim-anggota"><p class="hint">Memuat data anggota tim...</p></div>' +
+    '<div class="submit-row" style="display:flex;justify-content:flex-end;margin-top:16px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-edit-tim">✏️ Edit Data</button>' +
+    '</div>';
 
   bukaModal("Detail Tim — " + row.nama_tim, infoHTML);
   pasangListenerStatusPopup(row, true, rule);
+
+  const btnEditTim = document.getElementById("btn-edit-tim");
+  if (btnEditTim) btnEditTim.addEventListener("click", function () { bukaModalTimEdit(row, rule); });
 
   const { data: anggota, error } = await supabaseClient
     .from("anggota_tim").select("*").eq("nomor_pendaftaran", row.nomor_pendaftaran).order("created_at");
@@ -734,6 +773,151 @@ function renderDaftarBerkasTim(urlBerkasTim, label) {
   }).join("");
 }
 
+/* -------- Form edit data tim (migrasi 0052) -------- */
+// Dibuka lewat tombol "✏️ Edit Data" di bukaModalTim(). Field yang SENGAJA
+// TIDAK disediakan di sini: Nomor Pendaftaran (identitas sistem, dikelola
+// otomatis lewat ambil_nomor_berikutnya()/status "Ditolak" -- lihat RPC
+// ubah_status_pendaftaran() di migrasi 0052), jenis kelamin tim (tidak
+// pernah ditampilkan di popup detail ini sama sekali, ditentukan otomatis
+// dari syarat lomba saat daftar), dan berkas unggahan (mengganti file perlu
+// alur unggah ulang yang lebih rumit, di luar cakupan permintaan ini --
+// panitia tetap bisa membuka berkasnya lewat chip di popup detail seperti
+// biasa). Menambah/menghapus anggota tim JUGA di luar cakupan form ini --
+// cuma field anggota yang SUDAH ADA yang bisa dibetulkan; panitia perlu
+// lewat Table Editor Supabase kalau harus menambah/menghapus anggota.
+async function bukaModalTimEdit(row, rule) {
+  bukaModal("Edit Data Tim — " + row.nama_tim, '<p class="hint">Memuat data anggota tim...</p>');
+
+  const { data: anggota, error } = await supabaseClient
+    .from("anggota_tim").select("*").eq("nomor_pendaftaran", row.nomor_pendaftaran).order("created_at");
+
+  if (error) {
+    bukaModal("Edit Data Tim — " + row.nama_tim, '<p>Gagal memuat anggota tim: ' + error.message + '</p>');
+    return;
+  }
+
+  // Pilihan jenjang dibatasi ke syarat lomba ini (rule.jenjang) kalau
+  // tersedia -- fallback ke input teks bebas kalau "rule"-nya entah kenapa
+  // tidak ada (mis. dipanggil dari tempat lain tanpa rule).
+  const opsiJenjang = rule && Array.isArray(rule.jenjang) && rule.jenjang.length ? rule.jenjang : null;
+
+  const formHTML =
+    '<p class="modal-section-title">Data Tim</p>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-nama-tim">Nama Tim/Sekolah</label><input type="text" id="edit-nama-tim" value="' + escapeHTML(row.nama_tim) + '"></div>' +
+      '<div class="field"><label for="edit-pembina">Nama Pendamping</label><input type="text" id="edit-pembina" value="' + escapeHTML(row.pembina || "") + '"></div>' +
+    '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-wa-tim">No. WA Pendamping</label><input type="text" id="edit-wa-tim" value="' + escapeHTML(row.whatsapp || "") + '"></div>' +
+      '<div class="field"><label for="edit-sekolah-tim">Asal Sekolah</label><input type="text" id="edit-sekolah-tim" value="' + escapeHTML(row.asal_sekolah || "") + '"></div>' +
+    '</div>' +
+    '<div class="field">' +
+      '<label for="edit-jenjang-tim">Jenjang</label>' +
+      (opsiJenjang
+        ? ('<select id="edit-jenjang-tim">' + opsiJenjang.map(function (j) { return '<option value="' + escapeHTML(j) + '"' + (j === row.jenjang ? " selected" : "") + '>' + escapeHTML(j) + '</option>'; }).join("") + '</select>')
+        : ('<input type="text" id="edit-jenjang-tim" value="' + escapeHTML(row.jenjang) + '">')) +
+    '</div>' +
+    '<p class="modal-section-title" style="margin-top:18px;">Anggota Tim</p>' +
+    '<p class="hint">Menambah/menghapus anggota tidak bisa lewat form ini -- hanya membetulkan data anggota yang sudah ada.</p>' +
+    '<div class="table-wrap"><table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat Lahir</th><th>Tanggal Lahir</th><th>Kelas</th><th>No. Punggung</th></tr></thead><tbody>' +
+    (anggota && anggota.length ? anggota.map(function (a, i) {
+      return '<tr data-anggota-id="' + escapeHTML(a.id) + '">' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td><input type="text" class="edit-anggota-nama" value="' + escapeHTML(a.nama || "") + '"></td>' +
+        '<td><input type="text" class="edit-anggota-tempat" value="' + escapeHTML(a.tempat_lahir || "") + '"></td>' +
+        '<td><input type="date" class="edit-anggota-tanggal" value="' + escapeHTML(a.tanggal_lahir || "") + '"></td>' +
+        '<td><input type="text" class="edit-anggota-kelas" value="' + escapeHTML(a.kelas || "") + '"></td>' +
+        '<td><input type="number" min="1" max="99" class="edit-anggota-punggung" value="' + (a.nomor_punggung != null ? a.nomor_punggung : "") + '"></td>' +
+      '</tr>';
+    }).join("") : '<tr><td colspan="6">Belum ada data anggota.</td></tr>') +
+    '</tbody></table></div>' +
+    '<p class="hint">Nomor pendaftaran & berkas unggahan tidak bisa diubah lewat form ini.</p>' +
+    '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-batal-edit-tim">Batal</button>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-edit-tim">Simpan Perubahan</button>' +
+    '</div>';
+
+  bukaModal("Edit Data Tim — " + row.nama_tim, formHTML);
+
+  document.getElementById("btn-batal-edit-tim").addEventListener("click", function () {
+    bukaModalTim(row, rule);
+  });
+
+  document.getElementById("btn-simpan-edit-tim").addEventListener("click", async function () {
+    const namaTimBaru = document.getElementById("edit-nama-tim").value.trim();
+    const pembinaBaru = document.getElementById("edit-pembina").value.trim();
+    const waBaru = document.getElementById("edit-wa-tim").value.trim();
+    const sekolahBaru = document.getElementById("edit-sekolah-tim").value.trim();
+    const jenjangBaru = document.getElementById("edit-jenjang-tim").value.trim();
+
+    if (!namaTimBaru || !pembinaBaru || !waBaru || !jenjangBaru) {
+      alert("Nama Tim, Nama Pendamping, No. WA Pendamping, dan Jenjang wajib diisi.");
+      return;
+    }
+
+    const barisAnggota = Array.from(document.querySelectorAll("#modal-box tr[data-anggota-id]"));
+    const anggotaBaru = [];
+    const punggungTerpakai = [];
+    for (const tr of barisAnggota) {
+      const idAnggota = tr.getAttribute("data-anggota-id");
+      const nama = tr.querySelector(".edit-anggota-nama").value.trim();
+      const tempat = tr.querySelector(".edit-anggota-tempat").value.trim();
+      const tanggal = tr.querySelector(".edit-anggota-tanggal").value;
+      const kelasAnggota = tr.querySelector(".edit-anggota-kelas").value.trim();
+      const punggungStr = tr.querySelector(".edit-anggota-punggung").value.trim();
+
+      if (!nama || !tempat || !tanggal || !kelasAnggota) {
+        alert("Nama, Tempat Lahir, Tanggal Lahir, dan Kelas setiap anggota wajib diisi.");
+        return;
+      }
+
+      let punggung = null;
+      if (punggungStr !== "") {
+        punggung = parseInt(punggungStr, 10);
+        if (isNaN(punggung) || punggung < 1 || punggung > 99) {
+          alert("Nomor punggung harus angka 1-99 (atau dikosongkan).");
+          return;
+        }
+        if (punggungTerpakai.indexOf(punggung) !== -1) {
+          alert("Nomor punggung " + punggung + " dipakai lebih dari satu anggota.");
+          return;
+        }
+        punggungTerpakai.push(punggung);
+      }
+
+      anggotaBaru.push({ id: idAnggota, nama: nama, tempat_lahir: tempat, tanggal_lahir: tanggal, kelas: kelasAnggota, nomor_punggung: punggung });
+    }
+
+    const btnSimpan = document.getElementById("btn-simpan-edit-tim");
+    btnSimpan.disabled = true;
+    btnSimpan.textContent = "Menyimpan...";
+
+    const payloadTim = { nama_tim: namaTimBaru, pembina: pembinaBaru, whatsapp: waBaru, asal_sekolah: sekolahBaru, jenjang: jenjangBaru };
+    const { error: errorTim } = await supabaseClient.from("pendaftaran").update(payloadTim).eq("id", row.id);
+    if (errorTim) {
+      alert("Gagal menyimpan data tim: " + errorTim.message);
+      btnSimpan.disabled = false;
+      btnSimpan.textContent = "Simpan Perubahan";
+      return;
+    }
+
+    const hasilAnggota = await Promise.all(anggotaBaru.map(function (a) {
+      return supabaseClient.from("anggota_tim").update({
+        nama: a.nama, tempat_lahir: a.tempat_lahir, tanggal_lahir: a.tanggal_lahir, kelas: a.kelas, nomor_punggung: a.nomor_punggung
+      }).eq("id", a.id);
+    }));
+    const errorAnggota = hasilAnggota.find(function (h) { return h.error; });
+    if (errorAnggota) {
+      alert("Data tim tersimpan, tapi sebagian data anggota gagal disimpan: " + errorAnggota.error.message);
+    }
+
+    Object.assign(row, payloadTim);
+    if (typeof renderRekapPendaftarRef === "function") renderRekapPendaftarRef();
+    if (typeof renderBarisPendaftarRef === "function") renderBarisPendaftarRef();
+    bukaModalTim(row, rule);
+  });
+}
+
 /* -------- Popup detail peserta INDIVIDU: dibuka dengan mengetuk baris -------- */
 // Sejak migrasi 0027, baris peserta individu juga bisa diketuk (sebelumnya
 // cuma baris tim/Futsal yang bisa) supaya panitia bisa lihat data lengkapnya,
@@ -741,8 +925,13 @@ function renderDaftarBerkasTim(urlBerkasTim, label) {
 // kolom di tabel Data Pendaftar (biar tabelnya tetap ramping). Tidak perlu
 // query tambahan ke database -- semua field sudah ada di `row` (hasil
 // select("*") pada `pendaftaran`), jadi fungsi ini sinkron (tidak seperti
-// bukaModalTim yang harus memuat anggota_tim secara async).
-function bukaModalIndividu(row) {
+// bukaModalTim yang harus memuat anggota_tim secara async). "rule" (baris
+// lomba_rules yang cocok, opsional, migrasi 0052) dipakai untuk membatasi
+// pilihan jenjang/jenis kelamin di form edit (lihat bukaModalIndividuEdit())
+// sesuai syarat lomba ini, dan untuk menghitung ulang usia memakai tanggal
+// pelaksanaan lomba kalau tanggal lahirnya diubah -- kalau tidak disediakan,
+// popup tetap tampil normal, cuma form edit jadi lebih longgar (input bebas).
+function bukaModalIndividu(row, rule) {
   const infoHTML =
     '<div class="modal-field-grid">' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Nama Lengkap Peserta</span><span class="modal-field__value">' + escapeHTML(row.nama_lengkap) + '</span></div>' +
@@ -767,10 +956,121 @@ function bukaModalIndividu(row) {
     '<div class="modal-berkas-row">' +
       chipBerkasHTML("Kartu Pelajar", row.url_kartu_pelajar) +
       renderDaftarBerkasTim(row.url_bukti_follow_ig, "Bukti IG") +
+    '</div>' +
+    '<div class="submit-row" style="display:flex;justify-content:flex-end;margin-top:16px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-edit-individu">✏️ Edit Data</button>' +
     '</div>';
 
   bukaModal("Detail Peserta — " + row.nama_lengkap, infoHTML);
-  pasangListenerStatusPopup(row, false, null);
+  pasangListenerStatusPopup(row, false, rule);
+
+  const btnEditIndividu = document.getElementById("btn-edit-individu");
+  if (btnEditIndividu) btnEditIndividu.addEventListener("click", function () { bukaModalIndividuEdit(row, rule); });
+}
+
+/* -------- Form edit data peserta individu (migrasi 0052) -------- */
+// Dibuka lewat tombol "✏️ Edit Data" di bukaModalIndividu(). Field yang
+// SENGAJA TIDAK disediakan di sini: Nomor Pendaftaran (identitas sistem,
+// dikelola otomatis lewat ambil_nomor_berikutnya()/status "Ditolak" -- lihat
+// RPC ubah_status_pendaftaran() di migrasi 0052) & berkas unggahan
+// (mengganti file perlu alur unggah ulang yang lebih rumit, di luar cakupan
+// permintaan ini -- panitia tetap bisa membuka berkasnya lewat chip di
+// popup detail seperti biasa).
+function bukaModalIndividuEdit(row, rule) {
+  const opsiJenjang = rule && Array.isArray(rule.jenjang) && rule.jenjang.length ? rule.jenjang : null;
+  const opsiGender = rule && rule.gender_diizinkan && rule.gender_diizinkan !== "semua"
+    ? [rule.gender_diizinkan]
+    : ["laki-laki", "perempuan"];
+
+  const formHTML =
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-nama-lengkap">Nama Lengkap Peserta</label><input type="text" id="edit-nama-lengkap" value="' + escapeHTML(row.nama_lengkap) + '"></div>' +
+      '<div class="field"><label for="edit-nama-pendamping">Nama Pendamping</label><input type="text" id="edit-nama-pendamping" value="' + escapeHTML(row.nama_pendamping || "") + '"></div>' +
+    '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-jenjang">Jenjang</label>' +
+        (opsiJenjang
+          ? ('<select id="edit-jenjang">' + opsiJenjang.map(function (j) { return '<option value="' + escapeHTML(j) + '"' + (j === row.jenjang ? " selected" : "") + '>' + escapeHTML(j) + '</option>'; }).join("") + '</select>')
+          : ('<input type="text" id="edit-jenjang" value="' + escapeHTML(row.jenjang) + '">')) +
+      '</div>' +
+      '<div class="field"><label for="edit-kelas">Kelas</label><input type="text" id="edit-kelas" value="' + escapeHTML(row.kelas || "") + '"></div>' +
+    '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-jenis-kelamin">Jenis Kelamin</label><select id="edit-jenis-kelamin">' +
+        opsiGender.map(function (g) { return '<option value="' + g + '"' + (g === row.jenis_kelamin ? " selected" : "") + '>' + (g === "laki-laki" ? "Laki-laki" : "Perempuan") + '</option>'; }).join("") +
+      '</select></div>' +
+      '<div class="field"><label for="edit-tanggal-lahir">Tanggal Lahir</label><input type="date" id="edit-tanggal-lahir" value="' + escapeHTML(row.tanggal_lahir || "") + '"></div>' +
+    '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label for="edit-asal-sekolah">Asal Sekolah</label><input type="text" id="edit-asal-sekolah" value="' + escapeHTML(row.asal_sekolah || "") + '"></div>' +
+      '<div class="field"><label for="edit-whatsapp">No. WhatsApp</label><input type="text" id="edit-whatsapp" value="' + escapeHTML(row.whatsapp || "") + '"></div>' +
+    '</div>' +
+    '<div class="field"><label for="edit-email">Email</label><input type="email" id="edit-email" value="' + escapeHTML(row.email || "") + '"></div>' +
+    '<p class="hint">Nomor pendaftaran & berkas unggahan tidak bisa diubah lewat form ini.</p>' +
+    '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">' +
+      '<button type="button" class="btn btn--ghost" id="btn-batal-edit-individu">Batal</button>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-edit-individu">Simpan Perubahan</button>' +
+    '</div>';
+
+  bukaModal("Edit Data Peserta — " + row.nama_lengkap, formHTML);
+
+  document.getElementById("btn-batal-edit-individu").addEventListener("click", function () {
+    bukaModalIndividu(row, rule);
+  });
+
+  document.getElementById("btn-simpan-edit-individu").addEventListener("click", async function () {
+    const namaBaru = document.getElementById("edit-nama-lengkap").value.trim();
+    const jenjangBaru = document.getElementById("edit-jenjang").value.trim();
+    const kelasBaru = document.getElementById("edit-kelas").value.trim();
+    const genderBaru = document.getElementById("edit-jenis-kelamin").value;
+    const tanggalBaru = document.getElementById("edit-tanggal-lahir").value;
+    const sekolahBaru = document.getElementById("edit-asal-sekolah").value.trim();
+    const waBaru = document.getElementById("edit-whatsapp").value.trim();
+    const emailBaru = document.getElementById("edit-email").value.trim();
+    const pendampingBaru = document.getElementById("edit-nama-pendamping").value.trim();
+
+    if (!namaBaru || !jenjangBaru || !kelasBaru || !tanggalBaru || !sekolahBaru || !waBaru) {
+      alert("Nama, Jenjang, Kelas, Tanggal Lahir, Asal Sekolah, dan No. WhatsApp wajib diisi.");
+      return;
+    }
+
+    // Usia dihitung ulang memakai tanggal PELAKSANAAN lomba sebagai acuan
+    // (sama seperti submit_pendaftaran() di server) -- bukan tanggal hari
+    // ini, supaya tetap konsisten dengan cara "usia" ini dipakai di tempat
+    // lain (pengecekan status "Perlu Verifikasi Usia").
+    const acuanUsia = (rule && rule.tanggal_pelaksanaan) || null;
+    const usiaBaru = hitungUsiaDariTanggal(tanggalBaru, acuanUsia);
+
+    const payload = {
+      nama_lengkap: namaBaru,
+      nama_pendamping: pendampingBaru || null,
+      jenjang: jenjangBaru,
+      kelas: kelasBaru,
+      jenis_kelamin: genderBaru,
+      tanggal_lahir: tanggalBaru,
+      usia: usiaBaru,
+      asal_sekolah: sekolahBaru,
+      whatsapp: waBaru,
+      email: emailBaru || null
+    };
+
+    const btnSimpan = document.getElementById("btn-simpan-edit-individu");
+    btnSimpan.disabled = true;
+    btnSimpan.textContent = "Menyimpan...";
+
+    const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", row.id);
+    if (error) {
+      alert("Gagal menyimpan perubahan: " + error.message);
+      btnSimpan.disabled = false;
+      btnSimpan.textContent = "Simpan Perubahan";
+      return;
+    }
+
+    Object.assign(row, payload);
+    if (typeof renderRekapPendaftarRef === "function") renderRekapPendaftarRef();
+    if (typeof renderBarisPendaftarRef === "function") renderBarisPendaftarRef();
+    bukaModalIndividu(row, rule);
+  });
 }
 
 /* -------- Kirim notifikasi WA (Fonnte) lewat Edge Function -- TIDAK DIPAKAI
@@ -1162,7 +1462,7 @@ async function loadTabPendaftar() {
         if (row.tipe === "tim") {
           bukaModalTim(row, rules.find(function (l) { return l.id === row.lomba_id; }));
         } else {
-          bukaModalIndividu(row);
+          bukaModalIndividu(row, rules.find(function (l) { return l.id === row.lomba_id; }));
         }
       });
     });
