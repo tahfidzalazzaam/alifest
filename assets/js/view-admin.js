@@ -1483,11 +1483,12 @@ async function unduhXLSXPendaftar(btn, rows, rules, lombaFilter) {
    tidak perlu memasukkan angka manual satu-satu. Gambar dibuat di <canvas>
    (sama seperti Kartu Peserta, lihat gambarKartu()), bukan lewat library
    screenshot DOM -- lebih ringan & hasilnya tajam di ukuran berapa pun.
-   Rasio POSTER_LEBAR_PX:POSTER_TINGGI_PX = 2:3 (setara "6:9" sesuai yang
-   diminta), resolusi asli dibuat besar (1200x1800) supaya tetap tajam kalau
-   diunggah ke Instagram dsb walau pratinjaunya di modal ditampilkan kecil. */
-const POSTER_LEBAR_PX = 1200;
-const POSTER_TINGGI_PX = 1800;
+   Rasio POSTER_LEBAR_PX:POSTER_TINGGI_PX = 4:5 (1080x1350, rasio potret
+   standar Instagram) -- diganti dari 2:3 (1200x1800) atas permintaan,
+   sekaligus menyamakan rasio dengan poster rekap Bazar
+   (lihat POSTER_BAZAR_LEBAR_PX/POSTER_BAZAR_TINGGI_PX di view-adminbazar.js). */
+const POSTER_LEBAR_PX = 1080;
+const POSTER_TINGGI_PX = 1350;
 
 // Hitung ulang rekap per lomba (total, laki-laki/perempuan, per jenjang) --
 // SENGAJA dihitung terpisah dari renderRekap() (bukan dipakai bersama)
@@ -1529,12 +1530,11 @@ function kotakBulat(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Karakter/maskot kecil per cabang lomba untuk hiasan poster rekap -- SELAIN
-// `r.ikon` (yang tetap dipakai di sebelah nama lomba seperti sebelumnya),
-// dipetakan dari `lomba_id` ke emoji "karakter" yang lebih hidup/menggambarkan
-// kegiatannya, dipakai sebagai gambar watermark samar di tiap kartu. Kalau
-// lomba_id tidak dikenali (lomba baru yang ditambah panitia sendiri lewat
-// "Kelola Lomba"), jatuh balik ke `r.ikon` apa adanya -- tidak pernah kosong.
+// Ikon kecil per cabang lomba untuk chip ikon di tiap kartu rekap (lihat
+// gambarPosterRekap()) -- dipetakan dari `lomba_id` ke emoji yang
+// menggambarkan kegiatannya. Kalau lomba_id tidak dikenali (lomba baru yang
+// ditambah panitia sendiri lewat "Kelola Lomba"), jatuh balik ke `r.ikon`
+// apa adanya -- tidak pernah kosong.
 const KARAKTER_LOMBA = {
   adzan: "🕌",
   panahan: "🏹",
@@ -1543,91 +1543,76 @@ const KARAKTER_LOMBA = {
   futsal: "⚽",
 };
 
-// Pita bendera-bendera kecil (bunting) warna-warni di tepi atas poster,
-// senada dengan dekorasi ".bunting" yang sudah ada di navbar situs
-// (index.html) -- murni hiasan meriah bertema festival, tidak menampilkan
-// data apa pun.
-function gambarBuntingAtas(ctx, W) {
-  const warnaBendera = ["#ffc93c", "#ffffff", "#2fa84f", "#ffc93c", "#17914a", "#ffffff"];
-  const lebarBendera = 46;
-  const tinggiBendera = 56;
-  const yTali = 16;
+// Palet warna "batu permata" untuk kartu mozaik -- tiap cabang lomba dapat
+// warnanya sendiri (bukan satu warna seragam untuk semua) supaya poster
+// terasa hidup, bukan seperti tabel yang didandani. Dipilih dari gradasi
+// gelap->terang supaya teks putih di atasnya tetap kontras & tetap senada
+// "elegan" (bukan warna-warna terang/flat ala festival anak-anak).
+// Warna ditentukan dari INDEKS lomba (urutan tetap dari `lomba_rules`,
+// bukan dari ranking total pendaftar) supaya satu cabang lomba selalu
+// kebagian warna yang sama tiap kali poster dibuat ulang, walau rankingnya
+// berubah-ubah seiring pendaftar bertambah. Siklus (modulo) supaya tetap
+// jalan walau panitia menambah lomba baru lewat "Kelola Lomba" (tidak
+// terbatas 5 warna saja).
+const PALET_PERMATA = [
+  { bg: "#a9771f", bg2: "#c99a2e" }, // emas
+  { bg: "#1f2a6b", bg2: "#30409c" }, // nila
+  { bg: "#0b4a4a", bg2: "#157a7a" }, // teal
+  { bg: "#0b4d29", bg2: "#17914a" }, // zamrud
+  { bg: "#6b1f3a", bg2: "#9c2f54" }, // delima
+];
 
+// Hash deterministik kecil (BUKAN Math.random()) -- dipakai untuk menggeser
+// sudut kartu "pecahan keramik" (lihat pathKeramik()) supaya posisinya
+// TETAP sama tiap poster digambar ulang (konsisten dengan render-determinism
+// yang sudah jadi prinsip di elemen dekoratif lain di file ini).
+function hashKecil(seed) {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x); // 0..1
+}
+
+// Bintang delapan-penjuru (dua bujur sangkar bertumpuk 45 derajat) -- motif
+// ornamen Islami klasik, dipakai sebagai hiasan tipis di latar & pojok
+// kartu.
+function gambarBintang8(ctx, cx, cy, r) {
   ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.55)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, yTali);
-  ctx.lineTo(W, yTali);
-  ctx.stroke();
-
-  let i = 0;
-  for (let x = -lebarBendera / 2; x < W; x += lebarBendera) {
-    ctx.fillStyle = warnaBendera[i % warnaBendera.length];
+  ctx.translate(cx, cy);
+  for (let i = 0; i < 2; i++) {
+    ctx.rotate(i === 0 ? 0 : Math.PI / 4);
     ctx.beginPath();
-    ctx.moveTo(x, yTali);
-    ctx.lineTo(x + lebarBendera, yTali);
-    ctx.lineTo(x + lebarBendera / 2, yTali + tinggiBendera);
+    ctx.moveTo(-r, -r);
+    ctx.lineTo(r, -r);
+    ctx.lineTo(r, r);
+    ctx.lineTo(-r, r);
     ctx.closePath();
-    ctx.fill();
-    i++;
+    ctx.stroke();
   }
   ctx.restore();
 }
 
-// Taburan confetti/bintang di area header hijau -- posisi & ukuran TETAP
-// (bukan acak) supaya poster yang sama selalu tampil identik tiap digambar
-// ulang (mis. setelah klik "Muat Ulang Data"). Sengaja ditaruh di kolom
-// kiri/kanan saja (menjauhi logo & judul di tengah) supaya tidak mengganggu
-// keterbacaan.
-const KONFETI_HEADER = [
-  { x: 150, y: 79, e: "✨", s: 40, o: 0.85 },
-  { x: 95, y: 201, e: "⭐", s: 30, o: 0.7 },
-  { x: 175, y: 333, e: "🎊", s: 42, o: 0.8 },
-  { x: 110, y: 455, e: "🎉", s: 36, o: 0.75 },
-  { x: 220, y: 525, e: "✨", s: 26, o: 0.65 },
-  { x: 1050, y: 79, e: "🎉", s: 38, o: 0.8 },
-  { x: 1105, y: 201, e: "✨", s: 28, o: 0.7 },
-  { x: 1025, y: 333, e: "⭐", s: 34, o: 0.75 },
-  { x: 1090, y: 455, e: "🎊", s: 40, o: 0.8 },
-  { x: 980, y: 525, e: "✨", s: 26, o: 0.65 },
-];
-
-// Pita CTA "SEGERA DAFTAR! GRATIS" -- miring di pojok kanan atas poster
-// rekap, dipakai juga sebagai ajakan daftar (bukan cuma rekap statistik).
-function gambarPitaCTAPoster(ctx, W) {
-  ctx.save();
-  const cx = W - 150, cy = 150;
-  ctx.translate(cx, cy);
-  ctx.rotate(18 * Math.PI / 180);
-  ctx.shadowColor = "rgba(0,0,0,0.25)";
-  ctx.shadowBlur = 14;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle = "#ff5a5f";
-  kotakBulat(ctx, -175, -58, 350, 116, 16);
-  ctx.fill();
-  ctx.shadowColor = "transparent";
-  ctx.fillStyle = "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "800 34px 'Outfit', sans-serif";
-  ctx.fillText("SEGERA DAFTAR!", 0, -16);
-  ctx.font = "800 40px 'Outfit', sans-serif";
-  ctx.fillStyle = "#ffe14d";
-  ctx.fillText("GRATIS 🎉", 0, 30);
-  ctx.restore();
-}
-
-function gambarKonfetiHeader(ctx) {
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  KONFETI_HEADER.forEach(function (k) {
-    ctx.globalAlpha = k.o;
-    ctx.font = k.s + "px sans-serif";
-    ctx.fillText(k.e, k.x, k.y);
+// Jalur (path) kartu berbentuk "pecahan keramik" -- poligon 8 titik (4 sudut
+// + 4 titik tengah sisi persegi panjang x,y,w,h), tiap titik digeser sedikit
+// ke dalam/luar memakai hashKecil(seed) supaya siluetnya tidak kotak
+// sempurna (permintaan: "potongan kartunya dibuat tidak kotak, seperti
+// pecahan keramik"). `seed` beda per kartu supaya bentuknya tidak seragam
+// antar kartu, tapi TETAP sama tiap kartu yang sama digambar ulang.
+function pathKeramik(ctx, x, y, w, h, seed) {
+  const jMax = Math.min(w, h) * 0.05;
+  const titik = [
+    [x, y], [x + w / 2, y], [x + w, y],
+    [x + w, y + h / 2],
+    [x + w, y + h], [x + w / 2, y + h], [x, y + h],
+    [x, y + h / 2],
+  ];
+  ctx.beginPath();
+  titik.forEach(function (p, i) {
+    const j1 = hashKecil(seed * 97 + i * 13.37) * 2 - 1;
+    const j2 = hashKecil(seed * 211 + i * 7.77) * 2 - 1;
+    const px = p[0] + j1 * jMax, py = p[1] + j2 * jMax;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
   });
-  ctx.restore();
+  ctx.closePath();
 }
 
 // Pecah teks jadi beberapa baris supaya tidak keluar dari lebar maksimal --
@@ -1650,184 +1635,241 @@ function pecahTeks(ctx, teks, lebarMaks) {
   return baris;
 }
 
+// Gambar satu kartu "permata" (lihat gambarPosterRekap()) -- dipakai untuk
+// kartu unggulan (selebar penuh, `besar=true`) maupun kartu grid 2 kolom
+// (`besar=false`). `warna` dari PALET_PERMATA, `seed` untuk bentuk pecahan
+// keramik (lihat pathKeramik()).
+function gambarKartuPermata(ctx, r, d, x, y, w, h, besar, warna, seed) {
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.2)";
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 6;
+  const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+  grad.addColorStop(0, warna.bg);
+  grad.addColorStop(1, warna.bg2);
+  ctx.fillStyle = grad;
+  pathKeramik(ctx, x, y, w, h, seed);
+  ctx.fill();
+  ctx.restore();
+
+  // Garis tepi tipis terang -- menonjolkan kesan "tepi pecahan" keramik.
+  pathKeramik(ctx, x, y, w, h, seed);
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1;
+  gambarBintang8(ctx, x + w - 30, y + 28, besar ? 20 : 14);
+  ctx.restore();
+
+  const pad = besar ? 26 : 20;
+
+  // Ikon lomba DIBESARKAN -- chip lingkaran tersendiri di pojok kiri-atas
+  // kartu (bukan emoji kecil menempel di depan teks nama), supaya langsung
+  // kelihatan jelas dari jauh, bukan detail kecil yang gampang terlewat.
+  const rChip = besar ? 38 : 28;
+  const chipCx = x + pad + rChip, chipCy = y + pad + rChip;
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.beginPath();
+  ctx.arc(chipCx, chipCy, rChip, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(chipCx, chipCy, rChip, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = (rChip * 1.15) + "px sans-serif";
+  ctx.fillText(KARAKTER_LOMBA[r.id] || r.ikon || "🏆", chipCx, chipCy + 2);
+  ctx.restore();
+
+  // Nama lomba -- dipecah ke baris kedua (pecahTeks()) kalau terlalu
+  // panjang untuk sisa lebar kartu (mis. "Musabaqah Hifdzil Qur'an (MHQ)"
+  // di kartu kecil 2 kolom), jadi SENGAJA TIDAK dipotong/disingkat ("...").
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = (besar ? "600 20px" : "600 16px") + " 'Plus Jakarta Sans', sans-serif";
+  const xNama = chipCx + rChip + (besar ? 16 : 12);
+  const lebarMaksNama = x + w - pad - xNama;
+  const barisNama = pecahTeks(ctx, r.nama, lebarMaksNama);
+  ctx.fillText(barisNama[0] || r.nama, xNama, chipCy - (barisNama.length > 1 ? 4 : -7));
+  if (barisNama.length > 1) {
+    ctx.fillText(barisNama.slice(1).join(" "), xNama, chipCy + (besar ? 20 : 17));
+  }
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = (besar ? "900 64px" : "900 46px") + " 'Outfit', sans-serif";
+  ctx.fillText(String(d.total), x + pad, y + h - (besar ? 22 : 18));
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.font = (besar ? "600 18px" : "600 14px") + " 'Plus Jakarta Sans', sans-serif";
+  const genderTerkunci = r.gender_diizinkan && r.gender_diizinkan !== "semua";
+  const ringkas = genderTerkunci
+    ? (r.gender_diizinkan === "laki-laki" ? "Laki-laki" : "Perempuan")
+    : "L " + d.l + " · P " + d.p;
+  ctx.fillText(ringkas, x + w - pad, y + h - (besar ? 24 : 18));
+  ctx.textAlign = "left";
+}
+
 function gambarPosterRekap(canvas, logoImg, rules, perLomba, totalPendaftar) {
   canvas.width = POSTER_LEBAR_PX;
   canvas.height = POSTER_TINGGI_PX;
   const ctx = canvas.getContext("2d");
   const W = POSTER_LEBAR_PX, H = POSTER_TINGGI_PX;
-  const marginX = 70;
+  const marginX = 56;
+  const emas = "#c99a2e";
 
-  // -------- Latar belakang: krem (sama seperti --page-bg web) + pita hijau
-  // dekoratif atas-bawah, senada dengan warna situs (--green-700/--yellow-500).
-  const tinggiHeader = 560;
-  ctx.fillStyle = "#fffdf7";
+  // -------- Latar belakang krem + tekstur bintang delapan-penjuru tipis +
+  // bingkai emas tipis keliling poster.
+  ctx.fillStyle = "#fffaf0";
   ctx.fillRect(0, 0, W, H);
-  const gradAtas = ctx.createLinearGradient(0, 0, 0, tinggiHeader);
-  gradAtas.addColorStop(0, "#0f7b3e");
-  gradAtas.addColorStop(1, "#17914a");
-  ctx.fillStyle = gradAtas;
-  ctx.fillRect(0, 0, W, tinggiHeader);
-  ctx.fillStyle = "#ffc93c";
-  ctx.fillRect(0, tinggiHeader, W, 10);
-
-  // -------- Hiasan meriah bertema festival: bendera bunting + confetti --------
-  gambarBuntingAtas(ctx, W);
-  gambarKonfetiHeader(ctx);
-
-  ctx.textAlign = "center";
-
-  // -------- Logo besar (apa adanya, TANPA latar/bingkai bulat), dibesarkan
-  // lagi (520px -> 600px) sementara pita header hijau disempitkan
-  // (640px -> 560px) supaya logo tetap jadi fokus utama TAPI kartu rekap di
-  // bawahnya kebagian ruang vertikal lebih besar untuk teksnya -- tetap
-  // object-fit: contain (utuh, tidak terpotong), tanpa latar/bingkai apa pun
-  // di belakangnya.
-  const logoSize = 600;
-  const logoCx = W / 2, logoCy = 310;
-
-  if (logoImg) {
-    const skala = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
-    const lw = logoImg.width * skala, lh = logoImg.height * skala;
-    ctx.drawImage(logoImg, logoCx - lw / 2, logoCy - lh / 2, lw, lh);
-  } else {
-    ctx.font = (logoSize * 0.62) + "px sans-serif";
-    ctx.textBaseline = "middle";
-    ctx.fillText("🌙", logoCx, logoCy + 6);
+  ctx.save();
+  ctx.strokeStyle = "rgba(201,154,46,0.12)";
+  ctx.lineWidth = 1.1;
+  const sisi = 100;
+  for (let yy = 60; yy < H; yy += sisi) {
+    for (let xx = 60; xx < W; xx += sisi) { gambarBintang8(ctx, xx, yy, 27); }
   }
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = emas;
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(20, 20, W - 40, H - 40);
+  ctx.restore();
 
-  // -------- Judul --------
+  // -------- Header asimetris: swoosh hijau diagonal (bukan pita rata tengah
+  // simetris) + medalion logo menumpang di tepi lengkungan -- komposisi
+  // lebih dinamis dibanding header kotak biasa.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(W, 0);
+  ctx.lineTo(W, 150);
+  ctx.lineTo(0, 260);
+  ctx.closePath();
+  const gradSwoosh = ctx.createLinearGradient(0, 0, W, 200);
+  gradSwoosh.addColorStop(0, "#0b4d29");
+  gradSwoosh.addColorStop(1, "#1a8f4c");
+  ctx.fillStyle = gradSwoosh;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 60px 'Outfit', sans-serif";
-  ctx.fillText("ALIF 5.0", W / 2, 525);
-  ctx.font = "600 28px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", W / 2, 558);
+  ctx.font = "900 64px 'Outfit', sans-serif";
+  ctx.fillText("ALIF 5.0", marginX, 94);
+  ctx.fillStyle = "#dff3e4";
+  ctx.font = "600 21px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Al Azzaam Islamic Fair · Rekap Pendaftar", marginX, 124);
 
-  // -------- Pita CTA "Segera Daftar! Gratis" -- ditaruh miring di pojok
-  // kanan atas, menimpa sebagian header hijau, supaya poster rekap ini juga
-  // sekaligus mengajak orang mendaftar (bukan cuma menampilkan statistik).
-  // Sudah disetujui lewat sampel sebelum diterapkan di sini.
-  gambarPitaCTAPoster(ctx, W);
-
-  // -------- Kartu per cabang lomba --------
-  const atasKartu = tinggiHeader + 16;
-  const bawahKartu = H - 115;
-  const celahKartu = 10;
-  const tinggiTiapKartu = Math.floor((bawahKartu - atasKartu) / Math.max(rules.length, 1)) - celahKartu;
-
-  let y = atasKartu;
-  ctx.textAlign = "left";
-
-  rules.forEach(function (r) {
-    const d = perLomba[r.id] || { total: 0, l: 0, p: 0, perJenjang: {} };
-    const genderTerkunci = r.gender_diizinkan && r.gender_diizinkan !== "semua";
-    const jenjangList = r.jenjang && r.jenjang.length ? r.jenjang : ["-"];
-    const karakter = KARAKTER_LOMBA[r.id] || r.ikon || "🏆";
-
-    // Kartu putih dengan bayangan lembut, radius besar -- senada komponen
-    // ".form-shell"/".rekap-card" di web (var(--radius-lg), var(--shadow-card)).
+  const medR = 72, medCx = W - marginX - medR, medCy = 110;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.25)";
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 5;
+  ctx.fillStyle = "#fff8e8";
+  ctx.beginPath();
+  ctx.arc(medCx, medCy, medR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = emas;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(medCx, medCy, medR, 0, Math.PI * 2);
+  ctx.stroke();
+  if (logoImg) {
     ctx.save();
-    ctx.shadowColor = "rgba(15, 61, 34, 0.12)";
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetY = 6;
-    ctx.fillStyle = "#ffffff";
-    kotakBulat(ctx, marginX, y, W - marginX * 2, tinggiTiapKartu, 22);
-    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(medCx, medCy, medR - 6, 0, Math.PI * 2);
+    ctx.clip();
+    const logoSize = (medR - 6) * 2;
+    const skala = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
+    const lw = logoImg.width * skala, lh = logoImg.height * skala;
+    ctx.drawImage(logoImg, medCx - lw / 2, medCy - lh / 2, lw, lh);
     ctx.restore();
-
-    // Maskot/karakter sesuai cabang lomba -- watermark samar di sisi kanan
-    // kartu, DIGAMBAR SEBELUM teks supaya teks tetap jelas terbaca di atasnya
-    // (murni hiasan, tidak menampilkan data apa pun).
-    ctx.save();
-    ctx.globalAlpha = 0.12;
+  } else {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const ukuranMaskot = Math.min(tinggiTiapKartu - 16, 150);
-    ctx.font = ukuranMaskot + "px sans-serif";
-    ctx.fillText(karakter, W - marginX - 100, y + tinggiTiapKartu / 2);
-    ctx.restore();
+    ctx.font = "72px sans-serif";
+    ctx.fillText("🌙", medCx, medCy + 4);
+  }
 
-    const padKiri = marginX + 34;
-    let ty = y + 44;
+  // -------- Angka HERO -- total pendaftar jadi elemen visual utama di atas
+  // (bukan teks kecil di footer), supaya poster "berbicara" langsung lewat
+  // angka besar, bukan terasa seperti laporan/tabel.
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#12291c";
+  ctx.font = "900 150px 'Outfit', sans-serif";
+  ctx.fillText(String(totalPendaftar), marginX, 440);
+  ctx.fillStyle = "#6b7d72";
+  ctx.font = "700 24px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("T O T A L   P E N D A F T A R   D A R I   " + rules.length + "   C A B A N G   L O M B A", marginX, 472);
 
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#12291c";
-    ctx.font = "700 37px 'Outfit', sans-serif";
-    ctx.fillText((r.ikon ? r.ikon + "  " : "") + r.nama, padKiri, ty);
+  ctx.textAlign = "right";
+  ctx.fillStyle = emas;
+  ctx.font = "700 20px 'Outfit', sans-serif";
+  ctx.fillText("✦ PENDAFTARAN", W - marginX, 410);
+  ctx.fillText("MASIH DIBUKA ✦", W - marginX, 436);
+  ctx.textAlign = "left";
 
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#0f7b3e";
-    ctx.font = "800 40px 'Outfit', sans-serif";
-    ctx.fillText(String(d.total), W - marginX - 34, ty);
-    ctx.textAlign = "left";
+  // -------- Mozaik kartu "permata" -- diurutkan dari PENDAFTAR TERBANYAK
+  // (permintaan: "yang paling atas adalah yang paling banyak"): kartu
+  // unggulan selebar penuh untuk peringkat #1, sisanya mengisi grid 2 kolom
+  // berurutan dari kiri-atas (peringkat #2) ke kanan lalu baris berikutnya.
+  // Warna tiap kartu (PALET_PERMATA) tetap mengikuti INDEKS lomba asli
+  // (bukan urutan setelah diranking) supaya warnanya stabil antar reload.
+  const terurut = rules.slice().sort(function (a, b) {
+    const totalA = (perLomba[a.id] || { total: 0 }).total;
+    const totalB = (perLomba[b.id] || { total: 0 }).total;
+    return totalB - totalA;
+  });
+  const indeksAsli = {};
+  rules.forEach(function (r, i) { indeksAsli[r.id] = i; });
 
-    // -------- Rincian per jenjang & jenis kelamin -- dirapikan jadi badge
-    // (pil) jenjang + chip bertitik warna per jenis kelamin, kolomnya rata
-    // (bukan satu kalimat panjang seperti sebelumnya), supaya lebih mudah
-    // dipindai sekilas dan rapi walau jumlah jenjangnya beda-beda. Ukuran pil
-    // & font rincian dibesarkan supaya lebih jelas terbaca di poster.
-    const pillW = 100, pillH = 50;
-    const kolom1X = padKiri + pillW + 22;
-    const kolom2X = kolom1X + 250;
+  const gridTop = 500, gap = 20, bawahBatas = H - 70;
+  const featureH = terurut.length > 1 ? 190 : Math.min(320, bawahBatas - gridTop);
+  const sisanya = terurut.slice(1);
+  const kolom = 2;
+  const baris = Math.ceil(sisanya.length / kolom);
+  const tinggiTersedia = bawahBatas - gridTop - featureH - (sisanya.length ? gap : 0);
+  const cellH = baris > 0 ? Math.max(130, (tinggiTersedia - gap * Math.max(baris - 1, 0)) / baris) : 0;
+  const colW = (W - marginX * 2 - gap) / kolom;
 
-    ty += 20;
-    jenjangList.forEach(function (j) {
-      const jd = d.perJenjang[j] || { l: 0, p: 0 };
-      const baseline = ty + 33;
-
-      ctx.fillStyle = "#eafbe9";
-      kotakBulat(ctx, padKiri, ty, pillW, pillH, pillH / 2);
-      ctx.fill();
-      ctx.fillStyle = "#0f7b3e";
-      ctx.font = "700 27px 'Outfit', sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(j, padKiri + pillW / 2, baseline);
-      ctx.textAlign = "left";
-
-      ctx.font = "600 29px 'Plus Jakarta Sans', sans-serif";
-
-      if (genderTerkunci) {
-        const terisi = r.gender_diizinkan === "laki-laki" ? jd.l : jd.p;
-        const warnaDot = r.gender_diizinkan === "laki-laki" ? "#3f7fb0" : "#d1588f";
-        const labelGender = r.gender_diizinkan === "laki-laki" ? "Laki-laki" : "Perempuan";
-        ctx.fillStyle = warnaDot;
-        ctx.beginPath();
-        ctx.arc(kolom1X + 9, baseline - 9, 9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#12291c";
-        ctx.fillText(labelGender + " " + terisi, kolom1X + 28, baseline);
-      } else {
-        ctx.fillStyle = "#3f7fb0";
-        ctx.beginPath();
-        ctx.arc(kolom1X + 9, baseline - 9, 9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#12291c";
-        ctx.fillText("Laki-laki " + jd.l, kolom1X + 28, baseline);
-
-        ctx.fillStyle = "#d1588f";
-        ctx.beginPath();
-        ctx.arc(kolom2X + 9, baseline - 9, 9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#12291c";
-        ctx.fillText("Perempuan " + jd.p, kolom2X + 28, baseline);
-      }
-
-      ty += pillH + 12;
-    });
-
-    y += tinggiTiapKartu + celahKartu;
+  if (terurut.length) {
+    const unggulan = terurut[0];
+    const d0 = perLomba[unggulan.id] || { total: 0, l: 0, p: 0 };
+    gambarKartuPermata(ctx, unggulan, d0, marginX, gridTop, W - marginX * 2, featureH, true,
+      PALET_PERMATA[indeksAsli[unggulan.id] % PALET_PERMATA.length], indeksAsli[unggulan.id]);
+  }
+  sisanya.forEach(function (r, i) {
+    const baseKol = i % kolom, baseBaris = Math.floor(i / kolom);
+    const x = marginX + baseKol * (colW + gap);
+    const y = gridTop + featureH + gap + baseBaris * (cellH + gap);
+    const d = perLomba[r.id] || { total: 0, l: 0, p: 0 };
+    gambarKartuPermata(ctx, r, d, x, y, colW, cellH, false,
+      PALET_PERMATA[indeksAsli[r.id] % PALET_PERMATA.length], indeksAsli[r.id] + 2);
   });
 
-  // -------- Footer: total keseluruhan + tanggal --------
+  // -------- Footer --------
   ctx.textAlign = "center";
-  ctx.fillStyle = "#0f7b3e";
-  ctx.font = "800 44px 'Outfit', sans-serif";
-  ctx.fillText("Total Pendaftar: " + totalPendaftar, W / 2, H - 80);
-
+  ctx.strokeStyle = "rgba(201,154,46,0.6)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(marginX, H - 60);
+  ctx.lineTo(W - marginX, H - 60);
+  ctx.stroke();
   const tanggalCetak = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-  ctx.fillStyle = "#7c9186";
-  ctx.font = "500 22px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 40);
+  ctx.fillStyle = "#6b7d72";
+  ctx.font = "500 17px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Diperbarui " + tanggalCetak + " · PPTQ Al Azzaam", W / 2, H - 32);
 }
 
 // Caption siap-salin untuk dibagikan bersamaan dengan poster (mis. di
@@ -1894,7 +1936,7 @@ async function bukaPosterRekap(rules, rows) {
 
     bukaModal(
     "🖼️ Poster Rekap Pendaftar",
-    '<p class="hint">Rasio 2:3 (setara "6:9"), resolusi ' + POSTER_LEBAR_PX + '×' + POSTER_TINGGI_PX + 'px — cukup tajam untuk diunggah ke Instagram/WhatsApp. Angkanya otomatis dari data "Data Pendaftar" saat ini.</p>' +
+    '<p class="hint">Rasio 4:5 (potret standar Instagram), resolusi ' + POSTER_LEBAR_PX + '×' + POSTER_TINGGI_PX + 'px — cukup tajam untuk diunggah ke Instagram/WhatsApp. Angkanya otomatis dari data "Data Pendaftar" saat ini, kartu diurutkan dari pendaftar terbanyak.</p>' +
     '<div class="poster-rekap-preview-wrap">' +
       '<canvas id="poster-rekap-canvas"></canvas>' +
     '</div>' +
