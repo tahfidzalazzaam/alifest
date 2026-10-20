@@ -773,6 +773,96 @@ function renderDaftarBerkasTim(urlBerkasTim, label) {
   }).join("");
 }
 
+/* ==================== Ganti berkas pendaftaran yang sudah diunggah ====================
+   Dipakai form edit individu/tim (bukaModalIndividuEdit()/bukaModalTimEdit(),
+   di bawah) supaya panitia bisa MENGGANTI berkas yang sudah diunggah (Kartu
+   Pelajar, Surat Delegasi, Bukti IG, Kartu Anggota) tanpa perlu lewat
+   Storage Supabase manual. Replikasi SEDERHANA dari uploadKeStorage()/
+   kecilkanGambarJikaPerlu() di assets/js/view-daftar.js (nama fungsi diberi
+   akhiran "Admin" supaya tidak bentrok -- satu scope global JS yang sama,
+   lihat Catatan Teknis README) -- TANPA OCR nama kartu (fitur itu murni
+   kemudahan penamaan file saat pendaftaran AWAL, tidak relevan untuk GANTI
+   satu file oleh panitia yang sudah tahu persis berkas siapa yang diganti).
+   Kompresi gambar TETAP dipakai (alasan sama seperti versi pendaftar, lihat
+   komentarnya di sana) supaya berkas pengganti tidak balik jadi besar-besar
+   lagi. Panitia (role `authenticated`) sudah punya izin INSERT/UPDATE/
+   DELETE/SELECT penuh ke bucket `berkas-pendaftaran` sejak migrasi
+   0001/0008/0009/0047 -- TIDAK butuh migrasi SQL baru untuk ini. */
+
+// Menormalkan kolom berkas yang bisa berisi array JSON ATAU (data lama,
+// sebelum migrasi 0021) satu string polos jadi array JS biasa -- dipakai
+// bukaModalIndividuEdit()/bukaModalTimEdit() untuk merender satu kotak
+// "Ganti" per berkas yang SUDAH ADA. "minSlot" (opsional) memaksa jumlah
+// slot MINIMAL sekian -- dipakai untuk Bukti IG yang selalu diharapkan 2
+// slot walau datanya kebetulan kurang -- tanpa memotong kalau jumlah
+// aslinya lebih banyak dari itu.
+function bukaUrlBerkasArray(nilai, minSlot) {
+  const daftar = Array.isArray(nilai) ? nilai.slice() : (nilai ? [nilai] : []);
+  while (minSlot && daftar.length < minSlot) daftar.push(null);
+  return daftar;
+}
+
+function ekstensiAdmin(file) {
+  const bagian = file.name.split(".");
+  return bagian.length > 1 ? bagian.pop() : "bin";
+}
+
+function kecilkanGambarJikaPerluAdmin(file) {
+  if (!file || file.type.indexOf("image/") !== 0 || file.size < 400 * 1024) {
+    return Promise.resolve(file);
+  }
+  return new Promise(function (resolve) {
+    const img = new Image();
+    const urlSementara = URL.createObjectURL(file);
+    img.onload = function () {
+      URL.revokeObjectURL(urlSementara);
+      const MAKS_SISI = 1600;
+      const skala = Math.min(1, MAKS_SISI / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.round(img.naturalWidth * skala), h = Math.round(img.naturalHeight * skala);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(function (blob) {
+        if (!blob || blob.size >= file.size) { resolve(file); return; }
+        resolve(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+      }, "image/jpeg", 0.82);
+    };
+    img.onerror = function () { URL.revokeObjectURL(urlSementara); resolve(file); };
+    img.src = urlSementara;
+  });
+}
+
+// Mengunggah SATU berkas pengganti, mengembalikan URL publiknya. Dipakai
+// berkali-kali (satu panggilan per berkas yang diganti) oleh handler Simpan
+// di bukaModalIndividuEdit()/bukaModalTimEdit().
+async function unggahGantiBerkasAdmin(file, label) {
+  file = await kecilkanGambarJikaPerluAdmin(file);
+  const path = "admin-ganti/" + Date.now() + "-" + Math.random().toString(36).slice(2) + "-" + label + "." + ekstensiAdmin(file);
+  const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).upload(path, file, {
+    contentType: file.type,
+    upsert: false
+  });
+  if (error) throw new Error("Gagal mengunggah " + label + ": " + error.message);
+  const { data } = supabaseClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// Menghapus berkas LAMA dari Storage setelah berhasil diganti -- dipanggil
+// SETELAH baris `pendaftaran` berhasil disimpan dengan URL yang baru, biar
+// tidak ada jendela waktu di mana link berkas di database mengarah ke file
+// yang sudah terhapus. Best-effort, SAMA seperti pembersihan berkas saat
+// menghapus pendaftaran (lihat tombol Hapus di loadTabPendaftar()): kalau
+// gagal, cukup dicatat di console, TIDAK membatalkan penggantian yang sudah
+// berhasil tersimpan (berkas baru sudah terpakai, berkas lama yang gagal
+// terhapus paling buruk cuma tertinggal "sampah" di Storage).
+async function hapusBerkasLamaAdmin(urlLama) {
+  const path = ekstrakPathBerkas(urlLama);
+  if (!path) return;
+  const { error } = await supabaseClient.storage.from(STORAGE_BUCKET).remove([path]);
+  if (error) console.error("Berkas lama gagal dihapus (ditinggalkan, bukan error fatal):", urlLama, error);
+}
+
 /* -------- Form edit data tim (migrasi 0052) -------- */
 // Dibuka lewat tombol "✏️ Edit Data" di bukaModalTim(). Field yang SENGAJA
 // TIDAK disediakan di sini: Nomor Pendaftaran (identitas sistem, dikelola
@@ -831,7 +921,19 @@ async function bukaModalTimEdit(row, rule) {
       '</tr>';
     }).join("") : '<tr><td colspan="6">Belum ada data anggota.</td></tr>') +
     '</tbody></table></div>' +
-    '<p class="hint">Nomor pendaftaran & berkas unggahan tidak bisa diubah lewat form ini.</p>' +
+    '<p class="modal-section-title" style="margin-top:18px;">Ganti Berkas</p>' +
+    '<p class="hint">Kosongkan kotak mana pun yang tidak perlu diganti -- berkas lamanya tetap dipakai apa adanya.</p>' +
+    '<div class="field"><label for="edit-file-delegasi">Surat Delegasi' + (row.url_surat_delegasi ? ' (<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-delegasi" accept="image/*,.pdf"></div>' +
+    '<div class="field-row">' +
+      bukaUrlBerkasArray(row.url_bukti_follow_ig, 2).map(function (u, i) {
+        return '<div class="field"><label for="edit-file-ig' + i + '">Bukti IG #' + (i + 1) + (u ? ' (<a href="' + u + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-ig' + i + '" accept="image/*,.pdf"></div>';
+      }).join("") +
+    '</div>' +
+    '<p class="hint" style="margin-top:14px;">Kartu Anggota -- mengganti HANYA berkas yang sudah ada di bawah ini (menambah/menghapus berkas baru tidak bisa lewat form ini):</p>' +
+    bukaUrlBerkasArray(row.url_berkas_tim).map(function (u, i) {
+      return '<div class="field"><label for="edit-file-kartutim' + i + '">Kartu Anggota #' + (i + 1) + (u ? ' (<a href="' + u + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-kartutim' + i + '" accept="image/*,.pdf"></div>';
+    }).join("") +
+    '<p class="hint">Nomor pendaftaran tidak bisa diubah lewat form ini.</p>' +
     '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">' +
       '<button type="button" class="btn btn--ghost" id="btn-batal-edit-tim">Batal</button>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-edit-tim">Simpan Perubahan</button>' +
@@ -890,9 +992,57 @@ async function bukaModalTimEdit(row, rule) {
 
     const btnSimpan = document.getElementById("btn-simpan-edit-tim");
     btnSimpan.disabled = true;
+    btnSimpan.textContent = "Mengunggah berkas...";
+
+    // Kumpulkan dulu SEMUA berkas pengganti yang dipilih (kotak yang
+    // dibiarkan kosong tidak ikut diproses -- berkas lamanya dipakai apa
+    // adanya), unggah satu per satu, baru masukkan URL barunya ke payload.
+    // Berkas LAMA yang tergantikan baru dihapus dari Storage SETELAH baris
+    // `pendaftaran` berhasil disimpan dengan URL baru (lihat
+    // hapusBerkasLamaAdmin()), supaya tidak ada jendela waktu di mana link
+    // di database mengarah ke file yang sudah terhapus.
+    const payloadTim = { nama_tim: namaTimBaru, pembina: pembinaBaru, whatsapp: waBaru, asal_sekolah: sekolahBaru, jenjang: jenjangBaru };
+    const berkasLamaUntukDihapus = [];
+
+    try {
+      const fileDelegasiBaru = document.getElementById("edit-file-delegasi").files[0] || null;
+      if (fileDelegasiBaru) {
+        payloadTim.url_surat_delegasi = await unggahGantiBerkasAdmin(fileDelegasiBaru, "surat-delegasi");
+        if (row.url_surat_delegasi) berkasLamaUntukDihapus.push(row.url_surat_delegasi);
+      }
+
+      const igLama = bukaUrlBerkasArray(row.url_bukti_follow_ig, 2);
+      const igBaru = igLama.slice();
+      let igBerubah = false;
+      for (let i = 0; i < igLama.length; i++) {
+        const fileIgBaru = document.getElementById("edit-file-ig" + i).files[0] || null;
+        if (!fileIgBaru) continue;
+        igBaru[i] = await unggahGantiBerkasAdmin(fileIgBaru, "bukti-ig-" + (i + 1));
+        if (igLama[i]) berkasLamaUntukDihapus.push(igLama[i]);
+        igBerubah = true;
+      }
+      if (igBerubah) payloadTim.url_bukti_follow_ig = igBaru;
+
+      const kartuTimLama = bukaUrlBerkasArray(row.url_berkas_tim);
+      const kartuTimBaru = kartuTimLama.slice();
+      let kartuTimBerubah = false;
+      for (let i = 0; i < kartuTimLama.length; i++) {
+        const fileKartuTimBaru = document.getElementById("edit-file-kartutim" + i).files[0] || null;
+        if (!fileKartuTimBaru) continue;
+        kartuTimBaru[i] = await unggahGantiBerkasAdmin(fileKartuTimBaru, "kartu-anggota-" + (i + 1));
+        if (kartuTimLama[i]) berkasLamaUntukDihapus.push(kartuTimLama[i]);
+        kartuTimBerubah = true;
+      }
+      if (kartuTimBerubah) payloadTim.url_berkas_tim = kartuTimBaru;
+    } catch (e) {
+      alert(e.message || "Gagal mengunggah berkas pengganti.");
+      btnSimpan.disabled = false;
+      btnSimpan.textContent = "Simpan Perubahan";
+      return;
+    }
+
     btnSimpan.textContent = "Menyimpan...";
 
-    const payloadTim = { nama_tim: namaTimBaru, pembina: pembinaBaru, whatsapp: waBaru, asal_sekolah: sekolahBaru, jenjang: jenjangBaru };
     const { error: errorTim } = await supabaseClient.from("pendaftaran").update(payloadTim).eq("id", row.id);
     if (errorTim) {
       alert("Gagal menyimpan data tim: " + errorTim.message);
@@ -900,6 +1050,8 @@ async function bukaModalTimEdit(row, rule) {
       btnSimpan.textContent = "Simpan Perubahan";
       return;
     }
+
+    berkasLamaUntukDihapus.forEach(function (u) { hapusBerkasLamaAdmin(u); });
 
     const hasilAnggota = await Promise.all(anggotaBaru.map(function (a) {
       return supabaseClient.from("anggota_tim").update({
@@ -1006,7 +1158,15 @@ function bukaModalIndividuEdit(row, rule) {
       '<div class="field"><label for="edit-whatsapp">No. WhatsApp</label><input type="text" id="edit-whatsapp" value="' + escapeHTML(row.whatsapp || "") + '"></div>' +
     '</div>' +
     '<div class="field"><label for="edit-email">Email</label><input type="email" id="edit-email" value="' + escapeHTML(row.email || "") + '"></div>' +
-    '<p class="hint">Nomor pendaftaran & berkas unggahan tidak bisa diubah lewat form ini.</p>' +
+    '<p class="modal-section-title" style="margin-top:18px;">Ganti Berkas</p>' +
+    '<p class="hint">Kosongkan kotak mana pun yang tidak perlu diganti -- berkas lamanya tetap dipakai apa adanya.</p>' +
+    '<div class="field"><label for="edit-file-kartu">Kartu Pelajar / Surat Aktif' + (row.url_kartu_pelajar ? ' (<a href="' + row.url_kartu_pelajar + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-kartu" accept="image/*,.pdf"></div>' +
+    '<div class="field-row">' +
+      bukaUrlBerkasArray(row.url_bukti_follow_ig, 2).map(function (u, i) {
+        return '<div class="field"><label for="edit-file-ig' + i + '">Bukti IG #' + (i + 1) + (u ? ' (<a href="' + u + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-ig' + i + '" accept="image/*,.pdf"></div>';
+      }).join("") +
+    '</div>' +
+    '<p class="hint">Nomor pendaftaran tidak bisa diubah lewat form ini.</p>' +
     '<div class="submit-row" style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">' +
       '<button type="button" class="btn btn--ghost" id="btn-batal-edit-individu">Batal</button>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-edit-individu">Simpan Perubahan</button>' +
@@ -1056,6 +1216,38 @@ function bukaModalIndividuEdit(row, rule) {
 
     const btnSimpan = document.getElementById("btn-simpan-edit-individu");
     btnSimpan.disabled = true;
+    btnSimpan.textContent = "Mengunggah berkas...";
+
+    // Sama seperti bukaModalTimEdit(): unggah dulu berkas pengganti yang
+    // dipilih (kotak kosong dilewati), baru masukkan URL barunya ke
+    // payload -- berkas LAMA yang tergantikan baru dihapus dari Storage
+    // SETELAH baris `pendaftaran` berhasil disimpan dengan URL baru.
+    const berkasLamaUntukDihapus = [];
+    try {
+      const fileKartuBaru = document.getElementById("edit-file-kartu").files[0] || null;
+      if (fileKartuBaru) {
+        payload.url_kartu_pelajar = await unggahGantiBerkasAdmin(fileKartuBaru, "kartu-pelajar");
+        if (row.url_kartu_pelajar) berkasLamaUntukDihapus.push(row.url_kartu_pelajar);
+      }
+
+      const igLama = bukaUrlBerkasArray(row.url_bukti_follow_ig, 2);
+      const igBaru = igLama.slice();
+      let igBerubah = false;
+      for (let i = 0; i < igLama.length; i++) {
+        const fileIgBaru = document.getElementById("edit-file-ig" + i).files[0] || null;
+        if (!fileIgBaru) continue;
+        igBaru[i] = await unggahGantiBerkasAdmin(fileIgBaru, "bukti-ig-" + (i + 1));
+        if (igLama[i]) berkasLamaUntukDihapus.push(igLama[i]);
+        igBerubah = true;
+      }
+      if (igBerubah) payload.url_bukti_follow_ig = igBaru;
+    } catch (e) {
+      alert(e.message || "Gagal mengunggah berkas pengganti.");
+      btnSimpan.disabled = false;
+      btnSimpan.textContent = "Simpan Perubahan";
+      return;
+    }
+
     btnSimpan.textContent = "Menyimpan...";
 
     const { error } = await supabaseClient.from("pendaftaran").update(payload).eq("id", row.id);
@@ -1065,6 +1257,8 @@ function bukaModalIndividuEdit(row, rule) {
       btnSimpan.textContent = "Simpan Perubahan";
       return;
     }
+
+    berkasLamaUntukDihapus.forEach(function (u) { hapusBerkasLamaAdmin(u); });
 
     Object.assign(row, payload);
     if (typeof renderRekapPendaftarRef === "function") renderRekapPendaftarRef();
