@@ -130,6 +130,7 @@ async function renderDashboard(root, session) {
     '</div>' +
     '<div class="admin-tabs">' +
       '<button type="button" class="admin-tab is-active" data-tab="pendaftar">Data Pendaftar</button>' +
+      '<button type="button" class="admin-tab" data-tab="pendamping">Data Pendamping</button>' +
       '<button type="button" class="admin-tab" data-tab="lomba">Kelola Lomba</button>' +
       '<button type="button" class="admin-tab" data-tab="logo">Logo Situs</button>' +
       '<button type="button" class="admin-tab" data-tab="juknis">Petunjuk Teknis</button>' +
@@ -183,6 +184,7 @@ async function renderDashboard(root, session) {
       tab.classList.add("is-active");
       const nama = tab.getAttribute("data-tab");
       if (nama === "pendaftar") loadTabPendaftar();
+      if (nama === "pendamping") loadTabPendamping();
       if (nama === "lomba") loadTabLomba();
       if (nama === "logo") loadTabLogo();
       if (nama === "juknis") loadTabJuknis();
@@ -1735,6 +1737,167 @@ async function loadTabPendaftar() {
   document.getElementById("btn-unduh-xlsx").addEventListener("click", function () {
     unduhXLSXPendaftar(this, rows, rules, lombaFilter);
   });
+}
+
+/* =============================================================================
+   Tab "Data Pendamping" -- permintaan panitia: "mengetahui jumlah pendamping",
+   dengan pendamping yang sama (mendampingi lebih dari satu peserta/tim)
+   dihitung SATU kali saja, bukan satu per baris pendaftaran.
+
+   "Nama pendamping" satu baris pendaftaran diambil dari salah satu dari TIGA
+   kolom berikut (saling eksklusif tergantung tipe pendaftarannya -- cuma
+   SATU dari ketiganya yang akan terisi per baris):
+     - r.pembina                  -> lomba TIM (mis. Futsal): guru pendamping
+     - r.penanggung_jawab_lembaga -> pendaftaran Perwakilan Lembaga
+     - r.nama_pendamping          -> lomba individu (field OPSIONAL, migrasi 0027)
+   Baris yang ketiga kolom itu kosong semua (individu yang tidak mengisi
+   nama pendamping) TIDAK ikut dihitung sama sekali -- tidak ada pendamping
+   yang bisa dicatat dari baris itu.
+
+   Dua baris pendaftaran dianggap PENDAMPING YANG SAMA kalau NAMA-nya cocok
+   (setelah dirapikan: spasi berlebih & besar/kecil huruf diabaikan) ATAU
+   nomor WA-nya cocok (setelah dirapikan ke format "08..." -- "62"/"+62" di
+   depan disamakan ke "0") -- permintaan panitia eksplisit supaya pendamping
+   yang namanya ditulis beda-beda ejaan di form (tapi WA-nya sama) tetap
+   dianggap satu orang, dan sebaliknya. Pencocokan ini TRANSITIF lewat
+   union-find sederhana (gabungMap): kalau A=B lewat nama dan B=C lewat WA,
+   A/B/C semua jadi satu kelompok.
+
+   Baris berstatus "Ditolak" TIDAK ikut dihitung (sama seperti renderRekap()
+   di tab "Data Pendaftar") -- pendamping dari pendaftaran yang sudah
+   ditolak panitia tidak dianggap benar-benar akan datang.
+
+   Tab ini query SENDIRI ke tabel `pendaftaran` (tidak menumpang data `rows`
+   milik tab "Data Pendaftar") supaya tetap akurat dibuka kapan pun, tanpa
+   harus tab "Data Pendaftar" dibuka duluan pada sesi yang sama. */
+function rapikanNamaPendamping(s) {
+  return (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function rapikanWaPendamping(s) {
+  let d = (s || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.indexOf("62") === 0) d = "0" + d.slice(2);
+  return d;
+}
+
+function kumpulkanEntriPendamping(rows) {
+  const entri = [];
+  rows.forEach(function (r) {
+    if (r.status === "Ditolak") return;
+    const namaAsli = (r.pembina || r.penanggung_jawab_lembaga || r.nama_pendamping || "").trim();
+    if (!namaAsli) return;
+    const label = (r.tipe === "tim" ? (r.nama_tim || r.nama_lengkap) : r.nama_lengkap) || "-";
+    entri.push({
+      namaAsli: namaAsli,
+      namaKey: rapikanNamaPendamping(namaAsli),
+      waAsli: (r.whatsapp || "").trim(),
+      waKey: rapikanWaPendamping(r.whatsapp),
+      didampingi: label,
+      lomba: r.lomba_nama || r.lomba_id || "-"
+    });
+  });
+  return entri;
+}
+
+// Union-find super sederhana (array parent per index) -- cukup untuk jumlah
+// entri pendaftaran yang realistis di aplikasi ini (ratusan, bukan jutaan).
+function kelompokkanPendamping(entri) {
+  const parent = entri.map(function (_, i) { return i; });
+  function temukan(i) {
+    while (parent[i] !== i) i = parent[i];
+    return i;
+  }
+  function gabung(a, b) {
+    const ra = temukan(a), rb = temukan(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  const namaMap = {}; // namaKey -> index entri pertama yang punya key itu
+  const waMap = {};   // waKey -> index entri pertama yang punya key itu
+  entri.forEach(function (e, i) {
+    if (e.namaKey) {
+      if (namaMap[e.namaKey] !== undefined) gabung(i, namaMap[e.namaKey]);
+      else namaMap[e.namaKey] = i;
+    }
+    if (e.waKey) {
+      if (waMap[e.waKey] !== undefined) gabung(i, waMap[e.waKey]);
+      else waMap[e.waKey] = i;
+    }
+  });
+
+  const kelompok = {}; // root index -> { entriList: [...] }
+  entri.forEach(function (e, i) {
+    const r = temukan(i);
+    if (!kelompok[r]) kelompok[r] = [];
+    kelompok[r].push(e);
+  });
+
+  return Object.values(kelompok).map(function (list) {
+    // Nama tampilan: ejaan asli yang paling sering muncul di kelompok ini.
+    const hitungNama = {};
+    list.forEach(function (e) { hitungNama[e.namaAsli] = (hitungNama[e.namaAsli] || 0) + 1; });
+    const namaTampil = Object.keys(hitungNama).sort(function (a, b) { return hitungNama[b] - hitungNama[a]; })[0];
+
+    const waSet = Array.from(new Set(list.map(function (e) { return e.waAsli; }).filter(Boolean)));
+    const didampingiSet = Array.from(new Set(list.map(function (e) { return e.didampingi + " (" + e.lomba + ")"; })));
+
+    return { nama: namaTampil, wa: waSet.join(" / ") || "-", jumlah: list.length, didampingi: didampingiSet };
+  }).sort(function (a, b) { return b.jumlah - a.jumlah || a.nama.localeCompare(b.nama); });
+}
+
+async function loadTabPendamping() {
+  const content = document.getElementById("admin-content");
+  content.innerHTML = '<p class="hint">Memuat data pendamping...</p>';
+
+  const { data: rows, error } = await supabaseClient.from("pendaftaran").select("*");
+  if (error) {
+    content.innerHTML = "<p>Gagal memuat data pendamping: " + error.message + "</p>";
+    return;
+  }
+
+  const entri = kumpulkanEntriPendamping(rows || []);
+  const kelompok = kelompokkanPendamping(entri);
+
+  content.innerHTML =
+    '<p class="hint">Daftar pendamping UNIK (guru pendamping Futsal, penanggung jawab Perwakilan Lembaga, atau Nama Pendamping individu kalau diisi) -- pendamping yang mendampingi lebih dari satu peserta/tim/lomba sudah digabung jadi satu baris, dicocokkan lewat nama (ejaan dirapikan) dan/atau nomor WA. Pendaftaran berstatus "Ditolak" tidak ikut dihitung.</p>' +
+    '<div class="admin-filters">' +
+      '<input type="text" id="filter-cari-pendamping" placeholder="Cari nama pendamping / WA..." />' +
+    '</div>' +
+    '<p class="hint" id="jumlah-hint-pendamping"></p>' +
+    '<div class="table-wrap"><table class="admin-table" id="tabel-pendamping"><thead><tr>' +
+      '<th>#</th><th>Nama Pendamping</th><th>No. WA</th><th>Jumlah Didampingi</th><th>Mendampingi</th>' +
+    '</tr></thead><tbody></tbody></table></div>';
+
+  function renderBaris() {
+    const cari = document.getElementById("filter-cari-pendamping").value.toLowerCase();
+    const tampil = kelompok.filter(function (k) {
+      if (!cari) return true;
+      return k.nama.toLowerCase().indexOf(cari) !== -1 || k.wa.toLowerCase().indexOf(cari) !== -1;
+    });
+
+    document.getElementById("jumlah-hint-pendamping").textContent =
+      "Menampilkan " + tampil.length + " dari " + kelompok.length + " pendamping unik (" + entri.length + " baris pendaftaran yang mencatat pendamping).";
+
+    const tbody = document.querySelector("#tabel-pendamping tbody");
+    if (tampil.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5">Tidak ada data yang cocok.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = tampil.map(function (k, i) {
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHTML(k.nama) + '</td>' +
+        '<td>' + escapeHTML(k.wa) + '</td>' +
+        '<td>' + k.jumlah + '</td>' +
+        '<td>' + escapeHTML(k.didampingi.join(", ")) + '</td>' +
+      '</tr>';
+    }).join("");
+  }
+
+  renderBaris();
+  document.getElementById("filter-cari-pendamping").addEventListener("input", renderBaris);
 }
 
 /* -------- Unduh Data Pendaftar sebagai XLSX (murni client-side) --------
