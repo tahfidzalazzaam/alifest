@@ -140,6 +140,20 @@ async function renderDashboard(root, session) {
     '<div id="admin-content"></div>' +
     '<div class="modal-overlay" id="modal-overlay" style="display:none;">' +
       '<div class="modal-box" id="modal-box"></div>' +
+    '</div>' +
+    // Panel detail Pendaftar (Lomba) -- DOCKED DI KANAN layar ala "preview
+    // pane" File Explorer Windows, permintaan panitia (beda dari popup
+    // tengah ".modal-overlay" di atas yang masih dipakai modal LAIN).
+    // Lihat bukaPanelDetail()/tutupPanelDetail() di bawah & CSS
+    // ".detail-panel..." di style.css.
+    '<div class="detail-panel-overlay" id="detail-panel-overlay">' +
+      '<div class="detail-panel" id="detail-panel">' +
+        '<div class="detail-panel__header">' +
+          '<h3 id="detail-panel-title"></h3>' +
+          '<button type="button" class="modal-close" id="detail-panel-close-btn" aria-label="Tutup">&times;</button>' +
+        '</div>' +
+        '<div class="detail-panel__body" id="detail-panel-body"></div>' +
+      '</div>' +
     '</div>';
 
   const btnToggle = document.getElementById("btn-toggle-pendaftaran");
@@ -303,6 +317,34 @@ function bukaModal(judul, isiHTML) {
 
 function tutupModal() {
   document.getElementById("modal-overlay").style.display = "none";
+}
+
+/* ==================== PANEL DETAIL PENDAFTAR (docked kanan) ====================
+   Permintaan panitia: popup "Detail Peserta"/"Detail Tim" (tab "Data
+   Pendaftar") dipindah dari modal tengah ke PANEL DI SISI KANAN layar,
+   meniru panel preview file di Windows Explorer (daftar/tabel di
+   belakangnya tetap kelihatan, TIDAK digelapkan seperti modal biasa).
+
+   Dipakai KHUSUS untuk flow ini & sub-layarnya (Edit Data, Alasan
+   Penolakan) -- bukaModalIndividu()/bukaModalTim()/
+   bukaModalIndividuEdit()/bukaModalTimEdit()/bukaModalAlasanPenolakanPopup()
+   di bawah semuanya dipindah memakai bukaPanelDetail()/tutupPanelDetail()
+   ini, BUKAN bukaModal()/tutupModal() lagi. Popup/modal LAIN di halaman
+   Panitia (Kelola Lomba, Data Pendamping, dst) TIDAK ikut berubah, tetap
+   modal tengah seperti sebelumnya -- dua pasang fungsi ini sengaja dibuat
+   terpisah (bukan menambah parameter "mode" ke bukaModal()) supaya
+   perubahan di satu tidak berisiko mematahkan yang lain. */
+function bukaPanelDetail(judul, isiHTML) {
+  const overlay = document.getElementById("detail-panel-overlay");
+  document.getElementById("detail-panel-title").textContent = judul;
+  document.getElementById("detail-panel-body").innerHTML = isiHTML;
+  overlay.classList.add("is-visible");
+  document.getElementById("detail-panel-close-btn").addEventListener("click", tutupPanelDetail);
+  overlay.onclick = function (e) { if (e.target === overlay) tutupPanelDetail(); };
+}
+
+function tutupPanelDetail() {
+  document.getElementById("detail-panel-overlay").classList.remove("is-visible");
 }
 
 /* ==================== TAB 1: DATA PENDAFTAR ==================== */
@@ -598,7 +640,7 @@ async function bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule) {
       '<button type="button" class="btn btn--primary" id="btn-simpan-alasan-penolakan">Tandai Ditolak</button>' +
     '</div>';
 
-  bukaModal("Alasan Penolakan — " + (row.nama_tim || row.nama_lengkap), isiHTML);
+  bukaPanelDetail("Alasan Penolakan — " + (row.nama_tim || row.nama_lengkap), isiHTML);
 
   const selectEl = document.getElementById("alasan-penolakan-select");
   const lainnyaWrap = document.getElementById("alasan-penolakan-lainnya-wrap");
@@ -627,7 +669,7 @@ async function bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule) {
 }
 
 // Memasang listener dropdown status di dalam popup detail yang baru saja
-// digambar (bukaModalIndividu/bukaModalTim) -- dipanggil SETELAH bukaModal()
+// digambar (bukaModalIndividu/bukaModalTim) -- dipanggil SETELAH bukaPanelDetail()
 // supaya elemennya sudah ada di DOM. "rule" cuma relevan untuk tim (dioper
 // apa adanya ke bukaUlangPopupDetailLomba/commitPerubahanStatusLomba kalau
 // perlu membuka ulang popup tim).
@@ -715,7 +757,7 @@ async function bukaModalTim(row, rule) {
       '<button type="button" class="btn btn--ghost" id="btn-edit-tim">✏️ Edit Data</button>' +
     '</div>';
 
-  bukaModal("Detail Tim — " + row.nama_tim, infoHTML);
+  bukaPanelDetail("Detail Tim — " + row.nama_tim, infoHTML);
   pasangListenerStatusPopup(row, true, rule);
 
   const btnEditTim = document.getElementById("btn-edit-tim");
@@ -878,13 +920,13 @@ async function hapusBerkasLamaAdmin(urlLama) {
 // cuma field anggota yang SUDAH ADA yang bisa dibetulkan; panitia perlu
 // lewat Table Editor Supabase kalau harus menambah/menghapus anggota.
 async function bukaModalTimEdit(row, rule) {
-  bukaModal("Edit Data Tim — " + row.nama_tim, '<p class="hint">Memuat data anggota tim...</p>');
+  bukaPanelDetail("Edit Data Tim — " + row.nama_tim, '<p class="hint">Memuat data anggota tim...</p>');
 
   const { data: anggota, error } = await supabaseClient
     .from("anggota_tim").select("*").eq("nomor_pendaftaran", row.nomor_pendaftaran).order("created_at");
 
   if (error) {
-    bukaModal("Edit Data Tim — " + row.nama_tim, '<p>Gagal memuat anggota tim: ' + error.message + '</p>');
+    bukaPanelDetail("Edit Data Tim — " + row.nama_tim, '<p>Gagal memuat anggota tim: ' + error.message + '</p>');
     return;
   }
 
@@ -941,7 +983,7 @@ async function bukaModalTimEdit(row, rule) {
       '<button type="button" class="btn btn--primary" id="btn-simpan-edit-tim">Simpan Perubahan</button>' +
     '</div>';
 
-  bukaModal("Edit Data Tim — " + row.nama_tim, formHTML);
+  bukaPanelDetail("Edit Data Tim — " + row.nama_tim, formHTML);
 
   document.getElementById("btn-batal-edit-tim").addEventListener("click", function () {
     bukaModalTim(row, rule);
@@ -959,7 +1001,7 @@ async function bukaModalTimEdit(row, rule) {
       return;
     }
 
-    const barisAnggota = Array.from(document.querySelectorAll("#modal-box tr[data-anggota-id]"));
+    const barisAnggota = Array.from(document.querySelectorAll("#detail-panel-body tr[data-anggota-id]"));
     const anggotaBaru = [];
     const punggungTerpakai = [];
     for (const tr of barisAnggota) {
@@ -1115,7 +1157,7 @@ function bukaModalIndividu(row, rule) {
       '<button type="button" class="btn btn--ghost" id="btn-edit-individu">✏️ Edit Data</button>' +
     '</div>';
 
-  bukaModal("Detail Peserta — " + row.nama_lengkap, infoHTML);
+  bukaPanelDetail("Detail Peserta — " + row.nama_lengkap, infoHTML);
   pasangListenerStatusPopup(row, false, rule);
 
   const btnEditIndividu = document.getElementById("btn-edit-individu");
@@ -1174,7 +1216,7 @@ function bukaModalIndividuEdit(row, rule) {
       '<button type="button" class="btn btn--primary" id="btn-simpan-edit-individu">Simpan Perubahan</button>' +
     '</div>';
 
-  bukaModal("Edit Data Peserta — " + row.nama_lengkap, formHTML);
+  bukaPanelDetail("Edit Data Peserta — " + row.nama_lengkap, formHTML);
 
   document.getElementById("btn-batal-edit-individu").addEventListener("click", function () {
     bukaModalIndividu(row, rule);
