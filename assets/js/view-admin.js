@@ -1767,6 +1767,17 @@ async function loadTabPendaftar() {
    di tab "Data Pendaftar") -- pendamping dari pendaftaran yang sudah
    ditolak panitia tidak dianggap benar-benar akan datang.
 
+   Detail "siapa saja yang didampingi" TIDAK ditaruh di kolom tabel lagi
+   (permintaan panitia) -- sekarang ditaruh di POPUP yang terbuka begitu
+   baris pendamping diketuk (bukaModalDetailPendamping(), lewat bukaModal()
+   yang sudah ada). Di dalam popup itu, kalau ADA peserta/tim yang sama
+   ternyata tercatat didampingi oleh LEBIH DARI SATU pendamping (hasil
+   deteksi tandaiPendampingGanda() di bawah -- dicocokkan lewat nama peserta
+   + asal sekolah, dirapikan sama seperti nama pendamping), baris itu diberi
+   tanda ⚠️ "GANDA" beserta nama pendamping lain yang juga mengaku
+   mendampinginya -- supaya panitia bisa mengecek langsung mana yang benar
+   (mis. kekeliruan isi form, bukan dianggap otomatis salah satu yang salah).
+
    Tab ini query SENDIRI ke tabel `pendaftaran` (tidak menumpang data `rows`
    milik tab "Data Pendaftar") supaya tetap akurat dibuka kapan pun, tanpa
    harus tab "Data Pendaftar" dibuka duluan pada sesi yang sama. */
@@ -1787,14 +1798,21 @@ function kumpulkanEntriPendamping(rows) {
     if (r.status === "Ditolak") return;
     const namaAsli = (r.pembina || r.penanggung_jawab_lembaga || r.nama_pendamping || "").trim();
     if (!namaAsli) return;
-    const label = (r.tipe === "tim" ? (r.nama_tim || r.nama_lengkap) : r.nama_lengkap) || "-";
+    const pesertaLabel = (r.tipe === "tim" ? (r.nama_tim || r.nama_lengkap) : r.nama_lengkap) || "-";
     entri.push({
       namaAsli: namaAsli,
       namaKey: rapikanNamaPendamping(namaAsli),
       waAsli: (r.whatsapp || "").trim(),
       waKey: rapikanWaPendamping(r.whatsapp),
-      didampingi: label,
-      lomba: r.lomba_nama || r.lomba_id || "-"
+      pesertaLabel: pesertaLabel,
+      // Kunci identitas peserta/tim yang didampingi -- nama + asal sekolah
+      // (dirapikan), BUKAN termasuk lomba, supaya peserta yang sama tapi
+      // mendaftar >1 lomba dengan pendamping BEDA tetap terdeteksi "ganda"
+      // (lihat tandaiPendampingGanda()). Baris tanpa asal_sekolah (jarang)
+      // tetap dapat kunci dari nama saja.
+      pesertaKey: rapikanNamaPendamping(pesertaLabel) + "|" + rapikanNamaPendamping(r.asal_sekolah || ""),
+      lomba: r.lomba_nama || r.lomba_id || "-",
+      nomorPendaftaran: r.nomor_pendaftaran || ""
     });
   });
   return entri;
@@ -1826,24 +1844,69 @@ function kelompokkanPendamping(entri) {
     }
   });
 
-  const kelompok = {}; // root index -> { entriList: [...] }
+  const kelompokMap = {}; // root index -> [entri, ...]
   entri.forEach(function (e, i) {
     const r = temukan(i);
-    if (!kelompok[r]) kelompok[r] = [];
-    kelompok[r].push(e);
+    if (!kelompokMap[r]) kelompokMap[r] = [];
+    kelompokMap[r].push(e);
   });
 
-  return Object.values(kelompok).map(function (list) {
+  const kelompok = Object.values(kelompokMap).map(function (list) {
     // Nama tampilan: ejaan asli yang paling sering muncul di kelompok ini.
     const hitungNama = {};
     list.forEach(function (e) { hitungNama[e.namaAsli] = (hitungNama[e.namaAsli] || 0) + 1; });
     const namaTampil = Object.keys(hitungNama).sort(function (a, b) { return hitungNama[b] - hitungNama[a]; })[0];
 
     const waSet = Array.from(new Set(list.map(function (e) { return e.waAsli; }).filter(Boolean)));
-    const didampingiSet = Array.from(new Set(list.map(function (e) { return e.didampingi + " (" + e.lomba + ")"; })));
 
-    return { nama: namaTampil, wa: waSet.join(" / ") || "-", jumlah: list.length, didampingi: didampingiSet };
+    // Detail per peserta/tim -- dedup lewat nomor pendaftaran (satu baris
+    // pendaftaran = satu peserta/tim, jadi ini kunci paling pasti, tidak
+    // bergantung ejaan nama).
+    const sudahAda = {};
+    const didampingi = [];
+    list.forEach(function (e) {
+      const kunci = e.nomorPendaftaran || (e.pesertaLabel + "|" + e.lomba);
+      if (sudahAda[kunci]) return;
+      sudahAda[kunci] = true;
+      didampingi.push({ label: e.pesertaLabel, lomba: e.lomba, nomorPendaftaran: e.nomorPendaftaran, pesertaKey: e.pesertaKey, ganda: false, pendampingLain: [] });
+    });
+
+    return { nama: namaTampil, wa: waSet.join(" / ") || "-", jumlah: list.length, didampingi: didampingi, adaGanda: false };
   }).sort(function (a, b) { return b.jumlah - a.jumlah || a.nama.localeCompare(b.nama); });
+
+  tandaiPendampingGanda(kelompok);
+  return kelompok;
+}
+
+// Deteksi "ganda": satu peserta/tim (pesertaKey) yang muncul di daftar
+// "didampingi" LEBIH DARI SATU kelompok pendamping -- permintaan panitia
+// supaya kasus begini ditandai, bukan diam-diam dianggap benar. Ditulis ke
+// tiap item didampingi yang terdampak (k.ganda + k.pendampingLain) DAN
+// ke level kelompok (adaGanda, supaya bisa ditandai di baris tabel).
+function tandaiPendampingGanda(kelompok) {
+  const pemilik = {}; // pesertaKey -> [{ kelompokIdx, nama }]
+  kelompok.forEach(function (k, ki) {
+    k.didampingi.forEach(function (d) {
+      if (!pemilik[d.pesertaKey]) pemilik[d.pesertaKey] = [];
+      pemilik[d.pesertaKey].push({ kelompokIdx: ki, nama: k.nama });
+    });
+  });
+
+  Object.keys(pemilik).forEach(function (pesertaKey) {
+    const daftar = pemilik[pesertaKey];
+    if (daftar.length < 2) return;
+    daftar.forEach(function (pemilikIni) {
+      const k = kelompok[pemilikIni.kelompokIdx];
+      k.adaGanda = true;
+      k.didampingi.forEach(function (d) {
+        if (d.pesertaKey !== pesertaKey) return;
+        d.ganda = true;
+        d.pendampingLain = daftar
+          .filter(function (p) { return p.kelompokIdx !== pemilikIni.kelompokIdx; })
+          .map(function (p) { return p.nama; });
+      });
+    });
+  });
 }
 
 async function loadTabPendamping() {
@@ -1859,14 +1922,18 @@ async function loadTabPendamping() {
   const entri = kumpulkanEntriPendamping(rows || []);
   const kelompok = kelompokkanPendamping(entri);
 
+  const jumlahGanda = kelompok.filter(function (k) { return k.adaGanda; }).length;
+
   content.innerHTML =
-    '<p class="hint">Daftar pendamping UNIK (guru pendamping Futsal, penanggung jawab Perwakilan Lembaga, atau Nama Pendamping individu kalau diisi) -- pendamping yang mendampingi lebih dari satu peserta/tim/lomba sudah digabung jadi satu baris, dicocokkan lewat nama (ejaan dirapikan) dan/atau nomor WA. Pendaftaran berstatus "Ditolak" tidak ikut dihitung.</p>' +
+    '<p class="hint">Daftar pendamping UNIK (guru pendamping Futsal, penanggung jawab Perwakilan Lembaga, atau Nama Pendamping individu kalau diisi) -- pendamping yang mendampingi lebih dari satu peserta/tim/lomba sudah digabung jadi satu baris, dicocokkan lewat nama (ejaan dirapikan) dan/atau nomor WA. <strong>Ketuk baris</strong> untuk melihat detail siapa saja yang didampingi. Pendaftaran berstatus "Ditolak" tidak ikut dihitung.' +
+      (jumlahGanda > 0 ? ' <strong style="color:var(--danger);">⚠️ Ada ' + jumlahGanda + ' pendamping dengan peserta/tim yang ternyata tercatat ganda (didampingi >1 pendamping) -- lihat detailnya di popup.</strong>' : '') +
+    '</p>' +
     '<div class="admin-filters">' +
       '<input type="text" id="filter-cari-pendamping" placeholder="Cari nama pendamping / WA..." />' +
     '</div>' +
     '<p class="hint" id="jumlah-hint-pendamping"></p>' +
     '<div class="table-wrap"><table class="admin-table" id="tabel-pendamping"><thead><tr>' +
-      '<th>#</th><th>Nama Pendamping</th><th>No. WA</th><th>Jumlah Didampingi</th><th>Mendampingi</th>' +
+      '<th>#</th><th>Nama Pendamping</th><th>No. WA</th><th>Jumlah Didampingi</th><th></th>' +
     '</tr></thead><tbody></tbody></table></div>';
 
   function renderBaris() {
@@ -1886,18 +1953,58 @@ async function loadTabPendamping() {
     }
 
     tbody.innerHTML = tampil.map(function (k, i) {
-      return '<tr>' +
+      return '<tr class="baris-pendamping" data-idx="' + kelompok.indexOf(k) + '" style="cursor:pointer;">' +
         '<td>' + (i + 1) + '</td>' +
-        '<td>' + escapeHTML(k.nama) + '</td>' +
+        '<td>' + escapeHTML(k.nama) + ' <span class="lp-badge">ketuk untuk detail</span></td>' +
         '<td>' + escapeHTML(k.wa) + '</td>' +
-        '<td>' + k.jumlah + '</td>' +
-        '<td>' + escapeHTML(k.didampingi.join(", ")) + '</td>' +
+        '<td>' + k.jumlah + (k.adaGanda ? ' <span class="status-pill status-pill--danger">⚠️ Ganda</span>' : '') + '</td>' +
+        '<td></td>' +
       '</tr>';
     }).join("");
+
+    tbody.querySelectorAll(".baris-pendamping").forEach(function (tr) {
+      tr.addEventListener("click", function () {
+        bukaModalDetailPendamping(kelompok[Number(tr.getAttribute("data-idx"))]);
+      });
+    });
   }
 
   renderBaris();
   document.getElementById("filter-cari-pendamping").addEventListener("input", renderBaris);
+}
+
+// Popup "siapa saja yang didampingi" oleh satu kelompok pendamping --
+// dibuka dengan mengetuk barisnya di tabel (loadTabPendamping() di atas).
+// Item yang terdeteksi "ganda" (lihat tandaiPendampingGanda()) diberi pil
+// merah beserta nama pendamping lain yang juga mengaku mendampingi
+// peserta/tim yang sama, supaya panitia bisa mengecek langsung mana yang
+// benar.
+function bukaModalDetailPendamping(k) {
+  const baris = k.didampingi.map(function (d) {
+    return '<tr' + (d.ganda ? ' style="background:rgba(194,58,46,0.06);"' : '') + '>' +
+      '<td>' + escapeHTML(d.label) + '</td>' +
+      '<td>' + escapeHTML(d.lomba) + '</td>' +
+      '<td>' + escapeHTML(d.nomorPendaftaran || "-") + '</td>' +
+      '<td>' + (d.ganda
+        ? '<span class="status-pill status-pill--danger">⚠️ GANDA -- juga didampingi: ' + escapeHTML(d.pendampingLain.join(", ")) + '</span>'
+        : '') +
+      '</td>' +
+    '</tr>';
+  }).join("");
+
+  const isiHTML =
+    '<div class="modal-field-grid">' +
+      '<div class="modal-field"><span class="modal-field__label">Nama Pendamping</span><span class="modal-field__value">' + escapeHTML(k.nama) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">No. WA</span><span class="modal-field__value">' + escapeHTML(k.wa) + '</span></div>' +
+      '<div class="modal-field"><span class="modal-field__label">Jumlah Didampingi</span><span class="modal-field__value">' + k.jumlah + '</span></div>' +
+    '</div>' +
+    (k.adaGanda ? '<p class="modal-status-hint" style="color:var(--danger);">⚠️ Ada peserta/tim di bawah yang ternyata tercatat didampingi oleh LEBIH dari satu pendamping -- baris yang dimaksud disorot merah, cek lagi mana yang benar.</p>' : '') +
+    '<p class="modal-section-title">Mendampingi</p>' +
+    '<div class="table-wrap"><table class="admin-table modal-table"><thead><tr>' +
+      '<th>Nama Peserta/Tim</th><th>Lomba</th><th>Nomor Pendaftaran</th><th>Keterangan</th>' +
+    '</tr></thead><tbody>' + baris + '</tbody></table></div>';
+
+  bukaModal("Detail Pendamping — " + k.nama, isiHTML);
 }
 
 /* -------- Unduh Data Pendaftar sebagai XLSX (murni client-side) --------
