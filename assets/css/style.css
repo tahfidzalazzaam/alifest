@@ -1368,6 +1368,60 @@ tr.row-clickable:hover { background: var(--green-100); }
 .modal-close:hover { color: var(--danger); }
 .modal-box__body { padding: 18px 22px 24px; }
 
+/* Panel Detail Pendaftar (Lomba) -- DOCKED DI KANAN layar, meniru panel
+   preview file di Windows Explorer (daftar/tabel di belakangnya tetap
+   kelihatan apa adanya, TIDAK digelapkan seperti .modal-overlay biasa di
+   atas). Dipakai KHUSUS untuk popup "Detail Peserta"/"Detail Tim" beserta
+   sub-layarnya (Edit Data, Alasan Penolakan) di tab "Data Pendaftar" --
+   lihat bukaPanelDetail()/tutupPanelDetail() di assets/js/view-admin.js.
+   Popup/modal LAIN di halaman Panitia (Kelola Lomba, Data Pendamping, dst)
+   TIDAK ikut berubah, tetap memakai .modal-overlay/.modal-box di atas. */
+.detail-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  display: none;
+  z-index: 1000;
+  /* Transparan dengan sengaja -- backdrop ini cuma dipakai untuk menangkap
+     klik di luar panel supaya bisa ditutup (sama seperti .modal-overlay),
+     BUKAN untuk menggelapkan layar seperti modal biasa. */
+}
+.detail-panel-overlay.is-visible { display: block; }
+.detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 460px;
+  max-width: 100vw;
+  background: var(--white);
+  box-shadow: -10px 0 30px rgba(18, 41, 28, 0.18);
+  border-left: 1.5px solid #f0eee4;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+}
+.detail-panel-overlay.is-visible .detail-panel { transform: translateX(0); }
+.detail-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1.5px solid #f0eee4;
+  flex: 0 0 auto;
+}
+.detail-panel__header h3 { margin: 0; font-size: 1.1rem; }
+.detail-panel__body { padding: 18px 22px 24px; overflow-y: auto; flex: 1 1 auto; }
+
+@media (max-width: 640px) {
+  /* Layar sempit: panel memenuhi lebar penuh, sama seperti modal yang
+     dempet ke tepi layar di breakpoint yang sama (lihat ".modal-overlay"
+     di bawah). */
+  .detail-panel { width: 100vw; }
+}
+
 /* Popup detail pendaftar (Lomba) dirapikan jadi grid dua kolom per field
    (label kecil di atas, nilai di bawahnya -- bukan "Label: Nilai" sebaris
    seperti sebelumnya yang jadi padat/susah dipindai sekilas), dipakai
