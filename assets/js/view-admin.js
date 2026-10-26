@@ -3035,13 +3035,43 @@ async function loadTabJuknis() {
 
 /* ==================== TAB 5: KARTU PESERTA & PENDAMPING ==================== */
 
-// Sejak pembaruan ini, field "Jenjang" dan "Lomba" pada Kartu Peserta
-// digabung jadi SATU field (key "lomba_jenjang") -- tidak lagi dua tulisan
-// terpisah di kartu, supaya tata letaknya lebih ringkas. Kartu Pendamping
-// tidak berubah (memang sudah cuma satu field "Lomba/Sekolah").
+// Sejak pembaruan ini: Kartu Peserta & Kartu Peserta Futsal/Tim memakai
+// TEMPLATE TERPISAH per kombinasi CABANG LOMBA x JENIS KELAMIN (bukan lagi
+// satu template dibagi rata semua lomba) -- permintaan panitia, supaya
+// tiap cabang lomba bisa punya gambar/nuansa kartu sendiri-sendiri (ini
+// juga yang jadi "gambaran jenis lomba" di kartunya -- bukan lewat ikon
+// tambahan, tapi lewat template gambarnya sendiri yang beda per lomba).
+// Posisi & ukuran tiap field (Nama, Nomor Pendaftaran, dst.) JUGA diatur
+// TERPISAH per kombinasi tsb (tata letak gambar bisa beda-beda per
+// template), lewat editor DRAG-AND-DROP langsung di atas pratinjau kartu
+// (klik+geser tulisan contohnya buat mengatur posisi, seret bulatan kecil
+// di pojok kanan-bawah tiap tulisan buat memperbesar/mengecilkan huruf --
+// mirip Canva, tidak perlu lagi mengetik angka X/Y manual) -- lihat
+// buatEditorDrag().
+//
+// Kartu Pendamping TETAP satu template & satu posisi global (tidak
+// terikat cabang lomba tertentu, karena satu pendamping bisa membina lebih
+// dari satu lomba), tapi editornya memakai drag-and-drop yang sama.
+//
+// Semuanya tersimpan di SATU kolom site_settings.kartu_templates (jsonb,
+// migrasi 0053), strukturnya:
+//   {
+//     peserta:    { "<lomba_id>|<jenis_kelamin>": { url, layout } },
+//     pesertaTim: { "<lomba_id>|<jenis_kelamin>": { url, layout } },
+//     pendamping: { url, layout }
+//   }
+// (Kolom lama kartu_peserta_url/kartu_pendamping_url/kartu_layout dari
+// migrasi 0012 TIDAK dipakai lagi mulai migrasi 0053 -- lihat catatan di
+// file migrasinya.)
 const FIELD_PESERTA = [
   { key: "nama", label: "Nama" },
-  { key: "lomba_jenjang", label: "Lomba & Jenjang" }
+  { key: "nomor_pendaftaran", label: "Nomor Pendaftaran" }
+];
+// Kartu khusus pendaftar TIM (Futsal) -- SATU KARTU PER ANGGOTA tim, bukan
+// per baris pendaftaran (lihat cetakKartuPDF(), jenis "pesertaTim").
+const FIELD_PESERTA_TIM = [
+  { key: "nama_tim", label: "Nama Tim" },
+  { key: "nama_anggota", label: "Nama Anggota" }
 ];
 const FIELD_PENDAMPING = [
   { key: "nama", label: "Nama" },
@@ -3049,30 +3079,59 @@ const FIELD_PENDAMPING = [
 ];
 
 // Ukuran cetak KARTU PESERTA & KARTU PENDAMPING dibuat TETAP (bukan lagi
-// ikut ukuran piksel PNG template yang diupload panitia) -- 8,5 x 12 cm,
-// ukuran "cocard"/ID card berlanyard yang standar/umum dipakai jasa cetak di
-// Indonesia. Berapa pun ukuran file PNG yang diupload, hasil pratinjau &
-// PDF-nya SELALU pas di ukuran fisik ini (gambar template ditarik/disusutkan
-// otomatis supaya penuh) -- lihat gambarKartu() & cetakKartuPDF(). Sebaiknya
-// desain template dibuat dengan rasio 8,5:12 supaya tidak gepeng/melar.
+// ikut ukuran piksel PNG template yang diupload panitia) -- 8,5 x 11,5 cm,
+// PORTRAIT, supaya 4 kartu pas tercetak dalam satu lembar A4 (grid 2x2,
+// lihat cetakKartuPDF()) -- lebih efisien/murah dicetak massal lewat jasa
+// cetak biasa dibanding satu kartu per halaman. Berapa pun ukuran file PNG
+// yang diupload, hasil pratinjau & PDF-nya SELALU pas di ukuran fisik ini
+// (gambar template ditarik/disusutkan otomatis supaya penuh) -- lihat
+// gambarKartu() & cetakKartuPDF(). Sebaiknya desain template dibuat dengan
+// rasio 8,5:11,5 (portrait) supaya tidak gepeng/melar.
 const KARTU_LEBAR_CM = 8.5;
-const KARTU_TINGGI_CM = 12;
+const KARTU_TINGGI_CM = 11.5;
 const KARTU_DPI = 300; // dipakai buat kanvas pratinjau di layar; PDF-nya sendiri pakai satuan cm langsung (lihat cetakKartuPDF) supaya ukuran fisiknya presisi
 const KARTU_LEBAR_PX = Math.round((KARTU_LEBAR_CM / 2.54) * KARTU_DPI);
 const KARTU_TINGGI_PX = Math.round((KARTU_TINGGI_CM / 2.54) * KARTU_DPI);
 
+// Posisi default untuk template BARU yang belum pernah diatur -- cuma
+// titik awal, panitia tinggal menggeser lewat editor drag-and-drop.
 const DEFAULT_LAYOUT_KARTU = {
   peserta: {
-    nama: { x: 60, y: 680, font: 56 },
-    lomba_jenjang: { x: 60, y: 760, font: 34 },
-    qr: { x: 352, y: 850, size: 300 }
+    nama: { x: 60, y: 620, font: 64 },
+    nomor_pendaftaran: { x: 60, y: 710, font: 36 }
+  },
+  pesertaTim: {
+    nama_tim: { x: 60, y: 580, font: 46 },
+    nama_anggota: { x: 60, y: 680, font: 64 }
   },
   pendamping: {
-    nama: { x: 60, y: 680, font: 56 },
-    lomba: { x: 60, y: 760, font: 34 },
-    qr: { x: 352, y: 850, size: 300 }
+    nama: { x: 60, y: 620, font: 64 },
+    lomba: { x: 60, y: 710, font: 36 }
   }
 };
+
+// Salinan BARU (bukan referensi) dari posisi default suatu jenis kartu --
+// dipakai sebagai titik awal tiap kali kombinasi lomba+gender yang belum
+// pernah disentuh dibuka di editor, supaya menggeser satu kombinasi tidak
+// ikut mengubah objek default global/kombinasi lain.
+function layoutDefaultBaru(jenis, fields) {
+  const sumber = DEFAULT_LAYOUT_KARTU[jenis] || {};
+  const hasil = {};
+  fields.forEach(function (f) {
+    hasil[f.key] = Object.assign({}, sumber[f.key] || { x: 60, y: 60, font: 32 });
+  });
+  return hasil;
+}
+
+function kunciKartu(lombaId, gender) { return lombaId + "|" + gender; }
+
+async function ambilKartuTemplates() {
+  const { data } = await supabaseClient.from("site_settings").select("kartu_templates").eq("id", 1).single();
+  return (data && data.kartu_templates) || {};
+}
+function simpanKartuTemplates(templatesSemua) {
+  return supabaseClient.from("site_settings").update({ kartu_templates: templatesSemua }).eq("id", 1);
+}
 
 let libKartuSiap = false;
 function muatScript(src) {
@@ -3087,7 +3146,6 @@ function muatScript(src) {
 }
 async function pastikanLibKartu() {
   if (libKartuSiap) return;
-  await muatScript("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js");
   await muatScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
   libKartuSiap = true;
 }
@@ -3109,20 +3167,6 @@ function muatGambar(url, timeoutMs) {
   });
 }
 
-function gambarQR(ctx, teks, x, y, size) {
-  const qr = window.qrcode(0, "M");
-  qr.addData(teks);
-  qr.make();
-  const count = qr.getModuleCount();
-  const cell = size / count;
-  ctx.fillStyle = "#000000";
-  for (let r = 0; r < count; r++) {
-    for (let c = 0; c < count; c++) {
-      if (qr.isDark(r, c)) ctx.fillRect(x + c * cell, y + r * cell, cell, cell);
-    }
-  }
-}
-
 function gambarKartu(canvas, templateImg, layout, data, fields) {
   // Kanvas SELALU berukuran tetap (ukuran cocard standar, lihat
   // KARTU_LEBAR_PX/KARTU_TINGGI_PX di atas) -- template PNG yang diupload
@@ -3139,110 +3183,264 @@ function gambarKartu(canvas, templateImg, layout, data, fields) {
     ctx.font = "600 " + pos.font + "px 'Plus Jakarta Sans', sans-serif";
     ctx.fillText(data[f.key] || "-", pos.x, pos.y);
   });
-  const qrPos = (layout && layout.qr) || { x: 40, y: 170, size: 120 };
-  gambarQR(ctx, data.qrText, qrPos.x, qrPos.y, qrPos.size);
 }
 
-function bacaLayoutDariInput(jenis, fields) {
-  const layout = {};
+// ======================= EDITOR DRAG-AND-DROP (gaya Canva) =======================
+// Dipakai ulang untuk ketiga jenis kartu. `wrapEl` jadi kanvas pratinjau
+// berukuran tetap (KARTU_DISPLAY_LEBAR px, diskalakan dari ukuran cetak
+// sesungguhnya) dengan gambar template sebagai latar; tiap field jadi
+// elemen teks yang bisa diseret langsung (geser badan tulisannya = pindah
+// posisi, seret bulatan kecil di pojok kanan-bawah = perbesar/perkecil
+// huruf). `layout` DIUBAH LANGSUNG (bukan disalin) oleh editor ini --
+// pemanggil cukup simpan objek `layout` yang sama saat tombol Simpan
+// ditekan, tidak perlu baca ulang dari form.
+const KARTU_DISPLAY_LEBAR = 300; // px -- lebar kanvas pratinjau drag-and-drop di layar
+function kartuSkalaDrag() { return KARTU_LEBAR_PX / KARTU_DISPLAY_LEBAR; }
+function kartuDisplayTinggi() { return Math.round(KARTU_TINGGI_PX / kartuSkalaDrag()); }
+
+function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
+  wrapEl.innerHTML = "";
+  wrapEl.style.position = "relative";
+  wrapEl.style.width = KARTU_DISPLAY_LEBAR + "px";
+  wrapEl.style.height = kartuDisplayTinggi() + "px";
+  wrapEl.style.background = templateUrl ? ('url("' + templateUrl + '") center/100% 100% no-repeat #dcdcdc') : "#dcdcdc";
+  wrapEl.style.border = "1px solid #c7c7c7";
+  wrapEl.style.borderRadius = "10px";
+  wrapEl.style.overflow = "hidden";
+  wrapEl.style.userSelect = "none";
+  wrapEl.style.touchAction = "none";
+  wrapEl.style.marginTop = "10px";
+
+  if (!templateUrl) {
+    wrapEl.innerHTML = '<p class="hint" style="padding:14px;margin:0;">Belum ada template -- upload dulu supaya bisa mengatur posisi dengan menggeser.</p>';
+    return;
+  }
+
+  const skala = kartuSkalaDrag();
+
   fields.forEach(function (f) {
-    layout[f.key] = {
-      x: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-x").value, 10) || 0,
-      y: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-y").value, 10) || 0,
-      font: parseInt(document.getElementById("pos-" + jenis + "-" + f.key + "-font").value, 10) || 20
-    };
+    const pos = layout[f.key];
+    const el = document.createElement("div");
+    el.textContent = "Contoh " + f.label;
+    Object.assign(el.style, {
+      position: "absolute",
+      left: (pos.x / skala) + "px",
+      top: (pos.y / skala) + "px",
+      fontSize: (pos.font / skala) + "px",
+      fontWeight: "700",
+      fontFamily: "'Plus Jakarta Sans', sans-serif",
+      color: "#111",
+      padding: "2px 5px",
+      cursor: "move",
+      whiteSpace: "nowrap",
+      outline: "1.5px dashed #2f7bdb",
+      background: "rgba(255,255,255,0.35)",
+      lineHeight: "1.15"
+    });
+
+    const handle = document.createElement("span");
+    Object.assign(handle.style, {
+      position: "absolute", right: "-9px", bottom: "-9px", width: "15px", height: "15px",
+      borderRadius: "50%", background: "#0f7b3e", border: "2px solid #fff", cursor: "nwse-resize",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.4)"
+    });
+    el.appendChild(handle);
+
+    let modeAktif = null;
+
+    function gerak(ev) {
+      if (!modeAktif) return;
+      if (modeAktif.mode === "geser") {
+        pos.x = Math.max(0, Math.round(modeAktif.ox + (ev.clientX - modeAktif.x0) * skala));
+        pos.y = Math.max(0, Math.round(modeAktif.oy + (ev.clientY - modeAktif.y0) * skala));
+        el.style.left = (pos.x / skala) + "px";
+        el.style.top = (pos.y / skala) + "px";
+      } else {
+        pos.font = Math.max(10, Math.round(modeAktif.of + (ev.clientY - modeAktif.y0) * skala));
+        el.style.fontSize = (pos.font / skala) + "px";
+      }
+      onUbah();
+    }
+    function lepas() { modeAktif = null; }
+
+    el.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      modeAktif = { mode: "geser", x0: ev.clientX, y0: ev.clientY, ox: pos.x, oy: pos.y };
+      el.setPointerCapture(ev.pointerId);
+    });
+    el.addEventListener("pointermove", gerak);
+    el.addEventListener("pointerup", lepas);
+    el.addEventListener("pointercancel", lepas);
+
+    handle.addEventListener("pointerdown", function (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      modeAktif = { mode: "besar", y0: ev.clientY, of: pos.font };
+      handle.setPointerCapture(ev.pointerId);
+    });
+    handle.addEventListener("pointermove", gerak);
+    handle.addEventListener("pointerup", lepas);
+    handle.addEventListener("pointercancel", lepas);
+
+    wrapEl.appendChild(el);
   });
-  layout.qr = {
-    x: parseInt(document.getElementById("pos-" + jenis + "-qr-x").value, 10) || 0,
-    y: parseInt(document.getElementById("pos-" + jenis + "-qr-y").value, 10) || 0,
-    size: parseInt(document.getElementById("pos-" + jenis + "-qr-size").value, 10) || 100
-  };
-  return layout;
 }
 
-function isiLayoutKeInput(jenis, fields, layoutTersimpan) {
-  const layout = Object.assign({}, DEFAULT_LAYOUT_KARTU[jenis], layoutTersimpan || {});
-  fields.forEach(function (f) {
-    const pos = layout[f.key] || DEFAULT_LAYOUT_KARTU[jenis][f.key];
-    document.getElementById("pos-" + jenis + "-" + f.key + "-x").value = pos.x;
-    document.getElementById("pos-" + jenis + "-" + f.key + "-y").value = pos.y;
-    document.getElementById("pos-" + jenis + "-" + f.key + "-font").value = pos.font;
-  });
-  const qrPos = layout.qr || DEFAULT_LAYOUT_KARTU[jenis].qr;
-  document.getElementById("pos-" + jenis + "-qr-x").value = qrPos.x;
-  document.getElementById("pos-" + jenis + "-qr-y").value = qrPos.y;
-  document.getElementById("pos-" + jenis + "-qr-size").value = qrPos.size;
-}
-
-function kartuEditorHTML(jenis, judul, fields, existingUrl) {
-  const inputsHTML = fields.map(function (f) {
-    return (
-      '<div class="kartu-pos-group">' +
-        '<span class="kartu-pos-group__label">' + f.label + '</span>' +
-        '<label>X <input type="number" id="pos-' + jenis + '-' + f.key + '-x" /></label>' +
-        '<label>Y <input type="number" id="pos-' + jenis + '-' + f.key + '-y" /></label>' +
-        '<label>Font <input type="number" id="pos-' + jenis + '-' + f.key + '-font" /></label>' +
-      '</div>'
-    );
-  }).join("");
-
+// ======================= PANEL "Kartu Peserta" & "Kartu Peserta Futsal/Tim" =======================
+// Keduanya per kombinasi Cabang Lomba x Jenis Kelamin -- lihat komentar di
+// bagian atas file ini.
+function panelKartuPerLombaHTML(jenis, judul) {
   return (
-    '<div class="form-shell" style="margin-bottom:20px;">' +
+    '<div class="form-shell" id="panel-' + jenis + '" style="margin-bottom:20px;">' +
       '<h3>' + judul + '</h3>' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;">' +
+        '<div class="field"><label>Cabang Lomba</label><select id="pilih-lomba-' + jenis + '"></select></div>' +
+        '<div class="field"><label>Jenis Kelamin</label><select id="pilih-gender-' + jenis + '">' +
+          '<option value="laki-laki">Laki-laki</option><option value="perempuan">Perempuan</option>' +
+        '</select></div>' +
+      '</div>' +
+      '<p class="hint" id="status-kombo-' + jenis + '"></p>' +
       '<div class="field">' +
-        '<label>Template (PNG)</label>' +
+        '<label>Template (PNG) untuk kombinasi ini</label>' +
         '<input type="file" id="input-template-' + jenis + '" accept=".png,image/png" />' +
       '</div>' +
-      '<button type="button" class="btn btn--ghost" id="btn-upload-template-' + jenis + '" style="margin-bottom:16px;">Upload Template Baru</button>' +
-      '<div class="kartu-preview-wrap" id="preview-wrap-' + jenis + '">' +
-        (existingUrl ? '<canvas id="preview-' + jenis + '"></canvas>' : '<p class="hint">Belum ada template. Upload dulu untuk melihat pratinjau.</p>') +
-      '</div>' +
-      '<div class="kartu-pos-grid">' +
-        inputsHTML +
-        '<div class="kartu-pos-group">' +
-          '<span class="kartu-pos-group__label">QR Code</span>' +
-          '<label>X <input type="number" id="pos-' + jenis + '-qr-x" /></label>' +
-          '<label>Y <input type="number" id="pos-' + jenis + '-qr-y" /></label>' +
-          '<label>Ukuran <input type="number" id="pos-' + jenis + '-qr-size" /></label>' +
-        '</div>' +
-      '</div>' +
-      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-' + jenis + '" style="margin-top:14px;">Simpan Posisi</button>' +
+      '<button type="button" class="btn btn--ghost" id="btn-upload-template-' + jenis + '" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
+      '<div id="drag-wrap-' + jenis + '"></div>' +
+      '<p class="hint">Geser langsung tulisan contoh di atas untuk mengatur posisi; seret bulatan kecil di pojok kanan-bawah tulisannya untuk mengubah ukuran huruf.</p>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-' + jenis + '" style="margin-top:6px;">Simpan Posisi &amp; Template Ini</button>' +
       '<span class="hint" id="status-posisi-' + jenis + '" style="margin-left:10px;"></span>' +
+      '<div id="ringkasan-' + jenis + '" style="margin-top:16px;"></div>' +
     '</div>'
   );
 }
 
-async function setupKartuEditor(jenis, fields, existingUrl, savedLayout) {
-  isiLayoutKeInput(jenis, fields, savedLayout);
-
-  let templateImg = null;
-
-  function renderPratinjauSekarang() {
-    if (!templateImg) return;
-    const canvas = document.getElementById("preview-" + jenis);
-    if (!canvas) return;
-    const layout = bacaLayoutDariInput(jenis, fields);
-    const sample = {};
-    fields.forEach(function (f) { sample[f.key] = "Contoh " + f.label; });
-    sample.qrText = "ALIF5-CONTOH";
-    gambarKartu(canvas, templateImg, layout, sample, fields);
+async function setupKartuPerLomba(jenis, fields, daftarLomba, templatesSemua) {
+  const panel = document.getElementById("panel-" + jenis);
+  if (!daftarLomba || daftarLomba.length === 0) {
+    panel.innerHTML += '<p class="hint" style="padding:0 20px 16px;">Belum ada cabang lomba ' +
+      (jenis === "pesertaTim" ? "bertipe tim" : "individu") + ' yang terdaftar di "Kelola Lomba".</p>';
+    return;
   }
 
-  if (existingUrl) {
-    try {
-      templateImg = await muatGambar(existingUrl);
-      renderPratinjauSekarang();
-    } catch (e) {
-      console.error(e);
-    }
+  const selLomba = document.getElementById("pilih-lomba-" + jenis);
+  const selGender = document.getElementById("pilih-gender-" + jenis);
+  selLomba.innerHTML = daftarLomba.map(function (r) {
+    return '<option value="' + r.id + '">' + r.nama + '</option>';
+  }).join("");
+
+  if (!templatesSemua[jenis]) templatesSemua[jenis] = {};
+
+  let layoutAktif = null;
+
+  function renderRingkasanKombo() {
+    const el = document.getElementById("ringkasan-" + jenis);
+    if (!el) return;
+    const baris = [];
+    daftarLomba.forEach(function (r) {
+      ["laki-laki", "perempuan"].forEach(function (g) {
+        const ada = !!(templatesSemua[jenis][kunciKartu(r.id, g)] && templatesSemua[jenis][kunciKartu(r.id, g)].url);
+        baris.push(
+          '<span style="display:inline-block;margin:2px 8px 2px 0;padding:3px 9px;border-radius:999px;font-size:12px;' +
+          (ada ? 'background:#d8f5df;color:#0f7b3e;' : 'background:#fde3e3;color:#b23b3b;') + '">' +
+          escapeHTML(r.nama) + ' · ' + (g === "laki-laki" ? "L" : "P") + ' ' + (ada ? "✓" : "–") +
+          '</span>'
+        );
+      });
+    });
+    el.innerHTML = '<p class="hint" style="margin-bottom:6px;">Status template per kombinasi:</p>' + baris.join("");
   }
 
-  document.querySelectorAll('[id^="pos-' + jenis + '-"]').forEach(function (inp) {
-    inp.addEventListener("input", renderPratinjauSekarang);
-  });
+  function muatKombo() {
+    const lombaId = selLomba.value;
+    const gender = selGender.value;
+    if (!lombaId) return;
+    const kunci = kunciKartu(lombaId, gender);
+    const existing = templatesSemua[jenis][kunci];
+    const url = existing ? existing.url : null;
+    layoutAktif = Object.assign(layoutDefaultBaru(jenis, fields), existing ? existing.layout : {});
+
+    document.getElementById("status-kombo-" + jenis).textContent =
+      url ? "Template sudah diunggah untuk kombinasi ini." : "Belum ada template untuk kombinasi ini -- upload dulu di bawah.";
+
+    buatEditorDrag(document.getElementById("drag-wrap-" + jenis), url, fields, layoutAktif, function () {});
+    renderRingkasanKombo();
+  }
+
+  selLomba.addEventListener("change", muatKombo);
+  selGender.addEventListener("change", muatKombo);
 
   document.getElementById("btn-upload-template-" + jenis).addEventListener("click", async function () {
     const fileInput = document.getElementById("input-template-" + jenis);
+    const file = fileInput.files[0];
+    if (!file) { alert("Pilih file PNG dulu."); return; }
+    if (file.type !== "image/png") { alert("File harus berformat PNG."); return; }
+    const lombaId = selLomba.value, gender = selGender.value;
+    if (!lombaId) { alert("Pilih cabang lomba dulu."); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+
+    const kunci = kunciKartu(lombaId, gender);
+    const path = "kartu/" + jenis + "-" + kunci.replace(/[^a-z0-9]/gi, "-") + "-" + Date.now() + ".png";
+    const { error: upErr } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
+    btn.disabled = false;
+    btn.textContent = "Upload/Ganti Template";
+    if (upErr) { alert("Gagal mengunggah: " + upErr.message); return; }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    templatesSemua[jenis][kunci] = { url: pub.publicUrl, layout: layoutAktif || layoutDefaultBaru(jenis, fields) };
+    const { error: updErr } = await simpanKartuTemplates(templatesSemua);
+    if (updErr) { alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message); return; }
+    muatKombo();
+  });
+
+  document.getElementById("btn-simpan-posisi-" + jenis).addEventListener("click", async function () {
+    const lombaId = selLomba.value, gender = selGender.value;
+    if (!lombaId) { alert("Pilih cabang lomba dulu."); return; }
+    const kunci = kunciKartu(lombaId, gender);
+    if (!templatesSemua[jenis][kunci] || !templatesSemua[jenis][kunci].url) {
+      alert("Upload template untuk kombinasi ini dulu sebelum menyimpan posisi.");
+      return;
+    }
+    templatesSemua[jenis][kunci].layout = layoutAktif;
+    const { error } = await simpanKartuTemplates(templatesSemua);
+    const statusEl = document.getElementById("status-posisi-" + jenis);
+    statusEl.textContent = error ? ("Gagal: " + error.message) : "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+
+  muatKombo();
+}
+
+// ======================= PANEL "Kartu Pendamping" (satu template global) =======================
+function panelKartuPendampingHTML() {
+  return (
+    '<div class="form-shell" style="margin-bottom:20px;">' +
+      '<h3>Kartu Pendamping / Penanggung Jawab</h3>' +
+      '<div class="field">' +
+        '<label>Template (PNG)</label>' +
+        '<input type="file" id="input-template-pendamping" accept=".png,image/png" />' +
+      '</div>' +
+      '<button type="button" class="btn btn--ghost" id="btn-upload-template-pendamping" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
+      '<div id="drag-wrap-pendamping"></div>' +
+      '<p class="hint">Geser langsung tulisan contoh di atas untuk mengatur posisi; seret bulatan kecil di pojok kanan-bawah untuk mengubah ukuran huruf.</p>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-pendamping" style="margin-top:6px;">Simpan Posisi &amp; Template</button>' +
+      '<span class="hint" id="status-posisi-pendamping" style="margin-left:10px;"></span>' +
+    '</div>'
+  );
+}
+
+function setupKartuPendamping(fields, templatesSemua) {
+  if (!templatesSemua.pendamping) templatesSemua.pendamping = { url: null, layout: layoutDefaultBaru("pendamping", fields) };
+  const layoutAktif = Object.assign(layoutDefaultBaru("pendamping", fields), templatesSemua.pendamping.layout || {});
+  templatesSemua.pendamping.layout = layoutAktif;
+
+  const wrap = document.getElementById("drag-wrap-pendamping");
+  buatEditorDrag(wrap, templatesSemua.pendamping.url, fields, layoutAktif, function () {});
+
+  document.getElementById("btn-upload-template-pendamping").addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-template-pendamping");
     const file = fileInput.files[0];
     if (!file) { alert("Pilih file PNG dulu."); return; }
     if (file.type !== "image/png") { alert("File harus berformat PNG."); return; }
@@ -3250,39 +3448,24 @@ async function setupKartuEditor(jenis, fields, existingUrl, savedLayout) {
     const btn = this;
     btn.disabled = true;
     btn.textContent = "Mengunggah...";
-
-    const path = "kartu/" + jenis + "-" + Date.now() + ".png";
+    const path = "kartu/pendamping-" + Date.now() + ".png";
     const { error: upErr } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
-    if (upErr) {
-      btn.disabled = false;
-      btn.textContent = "Upload Template Baru";
-      alert("Gagal mengunggah: " + upErr.message);
-      return;
-    }
+    btn.disabled = false;
+    btn.textContent = "Upload/Ganti Template";
+    if (upErr) { alert("Gagal mengunggah: " + upErr.message); return; }
 
     const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
-    const kolom = jenis === "peserta" ? "kartu_peserta_url" : "kartu_pendamping_url";
-    const payload = {};
-    payload[kolom] = pub.publicUrl;
-    const { error: updErr } = await supabaseClient.from("site_settings").update(payload).eq("id", 1);
-
-    btn.disabled = false;
-    btn.textContent = "Upload Template Baru";
-
-    if (updErr) {
-      alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message);
-      return;
-    }
-    loadTabKartu();
+    templatesSemua.pendamping.url = pub.publicUrl;
+    const { error: updErr } = await simpanKartuTemplates(templatesSemua);
+    if (updErr) { alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message); return; }
+    buatEditorDrag(wrap, pub.publicUrl, fields, layoutAktif, function () {});
   });
 
-  document.getElementById("btn-simpan-posisi-" + jenis).addEventListener("click", async function () {
-    const layout = bacaLayoutDariInput(jenis, fields);
-    const { data: current } = await supabaseClient.from("site_settings").select("kartu_layout").eq("id", 1).single();
-    const merged = Object.assign({}, current ? current.kartu_layout : {});
-    merged[jenis] = layout;
-    const { error } = await supabaseClient.from("site_settings").update({ kartu_layout: merged }).eq("id", 1);
-    const statusEl = document.getElementById("status-posisi-" + jenis);
+  document.getElementById("btn-simpan-posisi-pendamping").addEventListener("click", async function () {
+    if (!templatesSemua.pendamping.url) { alert("Upload template dulu sebelum menyimpan posisi."); return; }
+    templatesSemua.pendamping.layout = layoutAktif;
+    const { error } = await simpanKartuTemplates(templatesSemua);
+    const statusEl = document.getElementById("status-posisi-pendamping");
     statusEl.textContent = error ? ("Gagal: " + error.message) : "Tersimpan.";
     setTimeout(function () { statusEl.textContent = ""; }, 3000);
   });
@@ -3292,40 +3475,60 @@ async function cetakKartuPDF(jenis) {
   const statusEl = document.getElementById("cetak-status");
   const lombaFilter = document.getElementById("cetak-filter-lomba").value;
 
-  const { data: settings } = await supabaseClient.from("site_settings").select("kartu_peserta_url,kartu_pendamping_url,kartu_layout").eq("id", 1).single();
-  const templateUrl = jenis === "peserta" ? (settings && settings.kartu_peserta_url) : (settings && settings.kartu_pendamping_url);
-  if (!templateUrl) {
-    alert("Upload template " + jenis + " dulu sebelum mencetak.");
-    return;
-  }
-  const layout = (settings && settings.kartu_layout && settings.kartu_layout[jenis]) || DEFAULT_LAYOUT_KARTU[jenis];
-  const fields = jenis === "peserta" ? FIELD_PESERTA : FIELD_PENDAMPING;
+  const templatesSemua = await ambilKartuTemplates();
+  const fields = jenis === "pendamping" ? FIELD_PENDAMPING : (jenis === "pesertaTim" ? FIELD_PESERTA_TIM : FIELD_PESERTA);
 
   let query = supabaseClient.from("pendaftaran").select("*");
   if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
+  // "peserta" (individu) & "pesertaTim" (Futsal/tim) saling eksklusif lewat
+  // kolom `tipe` -- permintaan panitia: kartu peserta individu biasa TIDAK
+  // lagi mengikutkan pendaftar tim sama sekali, karena tim punya jenis
+  // kartunya sendiri (satu kartu per ANGGOTA, lihat di bawah).
+  if (jenis === "peserta") query = query.neq("tipe", "tim");
+  if (jenis === "pesertaTim") query = query.eq("tipe", "tim");
   const { data: rows, error } = await query;
   if (error) { alert("Gagal memuat data: " + error.message); return; }
   if (!rows || rows.length === 0) { alert("Tidak ada data pendaftar yang cocok."); return; }
 
+  // Tiap item daftarData membawa `_kunci` -- untuk "peserta"/"pesertaTim"
+  // berarti "<lomba_id>|<jenis_kelamin>", dipakai untuk memilih
+  // template+layout yang cocok per kartu (bisa beda-beda per lomba &
+  // gender, lihat komentar di bagian atas file ini); untuk "pendamping"
+  // selalu "pendamping" (satu template global).
   let daftarData;
   if (jenis === "peserta") {
-    // "Lomba" dan "Jenjang" digabung jadi satu tulisan (field lomba_jenjang)
-    // -- lihat FIELD_PESERTA di atas. r.jenjang bisa kosong untuk sebagian
-    // baris tim (Futsal), jadi bagian itu cuma disisipkan kalau ada isinya.
     daftarData = rows.map(function (r) {
-      const lombaJenjang = r.lomba_nama + (r.jenjang ? " · " + r.jenjang : "");
-      return { nama: r.nama_lengkap, lomba_jenjang: lombaJenjang, qrText: "ALIF5-" + r.nomor_pendaftaran };
+      return { nama: r.nama_lengkap, nomor_pendaftaran: r.nomor_pendaftaran, _kunci: kunciKartu(r.lomba_id, r.jenis_kelamin) };
     });
+  } else if (jenis === "pesertaTim") {
+    // SATU KARTU PER ANGGOTA tim (bukan satu kartu per baris pendaftaran
+    // tim) -- permintaan panitia. Anggota diambil lewat satu query per tim
+    // yang cocok filter di atas (jumlah tim biasanya tidak banyak, jadi
+    // aman dilakukan berurutan, tidak perlu Promise.all).
+    daftarData = [];
+    for (const r of rows) {
+      const { data: anggota, error: errAnggota } = await supabaseClient
+        .from("anggota_tim").select("nama").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
+      if (errAnggota) { alert("Gagal memuat anggota tim \"" + r.nama_tim + "\": " + errAnggota.message); return; }
+      const kunci = kunciKartu(r.lomba_id, r.jenis_kelamin);
+      (anggota || []).forEach(function (a) {
+        daftarData.push({ nama_tim: r.nama_tim, nama_anggota: a.nama, _kunci: kunci });
+      });
+    }
+    if (daftarData.length === 0) {
+      alert("Tidak ada data anggota tim yang cocok.");
+      return;
+    }
   } else {
     const sudahAda = {};
     daftarData = [];
     rows.forEach(function (r) {
       const namaPj = r.pembina || r.penanggung_jawab_lembaga;
       if (!namaPj) return;
-      const kunci = namaPj.trim().toLowerCase() + "|" + (r.asal_sekolah || "").trim().toLowerCase();
-      if (sudahAda[kunci]) return;
-      sudahAda[kunci] = true;
-      daftarData.push({ nama: namaPj, lomba: r.lomba_nama + " · " + r.asal_sekolah, qrText: "ALIF5-" + r.nomor_pendaftaran + "-PJ" });
+      const kunciDedup = namaPj.trim().toLowerCase() + "|" + (r.asal_sekolah || "").trim().toLowerCase();
+      if (sudahAda[kunciDedup]) return;
+      sudahAda[kunciDedup] = true;
+      daftarData.push({ nama: namaPj, lomba: r.lomba_nama + " · " + r.asal_sekolah, _kunci: "pendamping" });
     });
     if (daftarData.length === 0) {
       alert("Tidak ada data penanggung jawab/pendamping pada data yang cocok (Futsal punya guru pendamping, pendaftaran Perwakilan Lembaga punya penanggung jawab).");
@@ -3333,33 +3536,89 @@ async function cetakKartuPDF(jenis) {
     }
   }
 
+  // Pastikan SEMUA kombinasi lomba+gender yang muncul di data sudah punya
+  // template -- kalau ada yang belum, batalkan cetak & sebutkan persis
+  // kombinasi mana yang kurang, supaya tidak ada kartu yang diam-diam
+  // kelewat dari hasil cetak PDF-nya.
+  const kunciDibutuhkan = Array.from(new Set(daftarData.map(function (d) { return d._kunci; })));
+  const kurang = kunciDibutuhkan.filter(function (k) {
+    const entri = jenis === "pendamping" ? templatesSemua.pendamping : (templatesSemua[jenis] && templatesSemua[jenis][k]);
+    return !entri || !entri.url;
+  });
+  if (kurang.length > 0) {
+    alert("Belum ada template untuk kombinasi berikut -- upload dulu di atas sebelum mencetak:\n\n" + kurang.join("\n"));
+    return;
+  }
+
   statusEl.textContent = "Menyiapkan " + daftarData.length + " kartu, mohon tunggu...";
 
-  let templateImg;
-  try {
-    templateImg = await muatGambar(templateUrl);
-  } catch (e) {
-    statusEl.textContent = "";
-    alert("Gagal memuat gambar template kartu.");
-    return;
+  // Muat gambar tiap template SEKALI saja (banyak kartu bisa berbagi
+  // kombinasi lomba+gender yang sama), simpan ke cache per kunci.
+  const cacheTemplate = {};
+  async function ambilTemplate(kunci) {
+    if (cacheTemplate[kunci]) return cacheTemplate[kunci];
+    const entri = jenis === "pendamping" ? templatesSemua.pendamping : templatesSemua[jenis][kunci];
+    const img = await muatGambar(entri.url);
+    cacheTemplate[kunci] = { img: img, layout: entri.layout || DEFAULT_LAYOUT_KARTU[jenis] };
+    return cacheTemplate[kunci];
   }
 
   const canvas = document.createElement("canvas");
   const { jsPDF } = window.jspdf;
-  // Satuan "cm" dipakai langsung (bukan "px") supaya ukuran fisik kartu di
-  // PDF-nya SELALU presisi 8,5 x 12 cm (ukuran cocard standar) begitu
+  // Satuan "cm" dipakai langsung (bukan "px") supaya ukuran fisik tiap
+  // kartu di PDF-nya SELALU presisi 8,5 x 11,5 cm (portrait) begitu
   // dicetak, tidak tergantung resolusi/DPI gambar kanvas yang dihasilkan.
-  const doc = new jsPDF({ unit: "cm", format: [KARTU_LEBAR_CM, KARTU_TINGGI_CM] });
+  //
+  // 4 kartu dicetak sekaligus per lembar A4 PORTRAIT (grid 2 kolom x 2
+  // baris), bukan satu kartu per halaman -- lebih hemat kertas/biaya cetak
+  // untuk jumlah peserta yang banyak. Sisa ruang di luar keempat kartu (A4
+  // portrait 21 x 29,7 cm dikurangi 2x lebar & 2x tinggi kartu) dibagi rata
+  // jadi margin SIMETRIS di semua sisi, tanpa jarak antar-kartu (kartu
+  // saling bersisian) -- garis putus-putus abu-abu digambar di batas setiap
+  // kartu sebagai panduan gunting/pemotong.
+  const A4_LEBAR_CM = 21;
+  const A4_TINGGI_CM = 29.7;
+  const marginX = (A4_LEBAR_CM - 2 * KARTU_LEBAR_CM) / 2;
+  const marginY = (A4_TINGGI_CM - 2 * KARTU_TINGGI_CM) / 2;
 
-  daftarData.forEach(function (data, i) {
-    gambarKartu(canvas, templateImg, layout, data, fields);
-    const imgData = canvas.toDataURL("image/png");
-    if (i > 0) doc.addPage([KARTU_LEBAR_CM, KARTU_TINGGI_CM]);
-    doc.addImage(imgData, "PNG", 0, 0, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
-  });
+  const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "portrait" });
+  const totalHalaman = Math.ceil(daftarData.length / 4);
+
+  for (let h = 0; h < totalHalaman; h++) {
+    if (h > 0) doc.addPage("a4", "portrait");
+
+    for (let slot = 0; slot < 4; slot++) {
+      const idx = h * 4 + slot;
+      if (idx >= daftarData.length) break;
+      const data = daftarData[idx];
+      let tpl;
+      try {
+        tpl = await ambilTemplate(data._kunci);
+      } catch (e) {
+        statusEl.textContent = "";
+        alert("Gagal memuat gambar template untuk \"" + data._kunci + "\".");
+        return;
+      }
+      gambarKartu(canvas, tpl.img, tpl.layout, data, fields);
+      const imgData = canvas.toDataURL("image/png");
+      const col = slot % 2, row = Math.floor(slot / 2);
+      const x = marginX + col * KARTU_LEBAR_CM;
+      const y = marginY + row * KARTU_TINGGI_CM;
+      doc.addImage(imgData, "PNG", x, y, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
+    }
+
+    // Garis panduan potong (putus-putus, abu-abu) di batas kartu tengah --
+    // murni bantuan visual untuk menggunting, tidak ikut ke hasil cetak
+    // kalau dirasa tidak perlu (bisa diabaikan/dihapus manual saat memotong).
+    doc.setDrawColor(190);
+    doc.setLineDashPattern([0.15, 0.15], 0);
+    doc.line(marginX + KARTU_LEBAR_CM, marginY - 0.3, marginX + KARTU_LEBAR_CM, marginY + 2 * KARTU_TINGGI_CM + 0.3);
+    doc.line(marginX - 0.3, marginY + KARTU_TINGGI_CM, marginX + 2 * KARTU_LEBAR_CM + 0.3, marginY + KARTU_TINGGI_CM);
+    doc.setLineDashPattern([], 0);
+  }
 
   doc.save("kartu-" + jenis + "-alif5.pdf");
-  statusEl.textContent = "Selesai — " + daftarData.length + " kartu terunduh.";
+  statusEl.textContent = "Selesai — " + daftarData.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
 async function loadTabKartu() {
@@ -3369,40 +3628,49 @@ async function loadTabKartu() {
   try {
     await pastikanLibKartu();
   } catch (e) {
-    content.innerHTML = "<p>Gagal memuat pustaka QR/PDF — periksa koneksi internet, lalu buka tab ini lagi.</p>";
+    content.innerHTML = "<p>Gagal memuat pustaka PDF — periksa koneksi internet, lalu buka tab ini lagi.</p>";
     return;
   }
 
-  const { data: settings } = await supabaseClient.from("site_settings")
-    .select("kartu_peserta_url,kartu_pendamping_url,kartu_layout").eq("id", 1).single();
-  const layoutTersimpan = (settings && settings.kartu_layout) || {};
+  const templatesSemua = await ambilKartuTemplates();
+  if (!templatesSemua.peserta) templatesSemua.peserta = {};
+  if (!templatesSemua.pesertaTim) templatesSemua.pesertaTim = {};
+  if (!templatesSemua.pendamping) templatesSemua.pendamping = { url: null, layout: {} };
 
-  const { data: rulesData } = await supabaseClient.from("lomba_rules").select("id,nama").order("urutan");
-  const opsiLombaCetak = (rulesData || []).map(function (r) {
+  const { data: rulesData } = await supabaseClient.from("lomba_rules").select("id,nama,tipe").order("urutan");
+  const semuaLomba = rulesData || [];
+  const lombaIndividu = semuaLomba.filter(function (r) { return r.tipe !== "tim"; });
+  const lombaTim = semuaLomba.filter(function (r) { return r.tipe === "tim"; });
+  const opsiLombaCetak = semuaLomba.map(function (r) {
     return '<option value="' + r.id + '">' + r.nama + '</option>';
   }).join("");
 
   content.innerHTML =
     '<div class="form-shell" style="margin-bottom:20px;">' +
       '<h3>🪪 Kartu Peserta &amp; Pendamping</h3>' +
-      '<p>Upload desain kartu (PNG), atur posisi nama/lomba+jenjang/QR lewat angka di bawah (pratinjau berubah langsung), lalu cetak kartu semua peserta sekaligus sebagai satu file PDF siap cetak. Ukuran cetaknya SELALU tetap ' + KARTU_LEBAR_CM + ' × ' + KARTU_TINGGI_CM + ' cm (ukuran cocard standar) — template PNG yang diupload otomatis disesuaikan supaya pas mengisi penuh, jadi sebaiknya didesain dengan rasio yang sama supaya tidak gepeng/melar. QR di tiap kartu berisi kode unik yang nanti dipakai untuk absen kedatangan & pemberian snack.</p>' +
+      '<p>Tiap <strong>Cabang Lomba &times; Jenis Kelamin</strong> bisa punya desain kartu (template PNG) sendiri-sendiri. Pilih kombinasinya di bawah, upload templatenya, lalu atur posisi Nama/Nomor Pendaftaran dengan MENGGESER LANGSUNG tulisan contohnya di atas pratinjau (gaya drag-and-drop seperti Canva) — tidak perlu input angka X/Y manual lagi. Seret bulatan kecil di pojok kanan-bawah tiap tulisan untuk mengubah ukuran hurufnya. Ukuran cetaknya SELALU tetap ' + KARTU_LEBAR_CM + ' × ' + KARTU_TINGGI_CM + ' cm (portrait) — template otomatis disesuaikan supaya pas mengisi penuh.</p>' +
     '</div>' +
-    kartuEditorHTML("peserta", "Kartu Peserta", FIELD_PESERTA, settings && settings.kartu_peserta_url) +
-    kartuEditorHTML("pendamping", "Kartu Pendamping / Penanggung Jawab", FIELD_PENDAMPING, settings && settings.kartu_pendamping_url) +
+    panelKartuPerLombaHTML("peserta", "Kartu Peserta (individu)") +
+    panelKartuPerLombaHTML("pesertaTim", "Kartu Peserta Futsal/Tim") +
+    panelKartuPendampingHTML() +
     '<div class="form-shell" style="margin-top:20px;max-width:520px;">' +
       '<h3>Cetak Kartu</h3>' +
       '<div class="field"><label>Cabang Lomba</label><select id="cetak-filter-lomba"><option value="">Semua Lomba</option>' + opsiLombaCetak + '</select></div>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
         '<button type="button" class="btn btn--primary" id="btn-cetak-peserta">Unduh Kartu Peserta (PDF)</button>' +
+        '<button type="button" class="btn btn--primary" id="btn-cetak-peserta-tim">Unduh Kartu Peserta Futsal/Tim (PDF)</button>' +
         '<button type="button" class="btn btn--ghost" id="btn-cetak-pendamping">Unduh Kartu Pendamping (PDF)</button>' +
       '</div>' +
+      '<p class="hint">"Kartu Peserta" di atas HANYA mengikutkan pendaftar individu; "Kartu Peserta Futsal/Tim" mencetak SATU KARTU PER ANGGOTA tim (bukan satu per tim). Filter "Cabang Lomba" berlaku untuk ketiga tombol. Kalau ada kombinasi lomba+jenis kelamin yang templatenya belum diunggah, proses cetak dibatalkan dan akan diberi tahu kombinasi mana yang kurang.</p>' +
       '<p class="hint" id="cetak-status"></p>' +
     '</div>';
 
-  setupKartuEditor("peserta", FIELD_PESERTA, settings && settings.kartu_peserta_url, layoutTersimpan.peserta);
-  setupKartuEditor("pendamping", FIELD_PENDAMPING, settings && settings.kartu_pendamping_url, layoutTersimpan.pendamping);
+  await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua);
+  await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua);
+  setupKartuPendamping(FIELD_PENDAMPING, templatesSemua);
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
+  document.getElementById("btn-cetak-peserta-tim").addEventListener("click", function () { cetakKartuPDF("pesertaTim"); });
   document.getElementById("btn-cetak-pendamping").addEventListener("click", function () { cetakKartuPDF("pendamping"); });
 }
 
