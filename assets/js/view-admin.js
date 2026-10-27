@@ -3492,6 +3492,16 @@ function muatGambar(url, timeoutMs) {
 // terlalu kecil untuk dibaca.
 const KARTU_FONT_MIN_RASIO = 0.55;
 
+// Field yang ditulis RATA TENGAH di dalam kotaknya (bukan rata kiri seperti
+// bawaan) -- permintaan panitia: Nama (dipakai field "peserta.nama" & juga
+// "pendamping.nama"), Nomor Pendaftaran, dan Nama Tim (khusus Kartu Peserta
+// Futsal/Tim). Field lain yang tidak disebut di sini (Nama Anggota, Lomba
+// di kartu Pendamping) TETAP rata kiri seperti semula. "x" tetap berarti
+// TEPI KIRI kotak (sama seperti sebelumnya, dipakai editor drag-and-drop
+// untuk menggeser) -- cuma titik gambar teksnya yang dipindah ke tengah
+// kotak lewat gambarTeksPasKotak() di bawah.
+const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true };
+
 // Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
 // selebar `lebarMaks` px (satuan kanvas cetak, KARTU_LEBAR_PX) -- permintaan
 // panitia: nama yang panjang jangan sampai meluber keluar template
@@ -3503,11 +3513,18 @@ const KARTU_FONT_MIN_RASIO = 0.55;
 // pun masih kepanjangan (nama tanpa spasi), baru dipotong huruf per huruf.
 // `lebarMaks` kosong/0 (data lama sebelum fitur ini, atau field yang
 // sengaja tidak dibatasi) -> digambar apa adanya tanpa batasan sama sekali.
-function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks) {
+// `align` ("left"/"center", default "left") -- lihat KARTU_FIELD_RATA_TENGAH
+// di atas; untuk "center" teks digambar di tengah kotak (x + lebarMaks/2),
+// "x" sendiri tetap tepi kiri kotak, tidak berubah artinya.
+function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align) {
   teks = teks || "-";
+  align = align === "center" ? "center" : "left";
+
   if (!lebarMaks) {
+    ctx.textAlign = align;
     ctx.font = "600 " + fontAwal + "px 'Plus Jakarta Sans', sans-serif";
     ctx.fillText(teks, x, y);
+    ctx.textAlign = "left"; // dikembalikan supaya tidak mempengaruhi field lain
     return;
   }
 
@@ -3530,7 +3547,9 @@ function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks) {
     }
   }
 
-  ctx.fillText(teks, x, y);
+  ctx.textAlign = align;
+  ctx.fillText(teks, align === "center" ? (x + lebarMaks / 2) : x, y);
+  ctx.textAlign = "left"; // dikembalikan supaya tidak mempengaruhi field lain
 }
 
 function gambarKartu(canvas, templateImg, layout, data, fields) {
@@ -3552,7 +3571,8 @@ function gambarKartu(canvas, templateImg, layout, data, fields) {
     // yang sudah pernah diatur sebelum ini tetap ikut terlindung dari nama
     // yang meluber tanpa panitia perlu mengatur ulang satu-satu.
     const lebar = pos.lebar || Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
-    gambarTeksPasKotak(ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar);
+    const align = KARTU_FIELD_RATA_TENGAH[f.key] ? "center" : "left";
+    gambarTeksPasKotak(ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar, align);
   });
 }
 
@@ -3624,6 +3644,7 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
       whiteSpace: "nowrap",
       overflow: "hidden",
       textOverflow: "ellipsis",
+      textAlign: KARTU_FIELD_RATA_TENGAH[f.key] ? "center" : "left",
       outline: "1.5px dashed #2f7bdb",
       background: "rgba(255,255,255,0.35)",
       lineHeight: "1.15"
