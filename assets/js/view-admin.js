@@ -3383,7 +3383,8 @@ const FIELD_PESERTA = [
 // per baris pendaftaran (lihat cetakKartuPDF(), jenis "pesertaTim").
 const FIELD_PESERTA_TIM = [
   { key: "nama_tim", label: "Nama Tim" },
-  { key: "nama_anggota", label: "Nama Anggota" }
+  { key: "nama_anggota", label: "Nama Anggota" },
+  { key: "nomor_pendaftaran", label: "Nomor Pendaftaran" }
 ];
 const FIELD_PENDAMPING = [
   { key: "nama", label: "Nama" },
@@ -3420,8 +3421,9 @@ const DEFAULT_LAYOUT_KARTU = {
     nomor_pendaftaran: { x: 60, y: 710, font: 36, lebar: 880 }
   },
   pesertaTim: {
-    nama_tim: { x: 60, y: 580, font: 46, lebar: 880 },
-    nama_anggota: { x: 60, y: 680, font: 46, lebar: 880 }
+    nama_tim: { x: 60, y: 540, font: 46, lebar: 880 },
+    nama_anggota: { x: 60, y: 630, font: 46, lebar: 880 },
+    nomor_pendaftaran: { x: 60, y: 720, font: 36, lebar: 880 }
   },
   pendamping: {
     nama: { x: 60, y: 620, font: 64, lebar: 880 },
@@ -3602,10 +3604,10 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
   wrapEl.style.position = "relative";
   wrapEl.style.width = KARTU_DISPLAY_LEBAR + "px";
   wrapEl.style.height = kartuDisplayTinggi() + "px";
-  wrapEl.style.background = templateUrl ? ('url("' + templateUrl + '") center/100% 100% no-repeat #dcdcdc') : "#dcdcdc";
+  wrapEl.style.background = "#dcdcdc";
   wrapEl.style.border = "1px solid #c7c7c7";
   wrapEl.style.borderRadius = "10px";
-  wrapEl.style.overflow = "hidden";
+  wrapEl.style.overflow = "visible"; // label kecil & tombol A-/A+ tiap field boleh sedikit menonjol ke luar kotak kartu
   wrapEl.style.userSelect = "none";
   wrapEl.style.touchAction = "none";
   wrapEl.style.marginTop = "10px";
@@ -3616,6 +3618,41 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
   }
 
   const skala = kartuSkalaDrag();
+
+  // Kanvas pratinjau WYSIWYG (baru) -- digambar memakai gambarKartu()/
+  // gambarTeksPasKotak() YANG SAMA PERSIS dengan kartu sungguhan (resolusi
+  // ASLI KARTU_LEBAR_PX x KARTU_TINGGI_PX, cuma DITAMPILKAN lebih kecil
+  // lewat CSS width/height) -- supaya posisi & ukuran huruf yang kelihatan
+  // di sini PERSIS SAMA dengan hasil kartu/PDF yang tercetak. Sebelumnya
+  // pratinjau ini dibuat dari <div> teks HTML biasa, yang metrik
+  // vertikalnya (line-height, padding) berbeda dari <canvas> fillText()
+  // yang dipakai saat cetak -- itu sebabnya posisi yang terlihat "pas" di
+  // pratinjau bisa meleset (teks tercetak lebih ke atas dari yang
+  // kelihatan) saat benar-benar dicetak. Dengan memakai fungsi gambar yang
+  // sama di sini, selisih itu sekarang tidak mungkin terjadi lagi.
+  const kanvasPratinjau = document.createElement("canvas");
+  Object.assign(kanvasPratinjau.style, {
+    position: "absolute", left: "0", top: "0",
+    width: KARTU_DISPLAY_LEBAR + "px", height: kartuDisplayTinggi() + "px",
+    borderRadius: "10px", pointerEvents: "none"
+  });
+  wrapEl.appendChild(kanvasPratinjau);
+
+  const dataContoh = {};
+  fields.forEach(function (f) { dataContoh[f.key] = "Contoh " + f.label; });
+
+  let templateImg = null;
+  function gambarUlang() {
+    if (!templateImg) return;
+    gambarKartu(kanvasPratinjau, templateImg, layout, dataContoh, fields);
+  }
+  muatGambar(templateUrl).then(function (img) {
+    templateImg = img;
+    gambarUlang();
+  }).catch(function () {
+    // Gagal memuat template (jaringan lambat/putus) -- kotak-kotak
+    // pengatur posisi di bawah tetap bisa dipakai, cuma latarnya kosong.
+  });
 
   fields.forEach(function (f) {
     const pos = layout[f.key];
@@ -3628,31 +3665,78 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
     // pratinjau lalu hilang lagi.
     if (pos.lebar == null) pos.lebar = Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
 
+    function tinggiKotak() { return Math.round(pos.font * 1.3); }
+
+    // Kotak transparan ini HANYA area pegangan untuk geser/ubah ukuran --
+    // teksnya sendiri sudah digambar di kanvasPratinjau di bawahnya
+    // (WYSIWYG), jadi kotak ini tidak perlu menampilkan tulisan apa pun.
     const el = document.createElement("div");
-    el.textContent = "Contoh " + f.label;
+    el.title = f.label + " -- geser untuk pindah posisi";
     Object.assign(el.style, {
       position: "absolute",
       left: (pos.x / skala) + "px",
       top: (pos.y / skala) + "px",
       width: (pos.lebar / skala) + "px",
+      height: (tinggiKotak() / skala) + "px",
       boxSizing: "border-box",
-      fontSize: (pos.font / skala) + "px",
-      fontWeight: "700",
-      fontFamily: "'Plus Jakarta Sans', sans-serif",
-      color: "#111",
-      padding: "2px 5px",
       cursor: "move",
-      whiteSpace: "nowrap",
-      overflow: "hidden",
-      textOverflow: "ellipsis",
-      textAlign: KARTU_FIELD_RATA_TENGAH[f.key] ? "center" : "left",
       outline: "1.5px dashed #2f7bdb",
-      background: "rgba(255,255,255,0.35)",
-      lineHeight: "1.15"
+      background: "rgba(47,123,219,0.07)"
+    });
+
+    // Label kecil nama field -- cuma penanda kotak mana ini (bukan teks
+    // kartu sungguhan), supaya tetap jelas kalau ada beberapa kotak
+    // berdekatan/bertumpuk.
+    const labelKecil = document.createElement("span");
+    labelKecil.textContent = f.label;
+    Object.assign(labelKecil.style, {
+      position: "absolute", left: "0", bottom: "100%", marginBottom: "2px",
+      fontSize: "10px", fontFamily: "sans-serif", fontWeight: "600", color: "#fff",
+      background: "#2f7bdb", padding: "1px 5px", borderRadius: "3px", whiteSpace: "nowrap"
+    });
+    el.appendChild(labelKecil);
+
+    // Tombol A-/A+ (ditambahkan lagi) -- cara TAMBAHAN yang presisi untuk
+    // mengecilkan/membesarkan huruf (langkah 2px tiap klik), selain
+    // menyeret bulatan hijau di pojok kanan-bawah -- lebih mudah dipakai
+    // kalau kotaknya kecil/berdekatan sehingga menyeret jadi kurang presisi.
+    const tombolFontKecil = document.createElement("button");
+    tombolFontKecil.type = "button";
+    tombolFontKecil.textContent = "A−";
+    tombolFontKecil.title = "Kecilkan huruf";
+    const tombolFontBesar = document.createElement("button");
+    tombolFontBesar.type = "button";
+    tombolFontBesar.textContent = "A+";
+    tombolFontBesar.title = "Besarkan huruf";
+    [tombolFontKecil, tombolFontBesar].forEach(function (btn, i) {
+      Object.assign(btn.style, {
+        position: "absolute", bottom: "100%", marginBottom: "2px",
+        right: (i === 0 ? "19px" : "0"),
+        width: "17px", height: "17px", fontSize: "11px", lineHeight: "1",
+        padding: "0", border: "1px solid #2f7bdb", borderRadius: "3px",
+        background: "#fff", color: "#2f7bdb", cursor: "pointer", fontWeight: "700"
+      });
+      btn.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); });
+      el.appendChild(btn);
+    });
+    tombolFontKecil.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      pos.font = Math.max(10, pos.font - 2);
+      el.style.height = (tinggiKotak() / skala) + "px";
+      gambarUlang();
+      onUbah();
+    });
+    tombolFontBesar.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      pos.font = pos.font + 2;
+      el.style.height = (tinggiKotak() / skala) + "px";
+      gambarUlang();
+      onUbah();
     });
 
     // Bulatan HIJAU di pojok kanan-bawah -- seret VERTIKAL = ubah ukuran
-    // HURUF (pos.font), sama seperti sebelumnya.
+    // HURUF (pos.font), sama seperti sebelumnya (dipertahankan sebagai
+    // cara cepat selain tombol A-/A+ di atas).
     const handleFont = document.createElement("span");
     Object.assign(handleFont.style, {
       position: "absolute", right: "-9px", bottom: "-9px", width: "15px", height: "15px",
@@ -3661,9 +3745,9 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
     });
     el.appendChild(handleFont);
 
-    // Pegangan BIRU di tepi kanan-tengah (baru) -- seret HORIZONTAL = ubah
-    // LEBAR KOTAK (pos.lebar), batas sebelum teks otomatis mengecil/
-    // disingkat saat kartu sungguhan dicetak.
+    // Pegangan BIRU di tepi kanan-tengah -- seret HORIZONTAL = ubah LEBAR
+    // KOTAK (pos.lebar), batas sebelum teks otomatis mengecil/disingkat
+    // saat kartu sungguhan dicetak.
     const handleLebar = document.createElement("span");
     Object.assign(handleLebar.style, {
       position: "absolute", right: "-5px", top: "50%", width: "9px", height: "20px",
@@ -3683,11 +3767,12 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
         el.style.top = (pos.y / skala) + "px";
       } else if (modeAktif.mode === "besar") {
         pos.font = Math.max(10, Math.round(modeAktif.of + (ev.clientY - modeAktif.y0) * skala));
-        el.style.fontSize = (pos.font / skala) + "px";
+        el.style.height = (tinggiKotak() / skala) + "px";
       } else { // "lebar"
         pos.lebar = Math.max(40, Math.round(modeAktif.ol + (ev.clientX - modeAktif.x0) * skala));
         el.style.width = (pos.lebar / skala) + "px";
       }
+      gambarUlang();
       onUbah();
     }
     function lepas() { modeAktif = null; }
@@ -3745,7 +3830,7 @@ function panelKartuPerLombaHTML(jenis, judul) {
       '</div>' +
       '<button type="button" class="btn btn--ghost" id="btn-upload-template-' + jenis + '" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
       '<div id="drag-wrap-' + jenis + '"></div>' +
-      '<p class="hint">Geser langsung kotak contoh di atas untuk mengatur posisi; seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya -- begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
+      '<p class="hint">Geser langsung kotak (area putus-putus biru) untuk mengatur posisi; pakai tombol <strong>A−/A+</strong> di pojok kanan-atas kotak atau seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya. Pratinjau di atas memakai gambar PERSIS SAMA dengan hasil cetak (bukan tiruan HTML) -- posisi yang terlihat di sini presisi sama dengan kartu yang akan dicetak. Begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-' + jenis + '" style="margin-top:6px;">Simpan Posisi &amp; Template Ini</button>' +
       '<span class="hint" id="status-posisi-' + jenis + '" style="margin-left:10px;"></span>' +
       '<div id="ringkasan-' + jenis + '" style="margin-top:16px;"></div>' +
@@ -3863,7 +3948,7 @@ function panelKartuPendampingHTML() {
       '</div>' +
       '<button type="button" class="btn btn--ghost" id="btn-upload-template-pendamping" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
       '<div id="drag-wrap-pendamping"></div>' +
-      '<p class="hint">Geser langsung kotak contoh di atas untuk mengatur posisi; seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya -- begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
+      '<p class="hint">Geser langsung kotak (area putus-putus biru) untuk mengatur posisi; pakai tombol <strong>A−/A+</strong> di pojok kanan-atas kotak atau seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya. Pratinjau di atas memakai gambar PERSIS SAMA dengan hasil cetak (bukan tiruan HTML) -- posisi yang terlihat di sini presisi sama dengan kartu yang akan dicetak. Begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-pendamping" style="margin-top:6px;">Simpan Posisi &amp; Template</button>' +
       '<span class="hint" id="status-posisi-pendamping" style="margin-left:10px;"></span>' +
     '</div>'
@@ -3951,11 +4036,23 @@ async function cetakKartuPDF(jenis) {
     daftarData = [];
     for (const r of rows) {
       const { data: anggota, error: errAnggota } = await supabaseClient
-        .from("anggota_tim").select("nama").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
+        .from("anggota_tim").select("nama,nomor_punggung").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
       if (errAnggota) { alert("Gagal memuat anggota tim \"" + r.nama_tim + "\": " + errAnggota.message); return; }
       const kunci = kunciKartu(r.lomba_id, r.jenis_kelamin);
       (anggota || []).forEach(function (a) {
-        daftarData.push({ nama_tim: r.nama_tim, nama_anggota: a.nama, _kunci: kunci });
+        // Nomor Pendaftaran di kartu ANGGOTA tim = nomor pendaftaran TIM-nya
+        // digabung nomor punggung ANGGOTA itu sendiri, dipisah "/" --
+        // permintaan panitia, supaya satu nomor di kartu cukup untuk
+        // mengenali baik timnya (nomor pendaftaran) maupun pemainnya sendiri
+        // (nomor punggung) tanpa dua kartu/field terpisah. "-" kalau nomor
+        // punggung anggota itu belum diisi.
+        const punggung = (a.nomor_punggung != null && a.nomor_punggung !== "") ? a.nomor_punggung : "-";
+        daftarData.push({
+          nama_tim: r.nama_tim,
+          nama_anggota: a.nama,
+          nomor_pendaftaran: r.nomor_pendaftaran + "/" + punggung,
+          _kunci: kunci
+        });
       });
     }
     if (daftarData.length === 0) {
@@ -4063,10 +4160,17 @@ async function cetakKartuPDF(jenis) {
     const tengahGapX = marginX + KARTU_LEBAR_CM + KARTU_GAP_CM / 2;
     const tengahGapY = marginY + KARTU_TINGGI_CM + KARTU_GAP_CM / 2;
     doc.setDrawColor(190);
-    doc.setLineDashPattern([0.15, 0.15], 0);
+    // Hairline (0,01 cm = 0,1 mm) -- sebelumnya memakai lebar garis BAWAAN
+    // jsPDF yang relatif tebal untuk sekadar garis panduan gunting, jadi
+    // terlihat kasar/kurang rapi di atas kartu. Pola putus-putusnya juga
+    // dirapatkan sedikit (0,1 cm/0,1 cm, dari 0,15/0,15) supaya sebanding
+    // dengan garis yang sekarang jauh lebih tipis.
+    doc.setLineWidth(0.01);
+    doc.setLineDashPattern([0.1, 0.1], 0);
     doc.line(tengahGapX, marginY - 0.3, tengahGapX, marginY + 2 * KARTU_TINGGI_CM + KARTU_GAP_CM + 0.3);
     doc.line(marginX - 0.3, tengahGapY, marginX + 2 * KARTU_LEBAR_CM + KARTU_GAP_CM + 0.3, tengahGapY);
     doc.setLineDashPattern([], 0);
+    doc.setLineWidth(0.2); // kembalikan ke bawaan jsPDF, jaga-jaga kalau ada gambar lain setelah ini di versi mendatang
   }
 
   doc.save("kartu-" + jenis + "-alif5.pdf");
