@@ -4438,6 +4438,229 @@ async function cetakSertifikatPDF() {
   statusEl.textContent = "Selesai — " + daftarData.length + " sertifikat (" + daftarData.length + " lembar A4) terunduh.";
 }
 
+// ======================= CETAK ULANG/SUSULAN (pilih peserta tertentu, BARU) =======================
+// Beda dari "Unduh Kartu Peserta (PDF)"/"Unduh Kartu Peserta Futsal/Tim
+// (PDF)" di atas (yang SELALU mencetak SEMUA pendaftar "Diterima" sekaligus)
+// -- alat ini untuk mencetak ULANG kartu HANYA untuk beberapa nama
+// tertentu (mis. kartu rusak/hilang/typo, atau peserta susulan yang baru
+// saja diterima setelah batch cetak massal sebelumnya) tanpa perlu
+// mencetak ulang SELURUH peserta lain. Mengikutkan peserta INDIVIDU & tiap
+// ANGGOTA tim (status "Diterima" saja, sama seperti cetak massal) --
+// TIDAK mengikutkan Pendamping/Sertifikat (di luar cakupan "kartu peserta
+// susulan" yang diminta panitia untuk alat ini).
+//
+// `_susulanItems` (state modul, direset tiap kali "Muat Daftar Peserta"
+// ditekan) -- array flat berisi KEDUA jenis (peserta individu & anggota
+// tim) sekaligus, masing-masing item punya `jenis` ("peserta"/"pesertaTim"),
+// `data` (siap dioper ke gambarKartu()), `kunci` (kombinasi lomba+gender
+// untuk memilih template yang cocok), dan `dipilih` (diisi checkbox).
+let _susulanItems = [];
+
+function panelCetakSusulanHTML(opsiLombaCetak) {
+  return (
+    '<div class="form-shell" style="margin-top:20px;max-width:720px;">' +
+      '<h3>🔁 Cetak Ulang/Susulan (pilih peserta tertentu)</h3>' +
+      '<p>Untuk mencetak ulang <strong>Kartu Peserta</strong> HANYA untuk beberapa nama tertentu (mis. kartu rusak/hilang/typo, atau peserta susulan yang baru diterima) -- tanpa mencetak ulang SEMUA peserta lain. Mengikutkan peserta individu & tiap anggota tim berstatus "Diterima" saja.</p>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">' +
+        '<div class="field"><label>Cabang Lomba</label><select id="susulan-filter-lomba"><option value="">Semua Lomba</option>' + opsiLombaCetak + '</select></div>' +
+        '<button type="button" class="btn btn--ghost" id="btn-susulan-muat">Muat Daftar Peserta</button>' +
+      '</div>' +
+      '<div class="field" style="margin-top:10px;"><label>Cari nama</label><input type="text" id="susulan-cari" placeholder="Ketik nama untuk menyaring daftar di bawah..." disabled /></div>' +
+      '<div id="susulan-list" style="max-height:320px;overflow-y:auto;border:1px solid #e4e4e4;border-radius:8px;padding:10px;margin-top:8px;background:#fafafa;"><p class="hint" style="margin:0;">Pilih Cabang Lomba (opsional) lalu klik "Muat Daftar Peserta" dulu.</p></div>' +
+      '<div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap;">' +
+        '<button type="button" class="btn btn--primary" id="btn-susulan-cetak">Cetak Kartu Terpilih (PDF)</button>' +
+        '<span class="hint" id="susulan-jumlah-terpilih">0 dipilih</span>' +
+      '</div>' +
+      '<p class="hint" id="susulan-status"></p>' +
+    '</div>'
+  );
+}
+
+function perbaruiJumlahSusulanTerpilih() {
+  const n = _susulanItems.filter(function (it) { return it.dipilih; }).length;
+  const el = document.getElementById("susulan-jumlah-terpilih");
+  if (el) el.textContent = n + " dipilih";
+}
+
+function renderDaftarSusulan() {
+  const wrap = document.getElementById("susulan-list");
+  if (!wrap) return;
+  const cari = (document.getElementById("susulan-cari").value || "").trim().toLowerCase();
+  const terfilter = _susulanItems.filter(function (it) { return !cari || it.label.toLowerCase().indexOf(cari) !== -1; });
+
+  if (terfilter.length === 0) {
+    wrap.innerHTML = '<p class="hint" style="margin:0;">Tidak ada peserta yang cocok.</p>';
+    return;
+  }
+
+  wrap.innerHTML = terfilter.map(function (it) {
+    return (
+      '<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer;">' +
+        '<input type="checkbox" class="susulan-check" data-id="' + escapeHTML(it.id) + '"' + (it.dipilih ? " checked" : "") + '>' +
+        '<span>' + escapeHTML(it.label) + (it.jenis === "pesertaTim" ? ' <span class="hint">(Tim)</span>' : "") + '</span>' +
+      '</label>'
+    );
+  }).join("");
+
+  wrap.querySelectorAll(".susulan-check").forEach(function (chk) {
+    chk.addEventListener("change", function () {
+      const item = _susulanItems.find(function (x) { return x.id === chk.getAttribute("data-id"); });
+      if (item) item.dipilih = chk.checked;
+      perbaruiJumlahSusulanTerpilih();
+    });
+  });
+}
+
+function setupCetakSusulan(templatesSemua) {
+  const btnMuat = document.getElementById("btn-susulan-muat");
+  const inputCari = document.getElementById("susulan-cari");
+
+  btnMuat.addEventListener("click", async function () {
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Memuat...";
+    document.getElementById("susulan-status").textContent = "";
+
+    const lombaFilter = document.getElementById("susulan-filter-lomba").value;
+    let query = supabaseClient.from("pendaftaran").select("*").eq("status", "Diterima");
+    if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
+    const { data: rows, error } = await query;
+
+    btn.disabled = false;
+    btn.textContent = "Muat Daftar Peserta";
+
+    if (error) { alert("Gagal memuat data: " + error.message); return; }
+
+    _susulanItems = [];
+    (rows || []).filter(function (r) { return r.tipe !== "tim"; }).forEach(function (r) {
+      _susulanItems.push({
+        id: "peserta-" + r.id,
+        jenis: "peserta",
+        label: r.nama_lengkap + " — " + r.lomba_nama + " (" + r.nomor_pendaftaran + ")",
+        data: { nama: r.nama_lengkap, nomor_pendaftaran: r.nomor_pendaftaran },
+        kunci: kunciKartu(r.lomba_id, r.jenis_kelamin)
+      });
+    });
+
+    const timRows = (rows || []).filter(function (r) { return r.tipe === "tim"; });
+    for (const r of timRows) {
+      const { data: anggota, error: errAnggota } = await supabaseClient
+        .from("anggota_tim").select("id,nama,nomor_punggung").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
+      if (errAnggota) continue; // satu tim gagal dimuat -- tim lain tetap lanjut, bukan membatalkan semuanya
+      (anggota || []).forEach(function (a) {
+        const punggung = (a.nomor_punggung != null && a.nomor_punggung !== "") ? a.nomor_punggung : "-";
+        _susulanItems.push({
+          id: "tim-" + a.id,
+          jenis: "pesertaTim",
+          label: a.nama + " — Tim " + r.nama_tim + " · " + r.lomba_nama + " (" + r.nomor_pendaftaran + "/" + punggung + ")",
+          data: { nama_tim: r.nama_tim, nama_anggota: a.nama, nomor_pendaftaran: r.nomor_pendaftaran + "/" + punggung },
+          kunci: kunciKartu(r.lomba_id, r.jenis_kelamin)
+        });
+      });
+    }
+
+    inputCari.disabled = false;
+    inputCari.value = "";
+    renderDaftarSusulan();
+    perbaruiJumlahSusulanTerpilih();
+
+    if (_susulanItems.length === 0) {
+      document.getElementById("susulan-list").innerHTML = '<p class="hint" style="margin:0;">Tidak ada pendaftar berstatus "Diterima" yang cocok dengan filter ini.</p>';
+    }
+  });
+
+  inputCari.addEventListener("input", renderDaftarSusulan);
+
+  document.getElementById("btn-susulan-cetak").addEventListener("click", function () { cetakKartuTerpilihPDF(templatesSemua); });
+}
+
+async function cetakKartuTerpilihPDF(templatesSemua) {
+  const statusEl = document.getElementById("susulan-status");
+  const terpilih = _susulanItems.filter(function (it) { return it.dipilih; });
+  if (terpilih.length === 0) { alert("Pilih dulu minimal satu peserta/anggota yang ingin dicetak ulang kartunya."); return; }
+
+  // Kombinasi (jenis, kunci lomba+gender) yang dibutuhkan -- sama seperti
+  // cetakKartuPDF(), dicek SEMUANYA dulu sebelum mulai menggambar supaya
+  // tidak ada kartu yang diam-diam terlewat begitu baru ketahuan di
+  // tengah proses.
+  const kombinasiDibutuhkan = Array.from(new Set(terpilih.map(function (it) { return it.jenis + "|" + it.kunci; })));
+  const kurang = kombinasiDibutuhkan.filter(function (gab) {
+    const parts = gab.split("|");
+    const jenis = parts[0], kunci = parts.slice(1).join("|");
+    const entri = templatesSemua[jenis] && templatesSemua[jenis][kunci];
+    return !entri || !entri.url;
+  });
+  if (kurang.length > 0) {
+    alert("Belum ada template untuk kombinasi berikut -- upload dulu di panel Kartu di atas sebelum mencetak:\n\n" + kurang.map(function (g) { return g.split("|").slice(1).join("|"); }).join("\n"));
+    return;
+  }
+
+  statusEl.textContent = "Menyiapkan " + terpilih.length + " kartu, mohon tunggu...";
+
+  const cacheTemplate = {};
+  async function ambilTemplateSusulan(jenis, kunci) {
+    const cacheKey = jenis + "|" + kunci;
+    if (cacheTemplate[cacheKey]) return cacheTemplate[cacheKey];
+    const entri = templatesSemua[jenis][kunci];
+    const img = await muatGambar(entri.url);
+    cacheTemplate[cacheKey] = { img: img, layout: entri.layout || DEFAULT_LAYOUT_KARTU[jenis] };
+    return cacheTemplate[cacheKey];
+  }
+
+  const canvas = document.createElement("canvas");
+  const { jsPDF } = window.jspdf;
+  // Grid 2x2 per lembar A4 portrait, jarak tipis & garis panduan hairline --
+  // PERSIS sama dengan cetakKartuPDF(), supaya hasil susulan ini tetap
+  // konsisten (ukuran fisik & tata letak) dengan kartu yang sudah dicetak
+  // massal sebelumnya.
+  const KARTU_GAP_CM = 0.2;
+  const A4_LEBAR_CM = 21;
+  const A4_TINGGI_CM = 29.7;
+  const marginX = (A4_LEBAR_CM - (2 * KARTU_LEBAR_CM + KARTU_GAP_CM)) / 2;
+  const marginY = (A4_TINGGI_CM - (2 * KARTU_TINGGI_CM + KARTU_GAP_CM)) / 2;
+
+  const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "portrait" });
+  const totalHalaman = Math.ceil(terpilih.length / 4);
+
+  for (let h = 0; h < totalHalaman; h++) {
+    if (h > 0) doc.addPage("a4", "portrait");
+
+    for (let slot = 0; slot < 4; slot++) {
+      const idx = h * 4 + slot;
+      if (idx >= terpilih.length) break;
+      const item = terpilih[idx];
+      let tpl;
+      try {
+        tpl = await ambilTemplateSusulan(item.jenis, item.kunci);
+      } catch (e) {
+        statusEl.textContent = "";
+        alert("Gagal memuat gambar template untuk \"" + item.kunci + "\".");
+        return;
+      }
+      const fields = item.jenis === "pesertaTim" ? FIELD_PESERTA_TIM : FIELD_PESERTA;
+      gambarKartu(canvas, tpl.img, tpl.layout, item.data, fields);
+      const imgData = canvas.toDataURL("image/png");
+      const col = slot % 2, row = Math.floor(slot / 2);
+      const x = marginX + col * (KARTU_LEBAR_CM + KARTU_GAP_CM);
+      const y = marginY + row * (KARTU_TINGGI_CM + KARTU_GAP_CM);
+      doc.addImage(imgData, "PNG", x, y, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
+    }
+
+    const tengahGapX = marginX + KARTU_LEBAR_CM + KARTU_GAP_CM / 2;
+    const tengahGapY = marginY + KARTU_TINGGI_CM + KARTU_GAP_CM / 2;
+    doc.setDrawColor(190);
+    doc.setLineWidth(0.01);
+    doc.setLineDashPattern([0.1, 0.1], 0);
+    doc.line(tengahGapX, marginY - 0.3, tengahGapX, marginY + 2 * KARTU_TINGGI_CM + KARTU_GAP_CM + 0.3);
+    doc.line(marginX - 0.3, tengahGapY, marginX + 2 * KARTU_LEBAR_CM + KARTU_GAP_CM + 0.3, tengahGapY);
+    doc.setLineDashPattern([], 0);
+    doc.setLineWidth(0.2);
+  }
+
+  doc.save("kartu-susulan-alif5.pdf");
+  statusEl.textContent = "Selesai — " + terpilih.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
+}
+
 async function loadTabKartu() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat...</p>';
@@ -4485,12 +4708,14 @@ async function loadTabKartu() {
       '</div>' +
       '<p class="hint">"Kartu Peserta" di atas HANYA mengikutkan pendaftar individu; "Kartu Peserta Futsal/Tim" mencetak SATU KARTU PER ANGGOTA tim (bukan satu per tim). Filter "Cabang Lomba" berlaku untuk semua tombol. Kalau ada kombinasi lomba+jenis kelamin yang templatenya belum diunggah, proses cetak dibatalkan dan akan diberi tahu kombinasi mana yang kurang. <strong>"Unduh Sertifikat Peserta"</strong> mencetak SATU sertifikat per peserta individu dan SATU per anggota tim (status "Diterima" saja) jadi satu PDF (satu sertifikat per halaman A4 landscape) -- sertifikat untuk PENDAMPING TIDAK ikut tercetak di sini, melainkan diunduh sendiri lewat link token yang dibuat dari popup detail pendaftar (tab "Data Pendaftar") -- lihat bagian 12 README.</p>' +
       '<p class="hint" id="cetak-status"></p>' +
-    '</div>';
+    '</div>' +
+    panelCetakSusulanHTML(opsiLombaCetak);
 
   await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua);
   await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua);
   setupKartuPendamping(FIELD_PENDAMPING, templatesSemua);
   setupSertifikat(FIELD_SERTIFIKAT, templatesSemua);
+  setupCetakSusulan(templatesSemua);
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
   document.getElementById("btn-cetak-peserta-tim").addEventListener("click", function () { cetakKartuPDF("pesertaTim"); });
