@@ -3421,7 +3421,7 @@ const DEFAULT_LAYOUT_KARTU = {
   },
   pesertaTim: {
     nama_tim: { x: 60, y: 580, font: 46, lebar: 880 },
-    nama_anggota: { x: 60, y: 680, font: 64, lebar: 880 }
+    nama_anggota: { x: 60, y: 680, font: 46, lebar: 880 }
   },
   pendamping: {
     nama: { x: 60, y: 620, font: 64, lebar: 880 },
@@ -3494,13 +3494,14 @@ const KARTU_FONT_MIN_RASIO = 0.55;
 
 // Field yang ditulis RATA TENGAH di dalam kotaknya (bukan rata kiri seperti
 // bawaan) -- permintaan panitia: Nama (dipakai field "peserta.nama" & juga
-// "pendamping.nama"), Nomor Pendaftaran, dan Nama Tim (khusus Kartu Peserta
-// Futsal/Tim). Field lain yang tidak disebut di sini (Nama Anggota, Lomba
-// di kartu Pendamping) TETAP rata kiri seperti semula. "x" tetap berarti
-// TEPI KIRI kotak (sama seperti sebelumnya, dipakai editor drag-and-drop
-// untuk menggeser) -- cuma titik gambar teksnya yang dipindah ke tengah
-// kotak lewat gambarTeksPasKotak() di bawah.
-const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true };
+// "pendamping.nama"), Nomor Pendaftaran, Nama Tim, dan Nama Anggota (dua
+// yang terakhir khusus Kartu Peserta Futsal/Tim). Field lain yang tidak
+// disebut di sini (Lomba di kartu Pendamping) TETAP rata kiri seperti
+// semula. "x" tetap berarti TEPI KIRI kotak (sama seperti sebelumnya,
+// dipakai editor drag-and-drop untuk menggeser) -- cuma titik gambar
+// teksnya yang dipindah ke tengah kotak lewat gambarTeksPasKotak() di
+// bawah.
+const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true };
 
 // Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
 // selebar `lebarMaks` px (satuan kanvas cetak, KARTU_LEBAR_PX) -- permintaan
@@ -3916,7 +3917,11 @@ async function cetakKartuPDF(jenis) {
   const templatesSemua = await ambilKartuTemplates();
   const fields = jenis === "pendamping" ? FIELD_PENDAMPING : (jenis === "pesertaTim" ? FIELD_PESERTA_TIM : FIELD_PESERTA);
 
-  let query = supabaseClient.from("pendaftaran").select("*");
+  // Hanya pendaftar berstatus "Diterima" (sudah TERVERIFIKASI panitia) yang
+  // ikut dicetak -- permintaan panitia, supaya kartu tidak sampai tercetak
+  // untuk pendaftar yang masih "Menunggu Verifikasi"/"Perlu Verifikasi
+  // Usia"/"Perlu Tambah Nomor Punggung", apalagi yang sudah "Ditolak".
+  let query = supabaseClient.from("pendaftaran").select("*").eq("status", "Diterima");
   if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
   // "peserta" (individu) & "pesertaTim" (Futsal/tim) saling eksklusif lewat
   // kolom `tipe` -- permintaan panitia: kartu peserta individu biasa TIDAK
@@ -3926,7 +3931,7 @@ async function cetakKartuPDF(jenis) {
   if (jenis === "pesertaTim") query = query.eq("tipe", "tim");
   const { data: rows, error } = await query;
   if (error) { alert("Gagal memuat data: " + error.message); return; }
-  if (!rows || rows.length === 0) { alert("Tidak ada data pendaftar yang cocok."); return; }
+  if (!rows || rows.length === 0) { alert("Tidak ada data pendaftar berstatus \"Diterima\" yang cocok dengan filter ini."); return; }
 
   // Tiap item daftarData membawa `_kunci` -- untuk "peserta"/"pesertaTim"
   // berarti "<lomba_id>|<jenis_kelamin>", dipakai untuk memilih
@@ -4010,14 +4015,20 @@ async function cetakKartuPDF(jenis) {
   // 4 kartu dicetak sekaligus per lembar A4 PORTRAIT (grid 2 kolom x 2
   // baris), bukan satu kartu per halaman -- lebih hemat kertas/biaya cetak
   // untuk jumlah peserta yang banyak. Sisa ruang di luar keempat kartu (A4
-  // portrait 21 x 29,7 cm dikurangi 2x lebar & 2x tinggi kartu) dibagi rata
-  // jadi margin SIMETRIS di semua sisi, tanpa jarak antar-kartu (kartu
-  // saling bersisian) -- garis putus-putus abu-abu digambar di batas setiap
-  // kartu sebagai panduan gunting/pemotong.
+  // portrait 21 x 29,7 cm dikurangi 2x lebar & 2x tinggi kartu, dikurangi
+  // lagi jarak antar-kartu KARTU_GAP_CM) dibagi rata jadi margin SIMETRIS
+  // di semua sisi -- garis putus-putus abu-abu (panduan gunting/pemotong)
+  // digambar PAS DI TENGAH jarak antar-kartu ini, BUKAN menempel di tepi
+  // kartu seperti sebelumnya (permintaan panitia: sebelumnya kartu saling
+  // bersisian tanpa jarak sama sekali, jadi garis panduannya "masuk" ke
+  // kartu/menimpa isinya begitu digunting agak melenceng sedikit saja) --
+  // dengan jarak tipis ini, meleset sedikit saat menggunting masih aman
+  // tidak memotong isi kartu.
+  const KARTU_GAP_CM = 0.2;
   const A4_LEBAR_CM = 21;
   const A4_TINGGI_CM = 29.7;
-  const marginX = (A4_LEBAR_CM - 2 * KARTU_LEBAR_CM) / 2;
-  const marginY = (A4_TINGGI_CM - 2 * KARTU_TINGGI_CM) / 2;
+  const marginX = (A4_LEBAR_CM - (2 * KARTU_LEBAR_CM + KARTU_GAP_CM)) / 2;
+  const marginY = (A4_TINGGI_CM - (2 * KARTU_TINGGI_CM + KARTU_GAP_CM)) / 2;
 
   const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "portrait" });
   const totalHalaman = Math.ceil(daftarData.length / 4);
@@ -4040,18 +4051,21 @@ async function cetakKartuPDF(jenis) {
       gambarKartu(canvas, tpl.img, tpl.layout, data, fields);
       const imgData = canvas.toDataURL("image/png");
       const col = slot % 2, row = Math.floor(slot / 2);
-      const x = marginX + col * KARTU_LEBAR_CM;
-      const y = marginY + row * KARTU_TINGGI_CM;
+      const x = marginX + col * (KARTU_LEBAR_CM + KARTU_GAP_CM);
+      const y = marginY + row * (KARTU_TINGGI_CM + KARTU_GAP_CM);
       doc.addImage(imgData, "PNG", x, y, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
     }
 
-    // Garis panduan potong (putus-putus, abu-abu) di batas kartu tengah --
-    // murni bantuan visual untuk menggunting, tidak ikut ke hasil cetak
-    // kalau dirasa tidak perlu (bisa diabaikan/dihapus manual saat memotong).
+    // Garis panduan potong (putus-putus, abu-abu) PAS DI TENGAH jarak
+    // antar-kartu (lihat KARTU_GAP_CM di atas) -- murni bantuan visual
+    // untuk menggunting, tidak ikut ke hasil cetak kalau dirasa tidak
+    // perlu (bisa diabaikan/dihapus manual saat memotong).
+    const tengahGapX = marginX + KARTU_LEBAR_CM + KARTU_GAP_CM / 2;
+    const tengahGapY = marginY + KARTU_TINGGI_CM + KARTU_GAP_CM / 2;
     doc.setDrawColor(190);
     doc.setLineDashPattern([0.15, 0.15], 0);
-    doc.line(marginX + KARTU_LEBAR_CM, marginY - 0.3, marginX + KARTU_LEBAR_CM, marginY + 2 * KARTU_TINGGI_CM + 0.3);
-    doc.line(marginX - 0.3, marginY + KARTU_TINGGI_CM, marginX + 2 * KARTU_LEBAR_CM + 0.3, marginY + KARTU_TINGGI_CM);
+    doc.line(tengahGapX, marginY - 0.3, tengahGapX, marginY + 2 * KARTU_TINGGI_CM + KARTU_GAP_CM + 0.3);
+    doc.line(marginX - 0.3, tengahGapY, marginX + 2 * KARTU_LEBAR_CM + KARTU_GAP_CM + 0.3, tengahGapY);
     doc.setLineDashPattern([], 0);
   }
 
