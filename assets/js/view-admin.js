@@ -3407,18 +3407,25 @@ const KARTU_TINGGI_PX = Math.round((KARTU_TINGGI_CM / 2.54) * KARTU_DPI);
 
 // Posisi default untuk template BARU yang belum pernah diatur -- cuma
 // titik awal, panitia tinggal menggeser lewat editor drag-and-drop.
+// "lebar" (baru) = lebar KOTAK PEMBATAS teks itu (dalam px kanvas cetak,
+// KARTU_LEBAR_PX) -- begitu nama/teksnya lebih panjang dari kotak ini,
+// gambarTeksPasKotak() (dipakai gambarKartu()) otomatis MENGECILKAN
+// hurufnya dulu, dan kalau masih belum cukup di ukuran terkecil yang
+// wajar, baru MENYINGKATNYA (dipotong per kata lalu per huruf, diakhiri
+// "…") -- supaya nama peserta yang panjang tidak pernah meluber keluar
+// template kartunya. Lihat juga KARTU_FONT_MIN_RASIO.
 const DEFAULT_LAYOUT_KARTU = {
   peserta: {
-    nama: { x: 60, y: 620, font: 64 },
-    nomor_pendaftaran: { x: 60, y: 710, font: 36 }
+    nama: { x: 60, y: 620, font: 64, lebar: 880 },
+    nomor_pendaftaran: { x: 60, y: 710, font: 36, lebar: 880 }
   },
   pesertaTim: {
-    nama_tim: { x: 60, y: 580, font: 46 },
-    nama_anggota: { x: 60, y: 680, font: 64 }
+    nama_tim: { x: 60, y: 580, font: 46, lebar: 880 },
+    nama_anggota: { x: 60, y: 680, font: 64, lebar: 880 }
   },
   pendamping: {
-    nama: { x: 60, y: 620, font: 64 },
-    lomba: { x: 60, y: 710, font: 36 }
+    nama: { x: 60, y: 620, font: 64, lebar: 880 },
+    lomba: { x: 60, y: 710, font: 36, lebar: 880 }
   }
 };
 
@@ -3430,7 +3437,7 @@ function layoutDefaultBaru(jenis, fields) {
   const sumber = DEFAULT_LAYOUT_KARTU[jenis] || {};
   const hasil = {};
   fields.forEach(function (f) {
-    hasil[f.key] = Object.assign({}, sumber[f.key] || { x: 60, y: 60, font: 32 });
+    hasil[f.key] = Object.assign({ x: 60, y: 60, font: 32, lebar: 880 }, sumber[f.key] || {});
   });
   return hasil;
 }
@@ -3479,6 +3486,53 @@ function muatGambar(url, timeoutMs) {
   });
 }
 
+// Jangan mengecilkan huruf lebih dari 55% ukuran yang diatur panitia --
+// di bawah itu, gambarTeksPasKotak() berhenti mengecilkan & mulai
+// MENYINGKAT teksnya (lihat fungsi itu) supaya hurufnya tidak sampai
+// terlalu kecil untuk dibaca.
+const KARTU_FONT_MIN_RASIO = 0.55;
+
+// Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
+// selebar `lebarMaks` px (satuan kanvas cetak, KARTU_LEBAR_PX) -- permintaan
+// panitia: nama yang panjang jangan sampai meluber keluar template
+// kartunya. Urutannya: (1) coba apa adanya di `fontAwal`, (2) kalau
+// kepanjangan, kecilkan hurufnya sedikit demi sedikit sampai PAS atau
+// sampai batas KARTU_FONT_MIN_RASIO, (3) kalau MASIH kepanjangan di ukuran
+// terkecil itu, singkat teksnya -- buang kata terakhir satu-satu (bukan
+// potong tengah kata) sampai pas, diberi akhiran "…"; kalau cuma satu kata
+// pun masih kepanjangan (nama tanpa spasi), baru dipotong huruf per huruf.
+// `lebarMaks` kosong/0 (data lama sebelum fitur ini, atau field yang
+// sengaja tidak dibatasi) -> digambar apa adanya tanpa batasan sama sekali.
+function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks) {
+  teks = teks || "-";
+  if (!lebarMaks) {
+    ctx.font = "600 " + fontAwal + "px 'Plus Jakarta Sans', sans-serif";
+    ctx.fillText(teks, x, y);
+    return;
+  }
+
+  const fontMin = Math.max(14, Math.round(fontAwal * KARTU_FONT_MIN_RASIO));
+  let font = fontAwal;
+  ctx.font = "600 " + font + "px 'Plus Jakarta Sans', sans-serif";
+  while (font > fontMin && ctx.measureText(teks).width > lebarMaks) {
+    font -= 2;
+    ctx.font = "600 " + font + "px 'Plus Jakarta Sans', sans-serif";
+  }
+
+  if (ctx.measureText(teks).width > lebarMaks) {
+    const kata = teks.split(" ");
+    while (kata.length > 1 && ctx.measureText(kata.join(" ") + "…").width > lebarMaks) {
+      kata.pop();
+    }
+    teks = kata.join(" ") + "…";
+    while (teks.length > 2 && ctx.measureText(teks).width > lebarMaks) {
+      teks = teks.slice(0, -2) + "…";
+    }
+  }
+
+  ctx.fillText(teks, x, y);
+}
+
 function gambarKartu(canvas, templateImg, layout, data, fields) {
   // Kanvas SELALU berukuran tetap (ukuran cocard standar, lihat
   // KARTU_LEBAR_PX/KARTU_TINGGI_PX di atas) -- template PNG yang diupload
@@ -3491,9 +3545,14 @@ function gambarKartu(canvas, templateImg, layout, data, fields) {
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "top";
   fields.forEach(function (f) {
-    const pos = (layout && layout[f.key]) || { x: 40, y: 40, font: 22 };
-    ctx.font = "600 " + pos.font + "px 'Plus Jakarta Sans', sans-serif";
-    ctx.fillText(data[f.key] || "-", pos.x, pos.y);
+    const pos = (layout && layout[f.key]) || { x: 40, y: 40, font: 22, lebar: 880 };
+    // Lebar kotak: pakai yang diatur panitia -- untuk layout LAMA (sebelum
+    // fitur ini, belum punya "lebar" sama sekali) dibuatkan perkiraan yang
+    // masuk akal dari posisi X-nya ke tepi kanan kartu, supaya template
+    // yang sudah pernah diatur sebelum ini tetap ikut terlindung dari nama
+    // yang meluber tanpa panitia perlu mengatur ulang satu-satu.
+    const lebar = pos.lebar || Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
+    gambarTeksPasKotak(ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar);
   });
 }
 
@@ -3501,11 +3560,18 @@ function gambarKartu(canvas, templateImg, layout, data, fields) {
 // Dipakai ulang untuk ketiga jenis kartu. `wrapEl` jadi kanvas pratinjau
 // berukuran tetap (KARTU_DISPLAY_LEBAR px, diskalakan dari ukuran cetak
 // sesungguhnya) dengan gambar template sebagai latar; tiap field jadi
-// elemen teks yang bisa diseret langsung (geser badan tulisannya = pindah
-// posisi, seret bulatan kecil di pojok kanan-bawah = perbesar/perkecil
-// huruf). `layout` DIUBAH LANGSUNG (bukan disalin) oleh editor ini --
-// pemanggil cukup simpan objek `layout` yang sama saat tombol Simpan
-// ditekan, tidak perlu baca ulang dari form.
+// KOTAK teks yang bisa diseret langsung (geser badan tulisannya = pindah
+// posisi, seret bulatan HIJAU di pojok kanan-bawah = perbesar/perkecil
+// huruf, seret pegangan BIRU di tepi kanan-tengah = ubah LEBAR kotaknya).
+// Kotak ini adalah batas lebar yang dipakai gambarTeksPasKotak() saat
+// kartu sungguhan dicetak -- begitu nama peserta lebih panjang dari
+// kotaknya, hurufnya otomatis mengecil dulu, lalu disingkat kalau masih
+// belum cukup (lihat komentar di gambarTeksPasKotak()) -- jadi mengatur
+// lebar kotak di sini = mengatur seberapa panjang nama yang masih
+// ditampilkan apa adanya sebelum mulai mengecil/disingkat.
+// `layout` DIUBAH LANGSUNG (bukan disalin) oleh editor ini -- pemanggil
+// cukup simpan objek `layout` yang sama saat tombol Simpan ditekan, tidak
+// perlu baca ulang dari form.
 const KARTU_DISPLAY_LEBAR = 300; // px -- lebar kanvas pratinjau drag-and-drop di layar
 function kartuSkalaDrag() { return KARTU_LEBAR_PX / KARTU_DISPLAY_LEBAR; }
 function kartuDisplayTinggi() { return Math.round(KARTU_TINGGI_PX / kartuSkalaDrag()); }
@@ -3532,12 +3598,23 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
 
   fields.forEach(function (f) {
     const pos = layout[f.key];
+    // Layout LAMA (disimpan sebelum fitur kotak-pembatas ini ada) belum
+    // punya "lebar" sama sekali -- dikasih perkiraan awal yang masuk akal
+    // begitu editornya dibuka, sama seperti fallback di gambarKartu().
+    // Ini MENULIS ke `pos` (bagian dari `layout` yang dioper apa adanya,
+    // bukan disalin) supaya begitu panitia menekan Simpan, nilai "lebar"
+    // yang baru ini ikut tersimpan -- bukan cuma dipakai sementara di
+    // pratinjau lalu hilang lagi.
+    if (pos.lebar == null) pos.lebar = Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
+
     const el = document.createElement("div");
     el.textContent = "Contoh " + f.label;
     Object.assign(el.style, {
       position: "absolute",
       left: (pos.x / skala) + "px",
       top: (pos.y / skala) + "px",
+      width: (pos.lebar / skala) + "px",
+      boxSizing: "border-box",
       fontSize: (pos.font / skala) + "px",
       fontWeight: "700",
       fontFamily: "'Plus Jakarta Sans', sans-serif",
@@ -3545,18 +3622,33 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
       padding: "2px 5px",
       cursor: "move",
       whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
       outline: "1.5px dashed #2f7bdb",
       background: "rgba(255,255,255,0.35)",
       lineHeight: "1.15"
     });
 
-    const handle = document.createElement("span");
-    Object.assign(handle.style, {
+    // Bulatan HIJAU di pojok kanan-bawah -- seret VERTIKAL = ubah ukuran
+    // HURUF (pos.font), sama seperti sebelumnya.
+    const handleFont = document.createElement("span");
+    Object.assign(handleFont.style, {
       position: "absolute", right: "-9px", bottom: "-9px", width: "15px", height: "15px",
       borderRadius: "50%", background: "#0f7b3e", border: "2px solid #fff", cursor: "nwse-resize",
       boxShadow: "0 1px 3px rgba(0,0,0,0.4)"
     });
-    el.appendChild(handle);
+    el.appendChild(handleFont);
+
+    // Pegangan BIRU di tepi kanan-tengah (baru) -- seret HORIZONTAL = ubah
+    // LEBAR KOTAK (pos.lebar), batas sebelum teks otomatis mengecil/
+    // disingkat saat kartu sungguhan dicetak.
+    const handleLebar = document.createElement("span");
+    Object.assign(handleLebar.style, {
+      position: "absolute", right: "-5px", top: "50%", width: "9px", height: "20px",
+      marginTop: "-10px", borderRadius: "4px", background: "#2f7bdb", border: "2px solid #fff",
+      cursor: "ew-resize", boxShadow: "0 1px 3px rgba(0,0,0,0.4)"
+    });
+    el.appendChild(handleLebar);
 
     let modeAktif = null;
 
@@ -3567,9 +3659,12 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
         pos.y = Math.max(0, Math.round(modeAktif.oy + (ev.clientY - modeAktif.y0) * skala));
         el.style.left = (pos.x / skala) + "px";
         el.style.top = (pos.y / skala) + "px";
-      } else {
+      } else if (modeAktif.mode === "besar") {
         pos.font = Math.max(10, Math.round(modeAktif.of + (ev.clientY - modeAktif.y0) * skala));
         el.style.fontSize = (pos.font / skala) + "px";
+      } else { // "lebar"
+        pos.lebar = Math.max(40, Math.round(modeAktif.ol + (ev.clientX - modeAktif.x0) * skala));
+        el.style.width = (pos.lebar / skala) + "px";
       }
       onUbah();
     }
@@ -3584,15 +3679,25 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
     el.addEventListener("pointerup", lepas);
     el.addEventListener("pointercancel", lepas);
 
-    handle.addEventListener("pointerdown", function (ev) {
+    handleFont.addEventListener("pointerdown", function (ev) {
       ev.stopPropagation();
       ev.preventDefault();
       modeAktif = { mode: "besar", y0: ev.clientY, of: pos.font };
-      handle.setPointerCapture(ev.pointerId);
+      handleFont.setPointerCapture(ev.pointerId);
     });
-    handle.addEventListener("pointermove", gerak);
-    handle.addEventListener("pointerup", lepas);
-    handle.addEventListener("pointercancel", lepas);
+    handleFont.addEventListener("pointermove", gerak);
+    handleFont.addEventListener("pointerup", lepas);
+    handleFont.addEventListener("pointercancel", lepas);
+
+    handleLebar.addEventListener("pointerdown", function (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      modeAktif = { mode: "lebar", x0: ev.clientX, ol: pos.lebar };
+      handleLebar.setPointerCapture(ev.pointerId);
+    });
+    handleLebar.addEventListener("pointermove", gerak);
+    handleLebar.addEventListener("pointerup", lepas);
+    handleLebar.addEventListener("pointercancel", lepas);
 
     wrapEl.appendChild(el);
   });
@@ -3618,7 +3723,7 @@ function panelKartuPerLombaHTML(jenis, judul) {
       '</div>' +
       '<button type="button" class="btn btn--ghost" id="btn-upload-template-' + jenis + '" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
       '<div id="drag-wrap-' + jenis + '"></div>' +
-      '<p class="hint">Geser langsung tulisan contoh di atas untuk mengatur posisi; seret bulatan kecil di pojok kanan-bawah tulisannya untuk mengubah ukuran huruf.</p>' +
+      '<p class="hint">Geser langsung kotak contoh di atas untuk mengatur posisi; seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya -- begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-' + jenis + '" style="margin-top:6px;">Simpan Posisi &amp; Template Ini</button>' +
       '<span class="hint" id="status-posisi-' + jenis + '" style="margin-left:10px;"></span>' +
       '<div id="ringkasan-' + jenis + '" style="margin-top:16px;"></div>' +
@@ -3736,7 +3841,7 @@ function panelKartuPendampingHTML() {
       '</div>' +
       '<button type="button" class="btn btn--ghost" id="btn-upload-template-pendamping" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
       '<div id="drag-wrap-pendamping"></div>' +
-      '<p class="hint">Geser langsung tulisan contoh di atas untuk mengatur posisi; seret bulatan kecil di pojok kanan-bawah untuk mengubah ukuran huruf.</p>' +
+      '<p class="hint">Geser langsung kotak contoh di atas untuk mengatur posisi; seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya -- begitu nama peserta lebih panjang dari lebar kotak ini, hurufnya otomatis mengecil dulu lalu disingkat kalau masih belum cukup saat kartu dicetak.</p>' +
       '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-pendamping" style="margin-top:6px;">Simpan Posisi &amp; Template</button>' +
       '<span class="hint" id="status-posisi-pendamping" style="margin-left:10px;"></span>' +
     '</div>'
