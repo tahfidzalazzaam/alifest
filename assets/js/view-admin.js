@@ -717,6 +717,71 @@ function pasangListenerStatusPopup(row, isTim, rule) {
   // pasangListenerStatusPopup lagi) supaya selalu menampilkan pesan & status
   // "sudah terkirim" yang sesuai dengan `row` TERBARU.
   renderTombolWALomba(row, rule);
+  renderTombolSertifikatPendamping(row);
+}
+
+// Nama "pendamping" untuk SATU baris pendaftaran -- COALESCE dari TIGA
+// kolom yang mutually-exclusive (lihat juga kumpulkanEntriPendamping() di
+// tab "Data Pendamping"): pembina (tim/Futsal), penanggung_jawab_lembaga
+// (Perwakilan Lembaga), atau nama_pendamping (individu biasa, opsional,
+// migrasi 0027). Dipakai renderTombolSertifikatPendamping() di bawah untuk
+// menentukan apakah baris ini PUNYA pendamping sama sekali (kalau tidak,
+// tombol link sertifikatnya tidak relevan/tidak ditampilkan).
+function namaPendampingUntukSertifikat(row) {
+  return row.pembina || row.penanggung_jawab_lembaga || row.nama_pendamping || "";
+}
+
+// Mengisi `.sertifikat-link-wrap[data-id=...]` (field "Sertifikat
+// Pendamping" di popup detail Tim/Individu, lihat bukaModalTim/
+// bukaModalIndividu) -- BERBEDA dari "Kirim WA": tombol ini TIDAK otomatis
+// mengirim apa pun, cuma MEMBUAT (kalau belum ada) & MENAMPILKAN link
+// rahasia yang panitia salin & kirimkan SENDIRI secara manual ke pendamping
+// (lewat WA/kanal apa pun pilihan panitia) -- permintaan panitia, berbeda
+// dari link {link_lengkapi} yang otomatis tertaut ke pesan status WA.
+// HANYA relevan kalau baris ini punya nama pendamping (lihat
+// namaPendampingUntukSertifikat() di atas) DAN statusnya PERSIS "Diterima"
+// (gating yang sama dipakai ulang di server oleh RPC ambil_sertifikat(),
+// migrasi 0055 -- jadi walau tombol ini sempat tampil lalu statusnya
+// berubah lagi, link yang SUDAH terkirim otomatis tidak berlaku lagi).
+async function renderTombolSertifikatPendamping(row) {
+  const wrap = document.querySelector('.sertifikat-link-wrap[data-id="' + row.id + '"]');
+  if (!wrap) return;
+
+  const namaPendamping = namaPendampingUntukSertifikat(row);
+  if (!namaPendamping) {
+    wrap.innerHTML = '<span class="hint">Tidak ada data pendamping/penanggung jawab untuk pendaftaran ini.</span>';
+    return;
+  }
+  if (row.status !== "Diterima") {
+    wrap.innerHTML = '<span class="hint">Link baru aktif begitu status pendaftaran ini "Diterima".</span>';
+    return;
+  }
+
+  wrap.innerHTML = '<button type="button" class="btn-link btn-link-sertifikat" data-id="' + escapeHTML(row.id) + '">🎓 Buat/Lihat Link Sertifikat</button>';
+  wrap.querySelector(".btn-link-sertifikat").addEventListener("click", async function () {
+    const btn = this;
+    const labelAsli = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Menyiapkan...";
+    try {
+      const { data: token, error } = await supabaseClient.rpc("pastikan_token_sertifikat", { p_id: row.id });
+      if (error) throw error;
+      const settings = await ambilSiteSettingsWALomba();
+      const link = settings.site_url
+        ? (settings.site_url + "/#/sertifikat?token=" + token)
+        : ("#/sertifikat?token=" + token);
+      // prompt() dipakai (bukan alert()) supaya panitia bisa langsung
+      // menyalin teksnya (Ctrl+C) tanpa harus select manual -- link ini
+      // sengaja TIDAK dikirim otomatis, panitia yang memutuskan kapan &
+      // lewat kanal apa mengirimkannya ke pendamping.
+      prompt('Link Sertifikat untuk "' + namaPendamping + '" -- salin (Ctrl+C) lalu kirimkan sendiri ke pendamping:', link);
+    } catch (e) {
+      alert("Gagal menyiapkan link sertifikat: " + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = labelAsli;
+    }
+  });
 }
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
@@ -735,6 +800,7 @@ async function bukaModalTim(row, rule) {
       '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, true) + '</span></div>' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Sertifikat Pendamping</span><span class="modal-field__value"><span class="sertifikat-link-wrap" data-id="' + escapeHTML(row.id) + '"></span></span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
@@ -1141,6 +1207,7 @@ function bukaModalIndividu(row, rule) {
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, false) + '</span></div>' +
+      '<div class="modal-field modal-field--full"><span class="modal-field__label">Sertifikat Pendamping</span><span class="modal-field__value"><span class="sertifikat-link-wrap" data-id="' + escapeHTML(row.id) + '"></span></span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
@@ -3391,6 +3458,20 @@ const FIELD_PENDAMPING = [
   { key: "lomba", label: "Lomba/Sekolah" }
 ];
 
+// Sertifikat (BARU) -- SATU templat generik untuk SEMUA penerima (peserta
+// individu, tiap anggota tim, & pendamping), beda dari Kartu yang punya
+// templat terpisah per Cabang Lomba x Jenis Kelamin. Field key "lomba"
+// TIDAK dipakai ulang di sini (walau namanya sama persis dengan field Kartu
+// Pendamping) -- dipakai key "lomba_sertifikat" yang beda, supaya
+// pengaturan rata tengah di KARTU_FIELD_RATA_TENGAH (di bawah) untuk field
+// ini TIDAK ikut membuat field "lomba" milik Kartu Pendamping jadi rata
+// tengah juga (field itu sengaja dibiarkan rata kiri, lihat komentarnya).
+const FIELD_SERTIFIKAT = [
+  { key: "nama", label: "Nama" },
+  { key: "lomba_sertifikat", label: "Cabang Lomba" },
+  { key: "nomor_pendaftaran", label: "Nomor Pendaftaran" }
+];
+
 // Ukuran cetak KARTU PESERTA & KARTU PENDAMPING dibuat TETAP (bukan lagi
 // ikut ukuran piksel PNG template yang diupload panitia) -- 8,5 x 11,5 cm,
 // PORTRAIT, supaya 4 kartu pas tercetak dalam satu lembar A4 (grid 2x2,
@@ -3405,6 +3486,20 @@ const KARTU_TINGGI_CM = 11.5;
 const KARTU_DPI = 300; // dipakai buat kanvas pratinjau di layar; PDF-nya sendiri pakai satuan cm langsung (lihat cetakKartuPDF) supaya ukuran fisiknya presisi
 const KARTU_LEBAR_PX = Math.round((KARTU_LEBAR_CM / 2.54) * KARTU_DPI);
 const KARTU_TINGGI_PX = Math.round((KARTU_TINGGI_CM / 2.54) * KARTU_DPI);
+
+// Ukuran cetak SERTIFIKAT (BARU) -- A4 LANDSCAPE penuh (29,7 x 21 cm), SATU
+// sertifikat per halaman -- beda dari Kartu yang portrait kecil 4-per-
+// halaman, karena sertifikat lazimnya memang mengisi satu lembar A4 utuh.
+// Memakai fungsi gambar (gambarKartu()/gambarTeksPasKotak()) & editor
+// drag-and-drop (buatEditorDrag()) YANG SAMA dengan Kartu, cuma dioper
+// resolusi & skala tampilan sendiri lewat parameter opsional masing-masing
+// fungsi itu -- lihat komentarnya.
+const SERTIFIKAT_LEBAR_CM = 29.7;
+const SERTIFIKAT_TINGGI_CM = 21;
+const SERTIFIKAT_DPI = 300;
+const SERTIFIKAT_LEBAR_PX = Math.round((SERTIFIKAT_LEBAR_CM / 2.54) * SERTIFIKAT_DPI);
+const SERTIFIKAT_TINGGI_PX = Math.round((SERTIFIKAT_TINGGI_CM / 2.54) * SERTIFIKAT_DPI);
+const SERTIFIKAT_DISPLAY_LEBAR = 480; // px -- lebih lebar dari KARTU_DISPLAY_LEBAR (300) karena rasionya landscape, bukan portrait
 
 // Posisi default untuk template BARU yang belum pernah diatur -- cuma
 // titik awal, panitia tinggal menggeser lewat editor drag-and-drop.
@@ -3428,6 +3523,15 @@ const DEFAULT_LAYOUT_KARTU = {
   pendamping: {
     nama: { x: 60, y: 620, font: 64, lebar: 880 },
     lomba: { x: 60, y: 710, font: 36, lebar: 880 }
+  },
+  // Posisi awal untuk kanvas A4 LANDSCAPE (3508x2480px, lihat
+  // SERTIFIKAT_LEBAR_PX/TINGGI_PX) -- jauh lebih lebar dari Kartu, jadi
+  // angkanya sengaja beda skala. Cuma titik awal, panitia tinggal menggeser
+  // lewat editor sesuai desain templatenya sendiri.
+  sertifikat: {
+    nama: { x: 600, y: 1050, font: 140, lebar: 2308 },
+    lomba_sertifikat: { x: 600, y: 1260, font: 70, lebar: 2308 },
+    nomor_pendaftaran: { x: 600, y: 2300, font: 40, lebar: 2308 }
   }
 };
 
@@ -3503,7 +3607,7 @@ const KARTU_FONT_MIN_RASIO = 0.55;
 // dipakai editor drag-and-drop untuk menggeser) -- cuma titik gambar
 // teksnya yang dipindah ke tengah kotak lewat gambarTeksPasKotak() di
 // bawah.
-const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true };
+const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true, lomba_sertifikat: true };
 
 // Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
 // selebar `lebarMaks` px (satuan kanvas cetak, KARTU_LEBAR_PX) -- permintaan
@@ -3555,15 +3659,20 @@ function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align) {
   ctx.textAlign = "left"; // dikembalikan supaya tidak mempengaruhi field lain
 }
 
-function gambarKartu(canvas, templateImg, layout, data, fields) {
-  // Kanvas SELALU berukuran tetap (ukuran cocard standar, lihat
-  // KARTU_LEBAR_PX/KARTU_TINGGI_PX di atas) -- template PNG yang diupload
-  // panitia ditarik/disusutkan supaya pas mengisi penuh, berapa pun ukuran
-  // piksel aslinya.
-  canvas.width = KARTU_LEBAR_PX;
-  canvas.height = KARTU_TINGGI_PX;
+// `lebarPx`/`tinggiPx` (opsional, BARU) -- resolusi kanvas cetak dalam px.
+// Default ke KARTU_LEBAR_PX/KARTU_TINGGI_PX (ukuran Kartu Peserta/Pendamping)
+// kalau tidak dioper sama sekali, supaya semua pemanggil LAMA (yang tidak
+// tahu-menahu soal parameter ini) tetap berjalan tanpa berubah. Sertifikat
+// (lihat SERTIFIKAT_LEBAR_PX/TINGGI_PX di bawah) memakai fungsi gambar YANG
+// SAMA ini, cuma mengoper resolusi A4 landscape-nya sendiri -- supaya tidak
+// ada duplikasi logika gambar/auto-mengecilkan teks antara Kartu & Sertifikat.
+function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiPx) {
+  lebarPx = lebarPx || KARTU_LEBAR_PX;
+  tinggiPx = tinggiPx || KARTU_TINGGI_PX;
+  canvas.width = lebarPx;
+  canvas.height = tinggiPx;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(templateImg, 0, 0, KARTU_LEBAR_PX, KARTU_TINGGI_PX);
+  ctx.drawImage(templateImg, 0, 0, lebarPx, tinggiPx);
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "top";
   fields.forEach(function (f) {
@@ -3573,7 +3682,7 @@ function gambarKartu(canvas, templateImg, layout, data, fields) {
     // masuk akal dari posisi X-nya ke tepi kanan kartu, supaya template
     // yang sudah pernah diatur sebelum ini tetap ikut terlindung dari nama
     // yang meluber tanpa panitia perlu mengatur ulang satu-satu.
-    const lebar = pos.lebar || Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
+    const lebar = pos.lebar || Math.max(100, lebarPx - pos.x - 40);
     const align = KARTU_FIELD_RATA_TENGAH[f.key] ? "center" : "left";
     gambarTeksPasKotak(ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar, align);
   });
@@ -3599,11 +3708,24 @@ const KARTU_DISPLAY_LEBAR = 300; // px -- lebar kanvas pratinjau drag-and-drop d
 function kartuSkalaDrag() { return KARTU_LEBAR_PX / KARTU_DISPLAY_LEBAR; }
 function kartuDisplayTinggi() { return Math.round(KARTU_TINGGI_PX / kartuSkalaDrag()); }
 
-function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
+// `opsi` (opsional, BARU) -- { lebarPx, tinggiPx, displayLebar } supaya
+// editor yang SAMA ini bisa dipakai ulang untuk kanvas beda ukuran/rasio
+// (Sertifikat, landscape A4, lihat SERTIFIKAT_LEBAR_PX dkk di bawah), bukan
+// cuma Kartu Peserta/Pendamping (portrait 8,5x11,5cm). Default ke
+// KARTU_LEBAR_PX/KARTU_TINGGI_PX/KARTU_DISPLAY_LEBAR kalau tidak dioper sama
+// sekali, supaya semua pemanggil LAMA (Kartu) tetap berjalan tanpa berubah.
+function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah, opsi) {
+  opsi = opsi || {};
+  const lebarPx = opsi.lebarPx || KARTU_LEBAR_PX;
+  const tinggiPx = opsi.tinggiPx || KARTU_TINGGI_PX;
+  const displayLebar = opsi.displayLebar || KARTU_DISPLAY_LEBAR;
+  const skala = lebarPx / displayLebar;
+  const displayTinggi = Math.round(tinggiPx / skala);
+
   wrapEl.innerHTML = "";
   wrapEl.style.position = "relative";
-  wrapEl.style.width = KARTU_DISPLAY_LEBAR + "px";
-  wrapEl.style.height = kartuDisplayTinggi() + "px";
+  wrapEl.style.width = displayLebar + "px";
+  wrapEl.style.height = displayTinggi + "px";
   wrapEl.style.background = "#dcdcdc";
   wrapEl.style.border = "1px solid #c7c7c7";
   wrapEl.style.borderRadius = "10px";
@@ -3616,8 +3738,6 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
     wrapEl.innerHTML = '<p class="hint" style="padding:14px;margin:0;">Belum ada template -- upload dulu supaya bisa mengatur posisi dengan menggeser.</p>';
     return;
   }
-
-  const skala = kartuSkalaDrag();
 
   // Kanvas pratinjau WYSIWYG (baru) -- digambar memakai gambarKartu()/
   // gambarTeksPasKotak() YANG SAMA PERSIS dengan kartu sungguhan (resolusi
@@ -3633,7 +3753,7 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
   const kanvasPratinjau = document.createElement("canvas");
   Object.assign(kanvasPratinjau.style, {
     position: "absolute", left: "0", top: "0",
-    width: KARTU_DISPLAY_LEBAR + "px", height: kartuDisplayTinggi() + "px",
+    width: displayLebar + "px", height: displayTinggi + "px",
     borderRadius: "10px", pointerEvents: "none"
   });
   wrapEl.appendChild(kanvasPratinjau);
@@ -3644,7 +3764,7 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
   let templateImg = null;
   function gambarUlang() {
     if (!templateImg) return;
-    gambarKartu(kanvasPratinjau, templateImg, layout, dataContoh, fields);
+    gambarKartu(kanvasPratinjau, templateImg, layout, dataContoh, fields, lebarPx, tinggiPx);
   }
   muatGambar(templateUrl).then(function (img) {
     templateImg = img;
@@ -3663,7 +3783,7 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah) {
     // bukan disalin) supaya begitu panitia menekan Simpan, nilai "lebar"
     // yang baru ini ikut tersimpan -- bukan cuma dipakai sementara di
     // pratinjau lalu hilang lagi.
-    if (pos.lebar == null) pos.lebar = Math.max(100, KARTU_LEBAR_PX - pos.x - 40);
+    if (pos.lebar == null) pos.lebar = Math.max(100, lebarPx - pos.x - 40);
 
     function tinggiKotak() { return Math.round(pos.font * 1.3); }
 
@@ -3995,6 +4115,75 @@ function setupKartuPendamping(fields, templatesSemua) {
   });
 }
 
+// ======================= PANEL "Sertifikat" (SATU templat generik, BARU) =======================
+// Beda dari ketiga jenis Kartu di atas (per Cabang Lomba x Jenis Kelamin,
+// atau satu templat global khusus Pendamping) -- Sertifikat SATU-SATUNYA
+// templat untuk SEMUA penerima (peserta individu, tiap anggota tim, &
+// pendamping yang mengunduh lewat link publik, lihat cetakSertifikatPDF()
+// & "Link Sertifikat Pendamping" di popup detail Data Pendaftar) -- cuma
+// isi teksnya (Nama/Cabang Lomba/Nomor Pendaftaran) yang beda per orang.
+// Memakai editor drag-and-drop YANG SAMA (buatEditorDrag()) dengan Kartu,
+// cuma dioper opsi kanvas A4 landscape lewat parameter "opsi" di akhir.
+function panelSertifikatHTML() {
+  return (
+    '<div class="form-shell" style="margin-bottom:20px;">' +
+      '<h3>🎓 Sertifikat (templat generik, untuk semua penerima)</h3>' +
+      '<p>Satu desain sertifikat ini dipakai untuk SEMUA penerima -- peserta individu, tiap anggota tim, dan pendamping -- cuma teks Nama/Cabang Lomba/Nomor Pendaftaran yang berbeda-beda per orang. Idealnya berukuran/rasio A4 LANDSCAPE (' + SERTIFIKAT_LEBAR_CM + ' × ' + SERTIFIKAT_TINGGI_CM + ' cm).</p>' +
+      '<div class="field">' +
+        '<label>Template (PNG)</label>' +
+        '<input type="file" id="input-template-sertifikat" accept=".png,image/png" />' +
+      '</div>' +
+      '<button type="button" class="btn btn--ghost" id="btn-upload-template-sertifikat" style="margin-bottom:10px;">Upload/Ganti Template</button>' +
+      '<div id="drag-wrap-sertifikat"></div>' +
+      '<p class="hint">Geser langsung kotak (area putus-putus biru) untuk mengatur posisi; pakai tombol <strong>A−/A+</strong> di pojok kanan-atas kotak atau seret bulatan hijau di pojok kanan-bawah untuk mengubah ukuran huruf; seret pegangan biru di tepi kanan untuk mengubah lebar kotaknya. Pratinjau di atas memakai gambar PERSIS SAMA dengan hasil cetak -- posisi yang terlihat di sini presisi sama dengan sertifikat yang akan dicetak/diunduh.</p>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-sertifikat" style="margin-top:6px;">Simpan Posisi &amp; Template</button>' +
+      '<span class="hint" id="status-posisi-sertifikat" style="margin-left:10px;"></span>' +
+    '</div>'
+  );
+}
+
+function setupSertifikat(fields, templatesSemua) {
+  if (!templatesSemua.sertifikat) templatesSemua.sertifikat = { url: null, layout: layoutDefaultBaru("sertifikat", fields) };
+  const layoutAktif = Object.assign(layoutDefaultBaru("sertifikat", fields), templatesSemua.sertifikat.layout || {});
+  templatesSemua.sertifikat.layout = layoutAktif;
+
+  const opsiKanvas = { lebarPx: SERTIFIKAT_LEBAR_PX, tinggiPx: SERTIFIKAT_TINGGI_PX, displayLebar: SERTIFIKAT_DISPLAY_LEBAR };
+
+  const wrap = document.getElementById("drag-wrap-sertifikat");
+  buatEditorDrag(wrap, templatesSemua.sertifikat.url, fields, layoutAktif, function () {}, opsiKanvas);
+
+  document.getElementById("btn-upload-template-sertifikat").addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-template-sertifikat");
+    const file = fileInput.files[0];
+    if (!file) { alert("Pilih file PNG dulu."); return; }
+    if (file.type !== "image/png") { alert("File harus berformat PNG."); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+    const path = "kartu/sertifikat-" + Date.now() + ".png";
+    const { error: upErr } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
+    btn.disabled = false;
+    btn.textContent = "Upload/Ganti Template";
+    if (upErr) { alert("Gagal mengunggah: " + upErr.message); return; }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    templatesSemua.sertifikat.url = pub.publicUrl;
+    const { error: updErr } = await simpanKartuTemplates(templatesSemua);
+    if (updErr) { alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message); return; }
+    buatEditorDrag(wrap, pub.publicUrl, fields, layoutAktif, function () {}, opsiKanvas);
+  });
+
+  document.getElementById("btn-simpan-posisi-sertifikat").addEventListener("click", async function () {
+    if (!templatesSemua.sertifikat.url) { alert("Upload template dulu sebelum menyimpan posisi."); return; }
+    templatesSemua.sertifikat.layout = layoutAktif;
+    const { error } = await simpanKartuTemplates(templatesSemua);
+    const statusEl = document.getElementById("status-posisi-sertifikat");
+    statusEl.textContent = error ? ("Gagal: " + error.message) : "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+}
+
 async function cetakKartuPDF(jenis) {
   const statusEl = document.getElementById("cetak-status");
   const lombaFilter = document.getElementById("cetak-filter-lomba").value;
@@ -4177,6 +4366,78 @@ async function cetakKartuPDF(jenis) {
   statusEl.textContent = "Selesai — " + daftarData.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
+// ======================= CETAK SERTIFIKAT (PDF, BARU) =======================
+// Mencetak SATU sertifikat PER HALAMAN A4 landscape (beda dari Kartu yang
+// 4-per-halaman) untuk peserta INDIVIDU dan tiap ANGGOTA tim (status
+// "Diterima" saja, sama seperti Kartu) -- TIDAK mengikutkan Pendamping di
+// sini (pendamping mengunduh sertifikatnya SENDIRI lewat link token publik,
+// lihat "Link Sertifikat Pendamping" di popup detail Data Pendaftar &
+// migrasi 0055 -- bukan dicetak massal panitia). Memakai SATU templat
+// generik (templatesSemua.sertifikat), bukan per lomba+gender seperti Kartu.
+async function cetakSertifikatPDF() {
+  const statusEl = document.getElementById("cetak-status");
+  const lombaFilter = document.getElementById("cetak-filter-lomba").value;
+
+  const templatesSemua = await ambilKartuTemplates();
+  if (!templatesSemua.sertifikat || !templatesSemua.sertifikat.url) {
+    alert('Upload template Sertifikat dulu di panel "🎓 Sertifikat" di atas sebelum mencetak.');
+    return;
+  }
+
+  let query = supabaseClient.from("pendaftaran").select("*").eq("status", "Diterima");
+  if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
+  const { data: rows, error } = await query;
+  if (error) { alert("Gagal memuat data: " + error.message); return; }
+  if (!rows || rows.length === 0) { alert("Tidak ada data pendaftar berstatus \"Diterima\" yang cocok dengan filter ini."); return; }
+
+  // SATU sertifikat per peserta individu, DAN satu sertifikat per ANGGOTA
+  // tim (bukan satu per tim) -- pola yang sama dengan Kartu Peserta
+  // Futsal/Tim (cetakKartuPDF, jenis "pesertaTim").
+  const daftarData = [];
+  rows.filter(function (r) { return r.tipe !== "tim"; }).forEach(function (r) {
+    daftarData.push({ nama: r.nama_lengkap, lomba_sertifikat: r.lomba_nama, nomor_pendaftaran: r.nomor_pendaftaran });
+  });
+  for (const r of rows.filter(function (r) { return r.tipe === "tim"; })) {
+    const { data: anggota, error: errAnggota } = await supabaseClient
+      .from("anggota_tim").select("nama").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
+    if (errAnggota) { alert("Gagal memuat anggota tim \"" + r.nama_tim + "\": " + errAnggota.message); return; }
+    (anggota || []).forEach(function (a) {
+      daftarData.push({ nama: a.nama, lomba_sertifikat: r.lomba_nama, nomor_pendaftaran: r.nomor_pendaftaran });
+    });
+  }
+
+  if (daftarData.length === 0) {
+    alert("Tidak ada data peserta yang cocok untuk dicetak sertifikatnya.");
+    return;
+  }
+
+  statusEl.textContent = "Menyiapkan " + daftarData.length + " sertifikat, mohon tunggu...";
+
+  let templateImg;
+  try {
+    templateImg = await muatGambar(templatesSemua.sertifikat.url);
+  } catch (e) {
+    statusEl.textContent = "";
+    alert("Gagal memuat gambar template Sertifikat.");
+    return;
+  }
+  const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
+
+  const canvas = document.createElement("canvas");
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "landscape" });
+
+  daftarData.forEach(function (data, i) {
+    if (i > 0) doc.addPage("a4", "landscape");
+    gambarKartu(canvas, templateImg, layout, data, FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX);
+    const imgData = canvas.toDataURL("image/png");
+    doc.addImage(imgData, "PNG", 0, 0, SERTIFIKAT_LEBAR_CM, SERTIFIKAT_TINGGI_CM);
+  });
+
+  doc.save("sertifikat-peserta-alif5.pdf");
+  statusEl.textContent = "Selesai — " + daftarData.length + " sertifikat (" + daftarData.length + " lembar A4) terunduh.";
+}
+
 async function loadTabKartu() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat...</p>';
@@ -4192,6 +4453,7 @@ async function loadTabKartu() {
   if (!templatesSemua.peserta) templatesSemua.peserta = {};
   if (!templatesSemua.pesertaTim) templatesSemua.pesertaTim = {};
   if (!templatesSemua.pendamping) templatesSemua.pendamping = { url: null, layout: {} };
+  if (!templatesSemua.sertifikat) templatesSemua.sertifikat = { url: null, layout: {} };
 
   const { data: rulesData } = await supabaseClient.from("lomba_rules").select("id,nama,tipe").order("urutan");
   const semuaLomba = rulesData || [];
@@ -4209,25 +4471,31 @@ async function loadTabKartu() {
     panelKartuPerLombaHTML("peserta", "Kartu Peserta (individu)") +
     panelKartuPerLombaHTML("pesertaTim", "Kartu Peserta Futsal/Tim") +
     panelKartuPendampingHTML() +
-    '<div class="form-shell" style="margin-top:20px;max-width:520px;">' +
-      '<h3>Cetak Kartu</h3>' +
+    panelSertifikatHTML() +
+    '<div class="form-shell" style="margin-top:20px;max-width:560px;">' +
+      '<h3>Cetak Kartu &amp; Sertifikat</h3>' +
       '<div class="field"><label>Cabang Lomba</label><select id="cetak-filter-lomba"><option value="">Semua Lomba</option>' + opsiLombaCetak + '</select></div>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
         '<button type="button" class="btn btn--primary" id="btn-cetak-peserta">Unduh Kartu Peserta (PDF)</button>' +
         '<button type="button" class="btn btn--primary" id="btn-cetak-peserta-tim">Unduh Kartu Peserta Futsal/Tim (PDF)</button>' +
         '<button type="button" class="btn btn--ghost" id="btn-cetak-pendamping">Unduh Kartu Pendamping (PDF)</button>' +
       '</div>' +
-      '<p class="hint">"Kartu Peserta" di atas HANYA mengikutkan pendaftar individu; "Kartu Peserta Futsal/Tim" mencetak SATU KARTU PER ANGGOTA tim (bukan satu per tim). Filter "Cabang Lomba" berlaku untuk ketiga tombol. Kalau ada kombinasi lomba+jenis kelamin yang templatenya belum diunggah, proses cetak dibatalkan dan akan diberi tahu kombinasi mana yang kurang.</p>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-cetak-sertifikat">🎓 Unduh Sertifikat Peserta (PDF)</button>' +
+      '</div>' +
+      '<p class="hint">"Kartu Peserta" di atas HANYA mengikutkan pendaftar individu; "Kartu Peserta Futsal/Tim" mencetak SATU KARTU PER ANGGOTA tim (bukan satu per tim). Filter "Cabang Lomba" berlaku untuk semua tombol. Kalau ada kombinasi lomba+jenis kelamin yang templatenya belum diunggah, proses cetak dibatalkan dan akan diberi tahu kombinasi mana yang kurang. <strong>"Unduh Sertifikat Peserta"</strong> mencetak SATU sertifikat per peserta individu dan SATU per anggota tim (status "Diterima" saja) jadi satu PDF (satu sertifikat per halaman A4 landscape) -- sertifikat untuk PENDAMPING TIDAK ikut tercetak di sini, melainkan diunduh sendiri lewat link token yang dibuat dari popup detail pendaftar (tab "Data Pendaftar") -- lihat bagian 12 README.</p>' +
       '<p class="hint" id="cetak-status"></p>' +
     '</div>';
 
   await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua);
   await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua);
   setupKartuPendamping(FIELD_PENDAMPING, templatesSemua);
+  setupSertifikat(FIELD_SERTIFIKAT, templatesSemua);
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
   document.getElementById("btn-cetak-peserta-tim").addEventListener("click", function () { cetakKartuPDF("pesertaTim"); });
   document.getElementById("btn-cetak-pendamping").addEventListener("click", function () { cetakKartuPDF("pendamping"); });
+  document.getElementById("btn-cetak-sertifikat").addEventListener("click", function () { cetakSertifikatPDF(); });
 }
 
 /* ==================== TAB 6: NOTIFIKASI WA (FONNTE) ==================== */
