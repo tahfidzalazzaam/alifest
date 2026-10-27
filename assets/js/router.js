@@ -28,6 +28,7 @@ const ROUTES = {
   "#/adminbazar": window.ViewAdminBazar,
   "#/adminprofil": window.ViewAdminProfil,
   "#/lengkapi": window.ViewLengkapi,
+  "#/sertifikat": window.ViewSertifikat,
   "#/timadmin": window.ViewTimAdmin
 };
 
@@ -62,6 +63,7 @@ function judulUntukView(view) {
   if (view === window.ViewAdminBazar) return "Panitia Bazar - ALIF 5.0";
   if (view === window.ViewAdminProfil) return "Panitia Beranda - ALIF 5.0";
   if (view === window.ViewLengkapi) return "Lengkapi Nomor Punggung - ALIF 5.0";
+  if (view === window.ViewSertifikat) return "Unduh Sertifikat - ALIF 5.0";
   if (view === window.ViewTimAdmin) return "Mode Maintenance - ALIF 5.0";
   return document.title; // view tak dikenal -- biarkan judul tab apa adanya
 }
@@ -119,6 +121,10 @@ function cekAksesLangsungAdmin() {
   }
   if (path === "/lengkapi") {
     tampilkanView(window.ViewLengkapi, "");
+    return true;
+  }
+  if (path === "/sertifikat") {
+    tampilkanView(window.ViewSertifikat, "");
     return true;
   }
   if (path === "/timadmin") {
@@ -407,6 +413,10 @@ window.KODE_UJI_COBA_PANITIA = KODE_UJI_COBA_PANITIA;
 //    punggung tim Futsal yang sudah mendaftar; tidak relevan dipaksa lewat
 //    gerbang pendaftaran lomba (pendaftarannya sendiri sudah pasti sudah
 //    masuk, cuma melengkapi data).
+//  - "/sertifikat" -- halaman publik token-only (migrasi 0055) yang dibuka
+//    PENDAMPING lewat link khusus yang dibuat & dikirim manual panitia
+//    untuk mengunduh sertifikatnya sendiri; sama seperti "/lengkapi", tidak
+//    relevan dipaksa lewat gerbang pendaftaran lomba.
 function halamanTanpaGerbangLomba() {
   const path = window.location.pathname.replace(/\/+$/, "");
   const hash = window.location.hash;
@@ -420,7 +430,8 @@ function halamanTanpaGerbangLomba() {
     path === "" || path === "/" || hashTanpaQuery === "" || hashTanpaQuery === "#" || hashTanpaQuery === "#/" ||
     path === "/bazar" || hashTanpaQuery === "#/bazar" ||
     path === "/daftar-bazar" || hashTanpaQuery === "#/daftar-bazar" ||
-    path === "/lengkapi" || hashTanpaQuery === "#/lengkapi"
+    path === "/lengkapi" || hashTanpaQuery === "#/lengkapi" ||
+    path === "/sertifikat" || hashTanpaQuery === "#/sertifikat"
   );
 }
 
