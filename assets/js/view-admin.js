@@ -3473,16 +3473,20 @@ const FIELD_SERTIFIKAT = [
 ];
 
 // Ukuran cetak KARTU PESERTA & KARTU PENDAMPING dibuat TETAP (bukan lagi
-// ikut ukuran piksel PNG template yang diupload panitia) -- 8,5 x 11,5 cm,
+// ikut ukuran piksel PNG template yang diupload panitia) -- 8 x 10 cm,
 // PORTRAIT, supaya 4 kartu pas tercetak dalam satu lembar A4 (grid 2x2,
 // lihat cetakKartuPDF()) -- lebih efisien/murah dicetak massal lewat jasa
 // cetak biasa dibanding satu kartu per halaman. Berapa pun ukuran file PNG
 // yang diupload, hasil pratinjau & PDF-nya SELALU pas di ukuran fisik ini
 // (gambar template ditarik/disusutkan otomatis supaya penuh) -- lihat
 // gambarKartu() & cetakKartuPDF(). Sebaiknya desain template dibuat dengan
-// rasio 8,5:11,5 (portrait) supaya tidak gepeng/melar.
-const KARTU_LEBAR_CM = 8.5;
-const KARTU_TINGGI_CM = 11.5;
+// rasio 8:10 (portrait) supaya tidak gepeng/melar -- kalau template yang
+// sudah diupload rasionya beda (mis. masih memakai rasio ukuran lama
+// 8,5:11,5), template itu tetap akan ditarik/disusutkan otomatis supaya
+// pas penuh ke ukuran baru ini (tidak dipotong), proporsinya cuma sedikit
+// berubah.
+const KARTU_LEBAR_CM = 8;
+const KARTU_TINGGI_CM = 10;
 const KARTU_DPI = 300; // dipakai buat kanvas pratinjau di layar; PDF-nya sendiri pakai satuan cm langsung (lihat cetakKartuPDF) supaya ukuran fisiknya presisi
 const KARTU_LEBAR_PX = Math.round((KARTU_LEBAR_CM / 2.54) * KARTU_DPI);
 const KARTU_TINGGI_PX = Math.round((KARTU_TINGGI_CM / 2.54) * KARTU_DPI);
@@ -3711,7 +3715,7 @@ function kartuDisplayTinggi() { return Math.round(KARTU_TINGGI_PX / kartuSkalaDr
 // `opsi` (opsional, BARU) -- { lebarPx, tinggiPx, displayLebar } supaya
 // editor yang SAMA ini bisa dipakai ulang untuk kanvas beda ukuran/rasio
 // (Sertifikat, landscape A4, lihat SERTIFIKAT_LEBAR_PX dkk di bawah), bukan
-// cuma Kartu Peserta/Pendamping (portrait 8,5x11,5cm). Default ke
+// cuma Kartu Peserta/Pendamping (portrait 8x10cm). Default ke
 // KARTU_LEBAR_PX/KARTU_TINGGI_PX/KARTU_DISPLAY_LEBAR kalau tidak dioper sama
 // sekali, supaya semua pemanggil LAMA (Kartu) tetap berjalan tanpa berubah.
 function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah, opsi) {
@@ -4295,7 +4299,7 @@ async function cetakKartuPDF(jenis) {
   const canvas = document.createElement("canvas");
   const { jsPDF } = window.jspdf;
   // Satuan "cm" dipakai langsung (bukan "px") supaya ukuran fisik tiap
-  // kartu di PDF-nya SELALU presisi 8,5 x 11,5 cm (portrait) begitu
+  // kartu di PDF-nya SELALU presisi 8 x 10 cm (portrait) begitu
   // dicetak, tidak tergantung resolusi/DPI gambar kanvas yang dihasilkan.
   //
   // 4 kartu dicetak sekaligus per lembar A4 PORTRAIT (grid 2 kolom x 2
