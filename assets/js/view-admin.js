@@ -3678,13 +3678,26 @@ function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align) {
 // (lihat SERTIFIKAT_LEBAR_PX/TINGGI_PX di bawah) memakai fungsi gambar YANG
 // SAMA ini, cuma mengoper resolusi A4 landscape-nya sendiri -- supaya tidak
 // ada duplikasi logika gambar/auto-mengecilkan teks antara Kartu & Sertifikat.
-function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiPx) {
+// `logo` (opsional, BARU -- Logo Sponsor) -- { img, x, y, lebar, tinggi }
+// (dalam px kanvas cetak, sama satuan dengan posisi field) -- kalau dioper,
+// digambar PERSIS SATU KALI di atas gambar template tapi DI BAWAH semua
+// teks field (supaya teks tetap selalu terbaca jelas kalau posisinya
+// kebetulan bertumpuk). Dipakai HANYA oleh Kartu Peserta/Peserta
+// Futsal-Tim/Pendamping (lihat cetakKartuPDF(), cetakKartuTerpilihPDF(),
+// & buatEditorDrag()) -- SENGAJA TIDAK dipakai Sertifikat (permintaan
+// panitia, lihat panelLogoSponsorHTML()), jadi pemanggil dari sisi
+// Sertifikat (cetakSertifikatPDF(), view-sertifikat.js) cukup tidak
+// mengoper parameter ini sama sekali.
+function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiPx, logo) {
   lebarPx = lebarPx || KARTU_LEBAR_PX;
   tinggiPx = tinggiPx || KARTU_TINGGI_PX;
   canvas.width = lebarPx;
   canvas.height = tinggiPx;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(templateImg, 0, 0, lebarPx, tinggiPx);
+  if (logo && logo.img) {
+    ctx.drawImage(logo.img, logo.x, logo.y, logo.lebar, logo.tinggi);
+  }
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "top";
   fields.forEach(function (f) {
@@ -3773,10 +3786,16 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah, opsi) {
   const dataContoh = {};
   fields.forEach(function (f) { dataContoh[f.key] = "Contoh " + f.label; });
 
+  // `opsi.logo` (opsional, BARU -- Logo Sponsor) -- { img, x, y, lebar,
+  // tinggi } SUDAH DIMUAT (gambar sudah selesai di-load), dioper langsung
+  // dari pemanggil (setupKartuPerLomba()/setupKartuPendamping()) supaya
+  // pratinjau WYSIWYG di sini juga ikut menampilkan logo sponsor (kalau
+  // ada) persis seperti hasil cetaknya -- lihat gambarKartu(). Sertifikat
+  // tidak pernah mengoper opsi ini.
   let templateImg = null;
   function gambarUlang() {
     if (!templateImg) return;
-    gambarKartu(kanvasPratinjau, templateImg, layout, dataContoh, fields, lebarPx, tinggiPx);
+    gambarKartu(kanvasPratinjau, templateImg, layout, dataContoh, fields, lebarPx, tinggiPx, opsi.logo);
   }
   muatGambar(templateUrl).then(function (img) {
     templateImg = img;
@@ -3942,6 +3961,217 @@ function buatEditorDrag(wrapEl, templateUrl, fields, layout, onUbah, opsi) {
   });
 }
 
+// ======================= LOGO SPONSOR (BARU) =======================
+// SATU gambar PNG logo sponsor (bisa gabungan beberapa logo jadi satu
+// baris), posisi & ukurannya diatur SEKALI lewat editor drag-resize di
+// bawah ini, lalu dipakai BERSAMA di ketiga jenis Kartu (Peserta, Peserta
+// Futsal/Tim, Pendamping) -- BUKAN di Sertifikat (permintaan panitia).
+// Disimpan di key baru `logoSponsor` pada `site_settings.kartu_templates`
+// (jsonb yang sudah ada, TIDAK butuh migrasi SQL baru) -- struktur
+// `{ url, x, y, lebar, tinggi }` (posisi/ukuran dalam px kanvas cetak,
+// satuan sama dengan posisi field KARTU_LEBAR_PX/KARTU_TINGGI_PX).
+//
+// Beda dari editor field teks (buatEditorDrag(), yang tiap field punya
+// kotak lebar + ukuran huruf terpisah) -- logo cuma SATU kotak gambar,
+// jadi editornya lebih sederhana: seret badan kotak = pindah posisi,
+// seret bulatan HIJAU di pojok kanan-bawah = perbesar/perkecil ukurannya
+// (lebar & tinggi SEKALIGUS, mengikuti rasio asli gambar logo yang
+// diupload, supaya logo tidak gepeng/melar).
+function logoSponsorDefault() {
+  return { url: null, x: 700, y: 20, lebar: 225, tinggi: 225 };
+}
+
+function buatEditorLogo(wrapEl, templateUrlLatar, logoUrl, posisi, onUbah) {
+  const displayLebar = KARTU_DISPLAY_LEBAR;
+  const skala = KARTU_LEBAR_PX / displayLebar;
+  const displayTinggi = Math.round(KARTU_TINGGI_PX / skala);
+
+  wrapEl.innerHTML = "";
+  wrapEl.style.position = "relative";
+  wrapEl.style.width = displayLebar + "px";
+  wrapEl.style.height = displayTinggi + "px";
+  wrapEl.style.background = "#dcdcdc";
+  wrapEl.style.border = "1px solid #c7c7c7";
+  wrapEl.style.borderRadius = "10px";
+  wrapEl.style.overflow = "visible";
+  wrapEl.style.userSelect = "none";
+  wrapEl.style.touchAction = "none";
+  wrapEl.style.marginTop = "10px";
+
+  if (!logoUrl) {
+    wrapEl.innerHTML = '<p class="hint" style="padding:14px;margin:0;">Belum ada logo sponsor -- upload dulu supaya bisa mengatur posisi & ukurannya.</p>';
+    return;
+  }
+
+  // Kanvas pratinjau: latar memakai template Kartu Peserta yang SEDANG
+  // aktif diatur (kalau ada) supaya panitia bisa lihat kira-kira
+  // bagaimana logo akan tampil di atas kartu sungguhan -- cuma BANTUAN
+  // VISUAL, posisi/ukuran yang disimpan di sini berlaku SAMA untuk
+  // ketiga jenis Kartu apa pun latar belakangnya masing-masing.
+  const kanvasPratinjau = document.createElement("canvas");
+  Object.assign(kanvasPratinjau.style, {
+    position: "absolute", left: "0", top: "0",
+    width: displayLebar + "px", height: displayTinggi + "px",
+    borderRadius: "10px", pointerEvents: "none"
+  });
+  wrapEl.appendChild(kanvasPratinjau);
+  kanvasPratinjau.width = KARTU_LEBAR_PX;
+  kanvasPratinjau.height = KARTU_TINGGI_PX;
+  const ctx = kanvasPratinjau.getContext("2d");
+
+  let gambarLatar = null, gambarLogo = null, rasioLogo = 1;
+  function gambarUlang() {
+    ctx.clearRect(0, 0, KARTU_LEBAR_PX, KARTU_TINGGI_PX);
+    if (gambarLatar) ctx.drawImage(gambarLatar, 0, 0, KARTU_LEBAR_PX, KARTU_TINGGI_PX);
+    else { ctx.fillStyle = "#f0f0f0"; ctx.fillRect(0, 0, KARTU_LEBAR_PX, KARTU_TINGGI_PX); }
+    if (gambarLogo) ctx.drawImage(gambarLogo, posisi.x, posisi.y, posisi.lebar, posisi.tinggi);
+  }
+  if (templateUrlLatar) {
+    muatGambar(templateUrlLatar).then(function (img) { gambarLatar = img; gambarUlang(); }).catch(function () {});
+  }
+  muatGambar(logoUrl).then(function (img) {
+    gambarLogo = img;
+    rasioLogo = img.naturalWidth && img.naturalHeight ? (img.naturalHeight / img.naturalWidth) : 1;
+    gambarUlang();
+  }).catch(function () {});
+
+  const kotak = document.createElement("div");
+  Object.assign(kotak.style, {
+    position: "absolute", border: "2px dashed #2f6fed", borderRadius: "4px",
+    cursor: "move", boxSizing: "border-box"
+  });
+  function posisikanKotak() {
+    kotak.style.left = (posisi.x / skala) + "px";
+    kotak.style.top = (posisi.y / skala) + "px";
+    kotak.style.width = (posisi.lebar / skala) + "px";
+    kotak.style.height = (posisi.tinggi / skala) + "px";
+  }
+  posisikanKotak();
+  wrapEl.appendChild(kotak);
+
+  const handleResize = document.createElement("div");
+  Object.assign(handleResize.style, {
+    position: "absolute", right: "-8px", bottom: "-8px", width: "16px", height: "16px",
+    borderRadius: "50%", background: "#2ecc71", border: "2px solid #fff",
+    boxShadow: "0 1px 3px rgba(0,0,0,.4)", cursor: "nwse-resize"
+  });
+  kotak.appendChild(handleResize);
+
+  let modeAktif = null;
+  function gerak(ev) {
+    if (!modeAktif) return;
+    const dx = (ev.clientX - modeAktif.x0) * skala;
+    if (modeAktif.mode === "pindah") {
+      posisi.x = Math.round(modeAktif.ox + dx);
+      posisi.y = Math.round(modeAktif.oy + (ev.clientY - modeAktif.y0) * skala);
+    } else {
+      // Resize PROPORSIONAL mengikuti rasio asli gambar logo -- supaya
+      // logo yang diupload tidak gepeng/melar begitu diperbesar/perkecil.
+      posisi.lebar = Math.max(40, Math.round(modeAktif.ol + dx));
+      posisi.tinggi = Math.round(posisi.lebar * rasioLogo);
+    }
+    posisikanKotak();
+    gambarUlang();
+    onUbah();
+  }
+  function lepas() { modeAktif = null; }
+
+  kotak.addEventListener("pointerdown", function (ev) {
+    if (ev.target === handleResize) return;
+    modeAktif = { mode: "pindah", x0: ev.clientX, y0: ev.clientY, ox: posisi.x, oy: posisi.y };
+    kotak.setPointerCapture(ev.pointerId);
+  });
+  kotak.addEventListener("pointermove", gerak);
+  kotak.addEventListener("pointerup", lepas);
+  kotak.addEventListener("pointercancel", lepas);
+
+  handleResize.addEventListener("pointerdown", function (ev) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    modeAktif = { mode: "resize", x0: ev.clientX, ol: posisi.lebar };
+    handleResize.setPointerCapture(ev.pointerId);
+  });
+  handleResize.addEventListener("pointermove", gerak);
+  handleResize.addEventListener("pointerup", lepas);
+  handleResize.addEventListener("pointercancel", lepas);
+}
+
+function panelLogoSponsorHTML() {
+  return (
+    '<div class="form-shell" style="margin-bottom:20px;">' +
+      '<h3>🏷️ Logo Sponsor</h3>' +
+      '<p>SATU gambar logo sponsor (boleh gabungan beberapa logo jadi satu baris PNG) yang dipasang di <strong>Kartu Peserta, Kartu Peserta Futsal/Tim, dan Kartu Pendamping</strong> sekaligus -- TIDAK dipasang di Sertifikat. Latar di bawah cuma contoh (memakai template Kartu Peserta yang sedang aktif diatur, kalau ada) supaya mudah membayangkan posisinya.</p>' +
+      '<div class="field">' +
+        '<label>Logo Sponsor (PNG, latar transparan disarankan)</label>' +
+        '<input type="file" id="input-logo-sponsor" accept=".png,image/png" />' +
+      '</div>' +
+      '<button type="button" class="btn btn--ghost" id="btn-upload-logo-sponsor" style="margin-bottom:10px;">Upload/Ganti Logo</button>' +
+      '<div id="drag-wrap-logo-sponsor"></div>' +
+      '<p class="hint">Geser badan kotak untuk memindah posisi; seret bulatan hijau di pojok kanan-bawah untuk memperbesar/perkecil (rasio logo tetap terjaga, tidak gepeng).</p>' +
+      '<button type="button" class="btn btn--primary" id="btn-simpan-posisi-logo-sponsor" style="margin-top:6px;">Simpan Posisi &amp; Logo</button>' +
+      '<span class="hint" id="status-posisi-logo-sponsor" style="margin-left:10px;"></span>' +
+    '</div>'
+  );
+}
+
+function setupLogoSponsor(templatesSemua) {
+  if (!templatesSemua.logoSponsor) templatesSemua.logoSponsor = logoSponsorDefault();
+  const posisi = templatesSemua.logoSponsor;
+
+  // Latar contoh: ambil template Kartu Peserta (individu) kombinasi
+  // APA PUN yang sudah pernah diupload -- murni bantuan visual di editor
+  // ini, tidak mempengaruhi logo itu sendiri yang berlaku untuk ketiga
+  // jenis Kartu.
+  let templateContoh = null;
+  if (templatesSemua.peserta) {
+    const semuaKombo = Object.values(templatesSemua.peserta);
+    const adaUrl = semuaKombo.find(function (t) { return t && t.url; });
+    if (adaUrl) templateContoh = adaUrl.url;
+  }
+
+  const wrap = document.getElementById("drag-wrap-logo-sponsor");
+  buatEditorLogo(wrap, templateContoh, posisi.url, posisi, function () {});
+
+  document.getElementById("btn-upload-logo-sponsor").addEventListener("click", async function () {
+    const fileInput = document.getElementById("input-logo-sponsor");
+    const file = fileInput.files[0];
+    if (!file) { alert("Pilih file PNG dulu."); return; }
+    if (file.type !== "image/png") { alert("File harus berformat PNG."); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = "Mengunggah...";
+    const path = "kartu/logo-sponsor-" + Date.now() + ".png";
+    const { error: upErr } = await supabaseClient.storage.from("aset-situs").upload(path, file, { contentType: "image/png" });
+    btn.disabled = false;
+    btn.textContent = "Upload/Ganti Logo";
+    if (upErr) { alert("Gagal mengunggah: " + upErr.message); return; }
+
+    const { data: pub } = supabaseClient.storage.from("aset-situs").getPublicUrl(path);
+    posisi.url = pub.publicUrl;
+    // Logo BARU (beda rasio dari sebelumnya) -- hitung ulang tinggi dari
+    // lebar yang sudah/akan dipakai supaya langsung proporsional, bukan
+    // ikut rasio logo LAMA yang sudah diganti.
+    try {
+      const img = await muatGambar(pub.publicUrl);
+      if (img.naturalWidth && img.naturalHeight) {
+        posisi.tinggi = Math.round(posisi.lebar * (img.naturalHeight / img.naturalWidth));
+      }
+    } catch (e) { /* biarkan ukuran lama kalau gagal dimuat -- tetap bisa diatur manual */ }
+    const { error: updErr } = await simpanKartuTemplates(templatesSemua);
+    if (updErr) { alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message); return; }
+    buatEditorLogo(wrap, templateContoh, posisi.url, posisi, function () {});
+  });
+
+  document.getElementById("btn-simpan-posisi-logo-sponsor").addEventListener("click", async function () {
+    if (!posisi.url) { alert("Upload logo dulu sebelum menyimpan posisi."); return; }
+    const { error } = await simpanKartuTemplates(templatesSemua);
+    const statusEl = document.getElementById("status-posisi-logo-sponsor");
+    statusEl.textContent = error ? ("Gagal: " + error.message) : "Tersimpan.";
+    setTimeout(function () { statusEl.textContent = ""; }, 3000);
+  });
+}
+
 // ======================= PANEL "Kartu Peserta" & "Kartu Peserta Futsal/Tim" =======================
 // Keduanya per kombinasi Cabang Lomba x Jenis Kelamin -- lihat komentar di
 // bagian atas file ini.
@@ -3970,7 +4200,7 @@ function panelKartuPerLombaHTML(jenis, judul) {
   );
 }
 
-async function setupKartuPerLomba(jenis, fields, daftarLomba, templatesSemua) {
+async function setupKartuPerLomba(jenis, fields, daftarLomba, templatesSemua, logoAktif) {
   const panel = document.getElementById("panel-" + jenis);
   if (!daftarLomba || daftarLomba.length === 0) {
     panel.innerHTML += '<p class="hint" style="padding:0 20px 16px;">Belum ada cabang lomba ' +
@@ -4018,7 +4248,7 @@ async function setupKartuPerLomba(jenis, fields, daftarLomba, templatesSemua) {
     document.getElementById("status-kombo-" + jenis).textContent =
       url ? "Template sudah diunggah untuk kombinasi ini." : "Belum ada template untuk kombinasi ini -- upload dulu di bawah.";
 
-    buatEditorDrag(document.getElementById("drag-wrap-" + jenis), url, fields, layoutAktif, function () {});
+    buatEditorDrag(document.getElementById("drag-wrap-" + jenis), url, fields, layoutAktif, function () {}, { logo: logoAktif });
     renderRingkasanKombo();
   }
 
@@ -4087,13 +4317,13 @@ function panelKartuPendampingHTML() {
   );
 }
 
-function setupKartuPendamping(fields, templatesSemua) {
+function setupKartuPendamping(fields, templatesSemua, logoAktif) {
   if (!templatesSemua.pendamping) templatesSemua.pendamping = { url: null, layout: layoutDefaultBaru("pendamping", fields) };
   const layoutAktif = Object.assign(layoutDefaultBaru("pendamping", fields), templatesSemua.pendamping.layout || {});
   templatesSemua.pendamping.layout = layoutAktif;
 
   const wrap = document.getElementById("drag-wrap-pendamping");
-  buatEditorDrag(wrap, templatesSemua.pendamping.url, fields, layoutAktif, function () {});
+  buatEditorDrag(wrap, templatesSemua.pendamping.url, fields, layoutAktif, function () {}, { logo: logoAktif });
 
   document.getElementById("btn-upload-template-pendamping").addEventListener("click", async function () {
     const fileInput = document.getElementById("input-template-pendamping");
@@ -4114,7 +4344,7 @@ function setupKartuPendamping(fields, templatesSemua) {
     templatesSemua.pendamping.url = pub.publicUrl;
     const { error: updErr } = await simpanKartuTemplates(templatesSemua);
     if (updErr) { alert("Berkas terunggah tapi gagal menyimpan pengaturan: " + updErr.message); return; }
-    buatEditorDrag(wrap, pub.publicUrl, fields, layoutAktif, function () {});
+    buatEditorDrag(wrap, pub.publicUrl, fields, layoutAktif, function () {}, { logo: logoAktif });
   });
 
   document.getElementById("btn-simpan-posisi-pendamping").addEventListener("click", async function () {
@@ -4304,6 +4534,17 @@ async function cetakKartuPDF(jenis) {
     return cacheTemplate[kunci];
   }
 
+  // Logo Sponsor (BARU) -- dimuat SEKALI (kalau sudah diupload), dipasang
+  // di ketiga jenis Kartu ini (bukan Sertifikat, lihat cetakSertifikatPDF())
+  // lewat parameter `logo` baru di gambarKartu().
+  let logo = null;
+  if (templatesSemua.logoSponsor && templatesSemua.logoSponsor.url) {
+    try {
+      const logoImg = await muatGambar(templatesSemua.logoSponsor.url);
+      logo = Object.assign({ img: logoImg }, templatesSemua.logoSponsor);
+    } catch (e) { /* logo gagal dimuat -- kartu tetap dicetak tanpa logo */ }
+  }
+
   const canvas = document.createElement("canvas");
   const { jsPDF } = window.jspdf;
   // Satuan "cm" dipakai langsung (bukan "px") supaya ukuran fisik tiap
@@ -4346,7 +4587,7 @@ async function cetakKartuPDF(jenis) {
         alert("Gagal memuat gambar template untuk \"" + data._kunci + "\".");
         return;
       }
-      gambarKartu(canvas, tpl.img, tpl.layout, data, fields);
+      gambarKartu(canvas, tpl.img, tpl.layout, data, fields, null, null, logo);
       const imgData = canvas.toDataURL("image/png");
       const col = slot % 2, row = Math.floor(slot / 2);
       const x = marginX + col * (KARTU_LEBAR_CM + KARTU_GAP_CM);
@@ -4631,6 +4872,16 @@ async function cetakKartuTerpilihPDF(templatesSemua) {
     return cacheTemplate[cacheKey];
   }
 
+  // Logo Sponsor (BARU) -- ikut dipasang di hasil cetak ulang/susulan ini
+  // juga, konsisten dengan cetakKartuPDF() (sama-sama Kartu Peserta/Tim).
+  let logo = null;
+  if (templatesSemua.logoSponsor && templatesSemua.logoSponsor.url) {
+    try {
+      const logoImg = await muatGambar(templatesSemua.logoSponsor.url);
+      logo = Object.assign({ img: logoImg }, templatesSemua.logoSponsor);
+    } catch (e) { /* logo gagal dimuat -- kartu tetap dicetak tanpa logo */ }
+  }
+
   const canvas = document.createElement("canvas");
   const { jsPDF } = window.jspdf;
   // Grid 2x2 per lembar A4 portrait, jarak tipis & garis panduan hairline --
@@ -4662,7 +4913,7 @@ async function cetakKartuTerpilihPDF(templatesSemua) {
         return;
       }
       const fields = item.jenis === "pesertaTim" ? FIELD_PESERTA_TIM : FIELD_PESERTA;
-      gambarKartu(canvas, tpl.img, tpl.layout, item.data, fields);
+      gambarKartu(canvas, tpl.img, tpl.layout, item.data, fields, null, null, logo);
       const imgData = canvas.toDataURL("image/png");
       const col = slot % 2, row = Math.floor(slot / 2);
       const x = marginX + col * (KARTU_LEBAR_CM + KARTU_GAP_CM);
@@ -4701,6 +4952,28 @@ async function loadTabKartu() {
   if (!templatesSemua.pesertaTim) templatesSemua.pesertaTim = {};
   if (!templatesSemua.pendamping) templatesSemua.pendamping = { url: null, layout: {} };
   if (!templatesSemua.sertifikat) templatesSemua.sertifikat = { url: null, layout: {} };
+  if (!templatesSemua.logoSponsor) templatesSemua.logoSponsor = logoSponsorDefault();
+
+  // Logo sponsor (BARU) -- dimuat SEKALI di sini (kalau sudah diupload),
+  // dioper ke ketiga panel Kartu (bukan Sertifikat) supaya pratinjau
+  // WYSIWYG-nya ikut menampilkan logo, dan ke cetakKartuPDF()/
+  // cetakKartuTerpilihPDF() lewat parameter `logo` baru di gambarKartu().
+  let logoAktif = null;
+  if (templatesSemua.logoSponsor.url) {
+    try {
+      const logoImg = await muatGambar(templatesSemua.logoSponsor.url);
+      logoAktif = {
+        img: logoImg,
+        x: templatesSemua.logoSponsor.x,
+        y: templatesSemua.logoSponsor.y,
+        lebar: templatesSemua.logoSponsor.lebar,
+        tinggi: templatesSemua.logoSponsor.tinggi
+      };
+    } catch (e) {
+      // Gagal memuat logo (jaringan lambat/putus) -- kartu tetap bisa
+      // diatur/dicetak tanpa logo, cuma logo-nya tidak ikut tampil kali ini.
+    }
+  }
 
   const { data: rulesData } = await supabaseClient.from("lomba_rules").select("id,nama,tipe").order("urutan");
   const semuaLomba = rulesData || [];
@@ -4718,6 +4991,7 @@ async function loadTabKartu() {
     panelKartuPerLombaHTML("peserta", "Kartu Peserta (individu)") +
     panelKartuPerLombaHTML("pesertaTim", "Kartu Peserta Futsal/Tim") +
     panelKartuPendampingHTML() +
+    panelLogoSponsorHTML() +
     panelSertifikatHTML() +
     '<div class="form-shell" style="margin-top:20px;max-width:560px;">' +
       '<h3>Cetak Kartu &amp; Sertifikat</h3>' +
@@ -4735,9 +5009,10 @@ async function loadTabKartu() {
     '</div>' +
     panelCetakSusulanHTML(opsiLombaCetak);
 
-  await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua);
-  await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua);
-  setupKartuPendamping(FIELD_PENDAMPING, templatesSemua);
+  await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua, logoAktif);
+  await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua, logoAktif);
+  setupKartuPendamping(FIELD_PENDAMPING, templatesSemua, logoAktif);
+  setupLogoSponsor(templatesSemua);
   setupSertifikat(FIELD_SERTIFIKAT, templatesSemua);
   setupCetakSusulan(templatesSemua);
 
