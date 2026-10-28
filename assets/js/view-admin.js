@@ -3466,10 +3466,16 @@ const FIELD_PENDAMPING = [
 // pengaturan rata tengah di KARTU_FIELD_RATA_TENGAH (di bawah) untuk field
 // ini TIDAK ikut membuat field "lomba" milik Kartu Pendamping jadi rata
 // tengah juga (field itu sengaja dibiarkan rata kiri, lihat komentarnya).
+// `peserta` (BARU) -- label peran, isinya SELALU teks tetap "Peserta"
+// (bukan diambil dari data pendaftaran) -- diperlakukan sebagai field
+// biasa (bisa digeser/diubah ukurannya lewat editor) supaya posisinya
+// tetap diatur panitia sendiri, walau nilainya konstan untuk semua orang.
+// `nomor_pendaftaran` (DIHAPUS) -- permintaan panitia: nomor pendaftaran
+// tidak lagi ditampilkan di sertifikat.
 const FIELD_SERTIFIKAT = [
   { key: "nama", label: "Nama" },
-  { key: "lomba_sertifikat", label: "Cabang Lomba" },
-  { key: "nomor_pendaftaran", label: "Nomor Pendaftaran" }
+  { key: "peserta", label: "Peserta" },
+  { key: "lomba_sertifikat", label: "Cabang Lomba" }
 ];
 
 // Ukuran cetak KARTU PESERTA & KARTU PENDAMPING dibuat TETAP (bukan lagi
@@ -3533,9 +3539,9 @@ const DEFAULT_LAYOUT_KARTU = {
   // angkanya sengaja beda skala. Cuma titik awal, panitia tinggal menggeser
   // lewat editor sesuai desain templatenya sendiri.
   sertifikat: {
+    peserta: { x: 600, y: 900, font: 60, lebar: 2308 },
     nama: { x: 600, y: 1050, font: 140, lebar: 2308 },
-    lomba_sertifikat: { x: 600, y: 1260, font: 70, lebar: 2308 },
-    nomor_pendaftaran: { x: 600, y: 2300, font: 40, lebar: 2308 }
+    lomba_sertifikat: { x: 600, y: 1260, font: 70, lebar: 2308 }
   }
 };
 
@@ -3604,14 +3610,16 @@ const KARTU_FONT_MIN_RASIO = 0.55;
 
 // Field yang ditulis RATA TENGAH di dalam kotaknya (bukan rata kiri seperti
 // bawaan) -- permintaan panitia: Nama (dipakai field "peserta.nama" & juga
-// "pendamping.nama"), Nomor Pendaftaran, Nama Tim, dan Nama Anggota (dua
-// yang terakhir khusus Kartu Peserta Futsal/Tim). Field lain yang tidak
-// disebut di sini (Lomba di kartu Pendamping) TETAP rata kiri seperti
-// semula. "x" tetap berarti TEPI KIRI kotak (sama seperti sebelumnya,
-// dipakai editor drag-and-drop untuk menggeser) -- cuma titik gambar
-// teksnya yang dipindah ke tengah kotak lewat gambarTeksPasKotak() di
-// bawah.
-const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true, lomba_sertifikat: true };
+// "pendamping.nama"), Nomor Pendaftaran, Nama Tim, Nama Anggota (dua yang
+// terakhir khusus Kartu Peserta Futsal/Tim), dan label "Peserta" di
+// Sertifikat. Field lain yang tidak disebut di sini (Lomba di kartu
+// Pendamping, dan -- permintaan panitia -- Cabang Lomba di Sertifikat,
+// field "lomba_sertifikat") TETAP rata kiri seperti semula. "x" tetap
+// berarti TEPI KIRI kotak (sama seperti sebelumnya, dipakai editor
+// drag-and-drop untuk menggeser) -- cuma titik gambar teksnya yang
+// dipindah ke tengah kotak lewat gambarTeksPasKotak() di bawah, untuk
+// field yang disebut di sini.
+const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true, peserta: true };
 
 // Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
 // selebar `lebarMaks` px (satuan kanvas cetak, KARTU_LEBAR_PX) -- permintaan
@@ -4370,6 +4378,15 @@ async function cetakKartuPDF(jenis) {
   statusEl.textContent = "Selesai — " + daftarData.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
+// Nama cabang lomba di `lomba_rules.nama` selalu diawali kata "Lomba "
+// (mis. "Lomba Adzan", "Lomba MHQ (Musabaqah Hifzhil Qur'an)") -- dibuang
+// KHUSUS untuk tampilan di Sertifikat (permintaan panitia), TIDAK mengubah
+// data aslinya di database maupun tampilan di tempat lain (Kartu, Data
+// Pendaftar, dst. tetap menampilkan nama lomba lengkap seperti biasa).
+function singkatNamaLomba(nama) {
+  return (nama || "").replace(/^lomba\s+/i, "").trim();
+}
+
 // ======================= CETAK SERTIFIKAT (PDF, BARU) =======================
 // Mencetak SATU sertifikat PER HALAMAN A4 landscape (beda dari Kartu yang
 // 4-per-halaman) untuk peserta INDIVIDU dan tiap ANGGOTA tim (status
@@ -4396,17 +4413,20 @@ async function cetakSertifikatPDF() {
 
   // SATU sertifikat per peserta individu, DAN satu sertifikat per ANGGOTA
   // tim (bukan satu per tim) -- pola yang sama dengan Kartu Peserta
-  // Futsal/Tim (cetakKartuPDF, jenis "pesertaTim").
+  // Futsal/Tim (cetakKartuPDF, jenis "pesertaTim"). "peserta" (label peran)
+  // SELALU "Peserta" untuk semua -- permintaan panitia, "lomba_sertifikat"
+  // sudah lewat singkatNamaLomba() untuk membuang kata "Lomba" di depan
+  // nama cabangnya (lihat definisi fungsi itu).
   const daftarData = [];
   rows.filter(function (r) { return r.tipe !== "tim"; }).forEach(function (r) {
-    daftarData.push({ nama: r.nama_lengkap, lomba_sertifikat: r.lomba_nama, nomor_pendaftaran: r.nomor_pendaftaran });
+    daftarData.push({ nama: r.nama_lengkap, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(r.lomba_nama) });
   });
   for (const r of rows.filter(function (r) { return r.tipe === "tim"; })) {
     const { data: anggota, error: errAnggota } = await supabaseClient
       .from("anggota_tim").select("nama").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
     if (errAnggota) { alert("Gagal memuat anggota tim \"" + r.nama_tim + "\": " + errAnggota.message); return; }
     (anggota || []).forEach(function (a) {
-      daftarData.push({ nama: a.nama, lomba_sertifikat: r.lomba_nama, nomor_pendaftaran: r.nomor_pendaftaran });
+      daftarData.push({ nama: a.nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(r.lomba_nama) });
     });
   }
 
