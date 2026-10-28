@@ -122,10 +122,16 @@ function renderUnduhSertifikatPublik(root, data) {
       const templateImg = await muatGambar(templatesSemua.sertifikat.url);
       const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
 
+      // Field "peserta" (label peran) SELALU "Peserta" untuk semua -- sama
+      // seperti cetakSertifikatPDF() di view-admin.js. "lomba_sertifikat"
+      // dilewatkan dulu ke singkatNamaLomba() (global, didefinisikan di
+      // view-admin.js) untuk membuang kata "Lomba" di depan nama cabangnya,
+      // supaya hasilnya identik dengan sertifikat yang dicetak massal
+      // panitia. Field "nomor_pendaftaran" sudah DIHAPUS dari Sertifikat.
       const canvas = document.createElement("canvas");
       gambarKartu(
         canvas, templateImg, layout,
-        { nama: data.nama, lomba_sertifikat: data.lomba, nomor_pendaftaran: data.nomor_pendaftaran },
+        { nama: data.nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(data.lomba) },
         FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
       );
 
