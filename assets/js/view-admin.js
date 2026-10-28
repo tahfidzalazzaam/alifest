@@ -4426,9 +4426,22 @@ function setupSertifikat(fields, templatesSemua) {
   });
 }
 
+// Dipakai untuk menyusun NAMA FILE PDF yang diunduh (kartu & cetak
+// ulang/susulan) -- supaya namanya ikut mencerminkan Cabang Lomba yang
+// sedang difilter saat tombol cetak ditekan (permintaan panitia),
+// bukan cuma nama generik yang sama terus setiap kali diunduh. Dibuang
+// karakter selain huruf/angka, diganti "-", dirapatkan & dipotong
+// tanda hubung di ujung -- "Semua Lomba" (tidak difilter) otomatis jadi
+// "semua-lomba" lewat jalur yang sama, tidak perlu kasus khusus.
+function slugUntukNamaFile(teks) {
+  return (teks || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "lomba";
+}
+
 async function cetakKartuPDF(jenis) {
   const statusEl = document.getElementById("cetak-status");
-  const lombaFilter = document.getElementById("cetak-filter-lomba").value;
+  const selLombaCetak = document.getElementById("cetak-filter-lomba");
+  const lombaFilter = selLombaCetak.value;
+  const lombaSlug = slugUntukNamaFile(selLombaCetak.selectedOptions[0].textContent);
 
   const templatesSemua = await ambilKartuTemplates();
   const fields = jenis === "pendamping" ? FIELD_PENDAMPING : (jenis === "pesertaTim" ? FIELD_PESERTA_TIM : FIELD_PESERTA);
@@ -4615,7 +4628,7 @@ async function cetakKartuPDF(jenis) {
     doc.setLineWidth(0.2); // kembalikan ke bawaan jsPDF, jaga-jaga kalau ada gambar lain setelah ini di versi mendatang
   }
 
-  doc.save("kartu-" + jenis + "-alif5.pdf");
+  doc.save("kartu-" + jenis + "-" + lombaSlug + "-alif5.pdf");
   statusEl.textContent = "Selesai — " + daftarData.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
@@ -4720,6 +4733,12 @@ async function cetakSertifikatPDF() {
 // `data` (siap dioper ke gambarKartu()), `kunci` (kombinasi lomba+gender
 // untuk memilih template yang cocok), dan `dipilih` (diisi checkbox).
 let _susulanItems = [];
+// Cabang Lomba yang sedang difilter saat "Muat Daftar Peserta" terakhir
+// ditekan -- dipakai HANYA untuk nama file PDF-nya (lihat slugUntukNamaFile()
+// & cetakKartuTerpilihPDF()), supaya konsisten dengan tombol cetak massal
+// di atasnya walau daftar terpilih di sini bisa saja dicentang lewat
+// beberapa kali muat ulang dengan filter yang beda-beda.
+let _susulanLombaSlug = "semua-lomba";
 
 function panelCetakSusulanHTML(opsiLombaCetak) {
   return (
@@ -4786,7 +4805,9 @@ function setupCetakSusulan(templatesSemua) {
     btn.textContent = "Memuat...";
     document.getElementById("susulan-status").textContent = "";
 
-    const lombaFilter = document.getElementById("susulan-filter-lomba").value;
+    const selLombaSusulan = document.getElementById("susulan-filter-lomba");
+    const lombaFilter = selLombaSusulan.value;
+    _susulanLombaSlug = slugUntukNamaFile(selLombaSusulan.selectedOptions[0].textContent);
     let query = supabaseClient.from("pendaftaran").select("*").eq("status", "Diterima");
     if (lombaFilter) query = query.eq("lomba_id", lombaFilter);
     const { data: rows, error } = await query;
@@ -4932,7 +4953,7 @@ async function cetakKartuTerpilihPDF(templatesSemua) {
     doc.setLineWidth(0.2);
   }
 
-  doc.save("kartu-susulan-alif5.pdf");
+  doc.save("kartu-susulan-" + _susulanLombaSlug + "-alif5.pdf");
   statusEl.textContent = "Selesai — " + terpilih.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
