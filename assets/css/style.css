@@ -1537,6 +1537,22 @@ tr.row-clickable:hover { background: var(--green-100); }
 .modal-table--edit input[type="date"] { min-width: 60px; }
 .modal-table--edit input[type="number"] { min-width: 40px; }
 .modal-table--edit .edit-anggota-nama { min-width: 80px; }
+/* Tombol "x" pembatal baris (kolom terakhir, kosong di header) -- hanya
+   relevan untuk membatalkan baris BARU yang belum disimpan (lewat tombol
+   "+ Tambah Anggota", lihat bukaModalTimEdit() di view-admin.js); boleh juga
+   dipakai di baris lama tapi hanya menghapus tampilannya di form ini, TIDAK
+   menghapus data anggota di database (sengaja -- menghapus anggota lama
+   tetap harus lewat cara lain, bukan form edit ini). */
+.btn-hapus-baris-anggota {
+  background: none;
+  border: none;
+  color: var(--danger, #c23a2e);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.btn-hapus-baris-anggota:hover { color: #8f2a20; }
 /* Pegangan tarik-lebar kolom (ditambahkan lewat JS, satu per th kecuali
    kolom terakhir) -- strip tipis transparan di tepi kanan th, menyala hijau
    tipis saat disentuh/diseret supaya terlihat bisa ditarik. */
