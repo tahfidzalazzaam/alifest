@@ -1511,19 +1511,69 @@ tr.row-clickable:hover { background: var(--green-100); }
 /* Tabel Anggota Tim di mode EDIT (bukaModalTimEdit(), class tambahan
    ".modal-table--edit") berisi <input> per sel (bukan teks biasa seperti
    versi tampilan READ-ONLY di popup Detail biasa) -- di dalam ".detail-panel"
-   yang sengaja dibuat SEMPIT (docked kanan, lebar cuma 460px), 6 kolom input
-   nyaris selalu butuh lebih lebar dari itu. Sebelumnya tiap <input> ikut
-   "width:100%" bawaan (lihat aturan global di atas) lalu dipaksa menyempit
-   mengikuti lebar panel -- kolom Nama (permintaan panitia) jadi nyaris tidak
-   terlihat/kepotong begitu form edit dibuka. Sekarang tabelnya dikasih lebar
-   MINIMUM yang cukup lega untuk semua kolom; tabel itu sendiri yang melebar
-   ke luar panel dan di-scroll ke samping lewat ".table-wrap" (sudah
-   "overflow-x:auto") kalau perlu, bukan tiap kolom yang dipaksa menyempit. */
-.modal-table--edit { min-width: 640px; }
+   yang sengaja dibuat SEMPIT (docked kanan). Sebelumnya tiap <input> ikut
+   "width:100%" + padding BESAR bawaan (lihat aturan global input di atas)
+   jadi kolom Nama kepotong. Sekarang dibuat lebih RINGKAS (padding & huruf
+   lebih kecil daripada input form biasa) supaya lebih banyak kolom tertampung
+   tanpa terlalu sempit, DAN tiap kolom bisa DITARIK LEBARNYA SENDIRI secara
+   manual lewat pegangan tipis di tepi kanan tiap th (lihat
+   buatKolomBisaDitarik() di view-admin.js, dipasang sekali tiap tabel ini
+   dirender) -- `table-layout:fixed` dipasang oleh JS itu sendiri begitu
+   pegangan-pegangan itu dipasang, supaya lebar yang diseret manual benar2
+   dipatuhi oleh browser (table-layout "auto" bawaan akan mengabaikan/
+   menimpa lebar kolom yang diatur manual). Kalau total lebar kolom
+   melebihi lebar panel, tabelnya di-scroll ke samping lewat ".table-wrap"
+   (sudah "overflow-x:auto"), bukan dipaksa menyempit lagi. */
+.modal-table--edit { font-size: 0.74rem; }
+.modal-table--edit th, .modal-table--edit td { padding: 4px 6px; position: relative; }
 .modal-table--edit input[type="text"],
-.modal-table--edit input[type="date"] { min-width: 110px; }
-.modal-table--edit input[type="number"] { min-width: 64px; }
-.modal-table--edit .edit-anggota-nama { min-width: 150px; }
+.modal-table--edit input[type="date"],
+.modal-table--edit input[type="number"] {
+  padding: 4px 6px;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+.modal-table--edit input[type="text"],
+.modal-table--edit input[type="date"] { min-width: 60px; }
+.modal-table--edit input[type="number"] { min-width: 40px; }
+.modal-table--edit .edit-anggota-nama { min-width: 80px; }
+/* Pegangan tarik-lebar kolom (ditambahkan lewat JS, satu per th kecuali
+   kolom terakhir) -- strip tipis transparan di tepi kanan th, menyala hijau
+   tipis saat disentuh/diseret supaya terlihat bisa ditarik. */
+.th-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+}
+.th-resize-handle:hover,
+.th-resize-handle.is-dragging { background: rgba(23, 145, 74, 0.35); }
+
+/* Panel Detail bisa dilebarkan manual (permintaan panitia) -- pegangan
+   tipis vertikal di tepi KIRI panel (lihat pasangResizeDetailPanel() di
+   view-admin.js). ".detail-panel" sudah "position:fixed" jadi pegangan ini
+   (absolute) terpatok relatif terhadapnya. */
+.detail-panel__resize-handle {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 10;
+  touch-action: none;
+}
+.detail-panel__resize-handle:hover,
+.detail-panel__resize-handle.is-dragging { background: rgba(23, 145, 74, 0.25); }
+@media (max-width: 640px) {
+  /* Layar sempit: panel sudah dipaksa 100vw (lihat media query di bawah),
+     jadi pegangan resize tidak ada gunanya -- disembunyikan. */
+  .detail-panel__resize-handle { display: none; }
+}
 
 /* ==========================================================================
    TAMPILAN MOBILE (≤640px)
