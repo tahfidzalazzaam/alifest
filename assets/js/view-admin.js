@@ -1019,7 +1019,7 @@ async function bukaModalTimEdit(row, rule) {
     '</div>' +
     '<p class="modal-section-title" style="margin-top:18px;">Anggota Tim</p>' +
     '<p class="hint">Menambah/menghapus anggota tidak bisa lewat form ini -- hanya membetulkan data anggota yang sudah ada.</p>' +
-    '<div class="table-wrap"><table class="admin-table modal-table"><thead><tr><th>#</th><th>Nama</th><th>Tempat Lahir</th><th>Tanggal Lahir</th><th>Kelas</th><th>No. Punggung</th></tr></thead><tbody>' +
+    '<div class="table-wrap"><table class="admin-table modal-table modal-table--edit"><thead><tr><th>#</th><th>Nama</th><th>Tempat Lahir</th><th>Tanggal Lahir</th><th>Kelas</th><th>No. Punggung</th></tr></thead><tbody>' +
     (anggota && anggota.length ? anggota.map(function (a, i) {
       return '<tr data-anggota-id="' + escapeHTML(a.id) + '">' +
         '<td>' + (i + 1) + '</td>' +
