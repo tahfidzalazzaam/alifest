@@ -1743,7 +1743,7 @@ async function loadTabPendaftar() {
       return (
         '<tr class="row-clickable ' + kelasBarisStatusLomba(r.status) + '" data-id="' + r.id + '">' +
           '<td>' + r.nomor_pendaftaran + '</td>' +
-          '<td class="col-truncate" title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + (r.tipe === "tim" ? "TIM" : (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-")) + '</span> <span class="lp-badge">ketuk untuk detail</span></td>' +
+          '<td title="' + r.nama_lengkap + '">' + r.nama_lengkap + ' <span class="lp-badge">' + (r.tipe === "tim" ? "TIM" : (r.jenis_kelamin === "perempuan" ? "P" : r.jenis_kelamin === "laki-laki" ? "L" : "-")) + '</span> <span class="lp-badge">ketuk untuk detail</span></td>' +
           '<td>' + r.lomba_nama + '</td>' +
           '<td class="col-status">' + pilStatusLombaHTML(r.status) + (r.wa_terkirim ? ' <span class="hint" title="Tombol Kirim WA sudah diklik untuk status saat ini">✅</span>' : '') + '</td>' +
           '<td><button type="button" class="btn-remove btn-hapus-pendaftar" data-id="' + r.id + '">Hapus</button></td>' +
