@@ -248,41 +248,6 @@ img { max-width: 100%; display: block; }
 .btn--ghost:hover { border-color: var(--green-500); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-/* Countdown mundur sampai tanggal tutup pendaftaran (migrasi 0022) --
-   di Beranda ditampilkan di atas judul "Cabang lomba" (section #lomba),
-   TERUS tampil selama tanggal tutupnya sudah diisi & belum lewat, tidak
-   peduli status pendaftaran sekarang dibuka/ditutup -- lihat komentar di
-   muatTombolJuknis() (view-beranda.js). Juga dipakai halaman Daftar
-   (form-header). Sengaja dibuat cukup mencolok (border tebal, angka besar)
-   tapi tidak seagresif badge "Kuota Penuh", karena ini sekadar info waktu,
-   bukan peringatan. */
-.countdown-tutup {
-  width: fit-content;
-  margin: 14px auto 28px;
-  background: var(--green-900);
-  color: #fff;
-  text-align: center;
-  padding: 12px 24px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-.countdown-tutup__label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  opacity: 0.85;
-}
-.countdown-tutup__waktu {
-  font-family: var(--font-display);
-  font-size: 1.3rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
 .hero__stats {
   display: flex;
   justify-content: center;
@@ -311,33 +276,12 @@ img { max-width: 100%; display: block; }
   gap: 26px;
 }
 .lomba-card {
-  position: relative;
   background: var(--white);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-.lomba-card--penuh { opacity: 0.9; }
-/* Pita besar "Kuota Penuh" di pojok kartu lomba (Beranda) -- sengaja dibuat
-   mencolok (merah, huruf besar, diagonal) supaya langsung terlihat tanpa
-   perlu membaca detail kuota per jenjang di bawahnya. */
-.lomba-card__ribbon-penuh {
-  position: absolute;
-  top: 20px;
-  right: -38px;
-  transform: rotate(40deg);
-  background: var(--danger);
-  color: #fff;
-  font-weight: 800;
-  font-size: 0.8rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 6px 44px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  z-index: 2;
-  pointer-events: none;
 }
 .lomba-card__main { padding: 28px 26px 22px; }
 .lomba-card__icon {
@@ -523,10 +467,7 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: var(--radius-md);
   padding: 14px 16px;
 }
-/* Kartu lomba yang penuh TIDAK dibuat transparan/pudar -- badge merah "Kuota
-   Penuh" justru harus tetap mencolok, bukan ikut memudar. Cuma teks
-   deskripsinya (bukan seluruh kartu) yang sedikit diredupkan. */
-.lomba-choice.is-disabled .lomba-choice__text { opacity: 0.55; }
+.lomba-choice.is-disabled { opacity: 0.5; }
 .lomba-choice input[type="radio"] { position: absolute; opacity: 0; }
 .lomba-choice label {
   display: flex;
@@ -549,23 +490,6 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--danger);
   text-align: right;
 }
-/* Badge besar "Kuota Penuh" pada kartu pilihan lomba (Langkah 1, halaman
-   Daftar) -- sengaja dibuat mencolok (pil merah solid, huruf kapital tebal)
-   supaya jelas terlihat di antara pilihan lomba lainnya, bukan cuma teks
-   kecil biasa. */
-.badge-penuh {
-  display: inline-block;
-  background: var(--danger);
-  color: #fff;
-  font-weight: 800;
-  font-size: 0.78rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: 999px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-.lomba-choice.is-penuh { border-color: var(--danger); }
 
 .notice {
   background: var(--yellow-100);
@@ -587,26 +511,10 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--danger);
 }
 
-/* Anggota tim (futsal): Nama, Tempat Lahir, Tanggal Lahir (+ usia), Kelas, tombol hapus */
+/* Anggota tim (futsal) */
 .anggota-list { display: grid; gap: 10px; margin-bottom: 10px; }
-.anggota-row { display: grid; grid-template-columns: 1.1fr 0.9fr 1.1fr 0.7fr auto; gap: 10px; align-items: center; }
-/* Futsal: baris anggota punya kolom tambahan "No. Punggung" (opsional) */
-.anggota-row--futsal { grid-template-columns: 1.1fr 0.9fr 1.1fr 0.7fr 0.6fr auto; }
-.anggota-punggung { width: 100%; }
-.anggota-tgl-wrap { display: flex; align-items: center; gap: 6px; }
-.anggota-tgl-wrap .anggota-tgl { width: 100%; }
-.anggota-usia { font-size: 0.72rem; color: var(--ink-400); white-space: nowrap; }
-.anggota-usia--error { color: var(--danger); font-weight: 700; }
-@media (max-width: 700px) { .anggota-row { grid-template-columns: 1fr; } }
-
-/* Chip kuota pada kartu pilihan lomba (Langkah 1, halaman Daftar) —
-   ditampilkan gamblang per jenjang & gender, bukan satu angka ambigu. */
-.kuota-chip {
-  display: block;
-  margin-top: 3px;
-  font-size: 0.76rem;
-  color: var(--green-700);
-}
+.anggota-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; }
+@media (max-width: 560px) { .anggota-row { grid-template-columns: 1fr; } }
 .btn-remove {
   background: none;
   border: 1.5px solid #e3e0d3;
@@ -668,89 +576,6 @@ textarea { resize: vertical; min-height: 80px; }
 .field.has-error .form-error { display: block; }
 
 .submit-row { text-align: center; margin-top: 8px; }
-
-/* ---------- Wizard bertahap (form Daftar Bazar, migrasi 0042) --------------
-   4 "kartu geser": tiap langkah adalah satu panel selebar penuh di dalam
-   ".wizard-viewport" (overflow:hidden), semuanya diletakkan sejajar di
-   dalam ".wizard-track" (display:flex) yang digeser lewat `transform:
-   translateX(-N * 100%)` oleh JS (view-daftarbazar.js) -- itulah "geser ke
-   samping" antar langkah yang diminta, bukan cuma show/hide fieldset biasa.
-   Indikator langkah di atas (".wizard-steps") pakai lingkaran bernomor,
-   BUKAN posisi absolute (sumber umum masalah "nabrak"/tumpang-tindih di
-   layar sempit) -- murni flexbox dengan `min-width:0` di tiap langkah
-   supaya teksnya boleh terpotong/mengecil di HP tanpa mendorong ke luar. */
-.wizard-steps {
-  display: flex;
-  margin-bottom: 30px;
-  gap: 4px;
-}
-.wizard-step {
-  flex: 1 1 0;
-  min-width: 0;
-  text-align: center;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--ink-400);
-}
-.wizard-step__dot {
-  width: 28px;
-  height: 28px;
-  line-height: 28px;
-  border-radius: 50%;
-  background: #e3e0d3;
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.85rem;
-  margin: 0 auto 6px;
-  transition: background 0.2s ease;
-}
-.wizard-step__label {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 2px;
-}
-.wizard-step.is-active { color: var(--green-700); }
-.wizard-step.is-active .wizard-step__dot { background: var(--green-600); }
-.wizard-step.is-done .wizard-step__dot { background: var(--green-500); }
-
-.wizard-viewport { overflow: hidden; }
-.wizard-track {
-  display: flex;
-  transition: transform 0.32s ease;
-}
-.wizard-pane {
-  flex: 0 0 100%;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.wizard-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 28px;
-  flex-wrap: wrap;
-}
-.wizard-nav__spacer { flex: 1 1 auto; }
-
-.wizard-ringkasan {
-  background: var(--green-100);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  font-size: 0.86rem;
-  color: var(--green-900);
-  margin-bottom: 18px;
-}
-.wizard-ringkasan strong { display: block; margin-bottom: 2px; }
-
-@media (max-width: 560px) {
-  .wizard-step__dot { width: 24px; height: 24px; line-height: 24px; font-size: 0.76rem; }
-  .wizard-step__label { font-size: 0.66rem; }
-  .wizard-nav .btn { flex: 1 1 auto; }
-}
 .submit-row .btn { width: 100%; justify-content: center; }
 
 /* Hasil kirim */
@@ -774,15 +599,6 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* ---------- Halaman Panitia ---------- */
 .admin-page { padding: 40px 0 80px; }
-/* Panel Panitia (Lomba `/admin` & Bazar `/adminbazar`) dibuat lebih LEBAR
-   dari halaman publik biasa -- aslinya ikut ".container" (max-width 1080px)
-   yang dirancang untuk halaman publik berisi teks/kartu, jadi di monitor
-   lebar tabel data pendaftar/tenant yang banyak kolom terasa sempit dengan
-   jarak kosong longgar di kiri-kanan. Override cuma untuk kombinasi class
-   ".admin-page.container" (keduanya SELALU dipasang bersamaan di
-   view-admin.js & view-adminbazar.js) supaya ".container" sendiri yang
-   dipakai halaman publik lain tidak ikut berubah. */
-.admin-page.container { max-width: 1400px; }
 
 .admin-login { max-width: 420px; margin: 0 auto; }
 .admin-login h1 { font-size: 1.6rem; }
@@ -797,33 +613,6 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .admin-header h1 { font-size: 1.6rem; margin-bottom: 4px; }
 .admin-header p { margin: 0; font-size: 0.88rem; }
-
-/* Kotak ringkas "Tutup Otomatis Pendaftaran" -- sejak pembaruan ini letaknya
-   dipindah ke paling bawah tab "Kelola Lomba" (bukan lagi kotak besar yang
-   tampil di SEMUA tab panel Panitia seperti sebelumnya), dan dibuat sekecil/
-   sesingkat mungkin: satu baris kecil, bukan kotak berwarna besar. */
-.tutup-otomatis-ringkas {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 28px;
-  padding-top: 14px;
-  border-top: 1px dashed #d8d4c4;
-  font-size: 0.82rem;
-}
-.tutup-otomatis-ringkas__label { font-weight: 600; color: var(--ink-400); }
-.tutup-otomatis-ringkas input[type="datetime-local"] {
-  width: auto;
-  min-width: 190px;
-  padding: 5px 8px;
-  font-size: 0.82rem;
-}
-.tutup-otomatis-ringkas #status-tanggal-tutup {
-  margin: 0;
-  flex-basis: 100%;
-  font-size: 0.8rem;
-}
 
 .admin-tabs {
   display: flex;
@@ -884,61 +673,6 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .rekap-card__gender { font-size: 0.72rem; color: var(--ink-400); margin-top: 2px; }
 
-/* Rekap Total Pendapatan (tab "Data Tenant" bazar) — kotak ringkasan uang
-   masuk, terpisah dari .rekap-grid kartu jumlah di atasnya supaya angka
-   uang (yang paling penting buat bendahara/panitia) tidak tenggelam di
-   antara kartu jumlah tenant biasa. */
-.pendapatan-bazar-box {
-  background: var(--white);
-  border: 1.5px solid #e3e0d3;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
-  padding: 16px 18px;
-  margin-bottom: 18px;
-}
-.pendapatan-bazar-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid #f0eee4;
-}
-.pendapatan-bazar-label {
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--ink-600);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  margin-bottom: 2px;
-}
-.pendapatan-bazar-total {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.7rem;
-  color: var(--green-900);
-  line-height: 1.15;
-}
-.pendapatan-bazar-total--kecil { font-size: 1.15rem; color: var(--ink-600); }
-.pendapatan-bazar-sisa { text-align: right; }
-.pendapatan-bazar-rincian { display: flex; flex-direction: column; gap: 8px; }
-.pendapatan-bazar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  font-size: 0.8rem;
-}
-.pendapatan-bazar-row__label { font-weight: 600; color: var(--ink-900); min-width: 150px; }
-.pendapatan-bazar-row__detail { color: var(--ink-400); flex: 1; }
-.pendapatan-bazar-row__subtotal { font-weight: 700; color: var(--green-700); }
-@media (max-width: 640px) {
-  .pendapatan-bazar-sisa { text-align: left; }
-  .pendapatan-bazar-row__label { min-width: 100%; }
-}
-
 .admin-filters {
   display: flex;
   gap: 10px;
@@ -981,158 +715,15 @@ textarea { resize: vertical; min-height: 80px; }
   border-radius: var(--radius-sm);
   border: 1.5px solid #e3e0d3;
   font-size: 0.74rem;
-  /* Lebar minimum supaya status terpanjang ("Perlu Tambah Nomor Punggung")
-     tidak kepotong/kepepet -- sebelumnya lebar dropdown cuma mengikuti
-     teks OPSI YANG SEDANG TERPILIH jadi kolomnya ikut menyempit begitu
-     statusnya pendek ("Lunas", "Diterima"), lalu kepotong lagi begitu
-     diganti ke status yang teksnya lebih panjang. */
-  min-width: 190px;
-  width: 100%;
 }
-/* Kolom Status di TABEL (dilebarkan atas permintaan panitia -- dulu sempit/
-   kepotong karena ikut lebar dropdown-nya saja) -- dipasang di <th> & <td>
-   sekaligus supaya lebar kolomnya konsisten dari baris header sampai baris
-   data. Sekarang isinya cuma pil status BACA-SAJA (lihat pilStatusLombaHTML()
-   di view-admin.js) -- dropdown untuk MENGUBAH status sudah dipindah ke
-   dalam popup detail (".status-select" di atas), jadi lebar minimumnya
-   diturunkan sedikit dari sebelumnya (cukup untuk pil terpanjang, tidak
-   perlu selebar dropdown lagi). */
-.admin-table th.col-status, .admin-table td.col-status {
-  min-width: 170px;
-}
-/* Kolom Status tabel "Data Tenant" Bazar (lihat renderBarisBazar() di
-   view-adminbazar.js) menampung DUA pil berdampingan (Status Pembayaran +
-   Status Pendaftaran, keduanya cuma tampilan baca-saja sejak tabelnya
-   diringkas) -- ".status-pill" sudah "display: inline-block" (lihat di
-   bawah), jadi dua pil yang dipisah spasi di markup akan membungkus sendiri
-   ke baris baru kalau kolomnya sempit, tanpa perlu mengubah "display" sel
-   tabelnya sendiri (mengubah itu berisiko merusak perataan lebar kolom
-   tabel bawaan browser).
-*/
-/* Kolom yang bisa panjang (nama, sekolah) dipotong dengan "..." — teks
-   lengkapnya muncul lewat tooltip (atribut title) saat kursor diarahkan. */
-.admin-table td.col-truncate {
-  max-width: 110px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Warna SELURUH BARIS menyesuaikan status pendaftaran -- dipasang lewat
-   class tambahan di <tr> (lihat kelasBarisStatusLomba() di view-admin.js &
-   kelasBarisStatusBazar() di view-adminbazar.js), BUKAN cuma mewarnai
-   kolom/dropdown status saja -- supaya status tiap baris langsung kelihatan
-   sekilas pandang tanpa perlu membaca teks dropdownnya satu-satu, sama di
-   tabel Data Pendaftar (Lomba) maupun Data Tenant (Bazar). Warna dipasang
-   di tiap <td> (bukan cuma di <tr>) mengikuti pola ".anggota-detail" yang
-   sudah ada supaya konsisten tercat di semua browser (background di <tr>
-   saja tidak selalu ikut tercat di balik border <td> collapse). */
-.admin-table tr.status-row--pending td { background: #fdf6e3; }
-.admin-table tr.status-row--warn td { background: #fde7cf; }
-.admin-table tr.status-row--success td { background: var(--green-100); }
-.admin-table tr.status-row--danger td { background: rgba(194, 58, 46, 0.1); }
-/* Dropdown status & tombol di dalam baris berwarna tetap diberi latar putih
-   sendiri supaya kontras & jelas bisa diklik, tidak "tenggelam" ke warna
-   baris di belakangnya. */
-.admin-table tr.status-row--pending select.status-select,
-.admin-table tr.status-row--warn select.status-select,
-.admin-table tr.status-row--success select.status-select,
-.admin-table tr.status-row--danger select.status-select { background: var(--white); }
-/* Hover (baris yang bisa diketuk untuk detail) tetap kelihatan walau
-   barisnya sudah berwarna -- warna hover sengaja dibuat sedikit LEBIH GELAP
-   dari warna status-nya sendiri (bukan hijau generik) supaya tidak terlihat
-   seperti status berubah saat kursor cuma lewat. */
-.admin-table tr.row-clickable.status-row--pending:hover td { background: #faeec0; }
-.admin-table tr.row-clickable.status-row--warn:hover td { background: #fbdcb3; }
-.admin-table tr.row-clickable.status-row--success:hover td { background: #d3ebda; }
-.admin-table tr.row-clickable.status-row--danger:hover td { background: rgba(194, 58, 46, 0.18); }
-/* ---------- Stepper jumlah pesanan ala GoFood/GrabFood (tombol bundar
-   minus/plus + angka besar di tengah) -- dipakai Langkah 2 form
-   /daftar-bazar (#bazar-jumlah-wrap) untuk menentukan jumlah stand yang
-   dipesan, pengganti dropdown <select> yang lama. ---------- */
-.qty-stepper {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-  background: var(--white);
-  border: 1.5px solid #e3e0d3;
-  border-radius: 999px;
-  padding: 6px 10px;
-}
-.qty-stepper__btn {
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  border: none;
-  background: var(--green-600);
-  color: var(--white);
-  font-family: var(--font-display);
-  font-size: 1.3rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s ease, transform 0.08s ease;
-}
-.qty-stepper__btn:hover:not(:disabled) { background: var(--green-700); }
-.qty-stepper__btn:active:not(:disabled) { transform: scale(0.9); }
-.qty-stepper__btn:disabled { background: #d8d4c4; cursor: not-allowed; }
-.qty-stepper__value {
-  min-width: 36px;
-  text-align: center;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.3rem;
-  color: var(--ink-900);
-}
-
-/* ---------- Chip list (dipakai halaman info Bazar untuk daftar kategori
-   stand, murni tampilan read-only -- bukan pilihan form) ---------- */
-.chip-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  background: var(--green-100);
-  color: var(--green-700);
-  font-weight: 700;
-  font-size: 0.85rem;
-  padding: 8px 16px;
-  border-radius: 999px;
-}
-
-/* ---------- Video embed responsif (dipakai Beranda untuk video dokumentasi
-   tahun lalu, lihat view-beranda.js) ---------- */
-.video-embed {
-  position: relative;
-  width: 100%;
-  padding-top: 56.25%; /* rasio 16:9 */
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-card);
-  background: #000;
-}
-.video-embed iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-/* ---------- Kartu navigasi di Beranda (link ke halaman Lomba/Bazar) --
-   dipakai lewat <a class="lomba-card"> -- reuse tampilan kartu lomba yang
-   sudah ada, tambah efek hover + hilangkan garis bawah tautan. ---------- */
-a.lomba-card { text-decoration: none; color: inherit; transition: transform 0.15s ease, box-shadow 0.15s ease; }
-a.lomba-card:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(15, 61, 34, 0.18); }
-.lomba-card__cta {
-  display: inline-block;
-  margin-top: 14px;
-  font-weight: 700;
-  font-size: 0.88rem;
-  color: var(--green-700);
-}
-
+/* `.col-truncate` (kolom Nama di tabel Data Pendaftar) DIHAPUS -- permintaan
+   panitia: nama peserta jadi terpotong "..." dan tabelnya malah terasa
+   dikecilkan/sempit karena kolom ini dipaksa max-width 110px. Sekarang
+   kolom Nama ditampilkan APA ADANYA (tidak dipotong) -- tabel tetap bisa
+   discroll ke samping lewat `.table-wrap { overflow-x: auto }` di atas
+   kalau di layar kecil nama+badge-nya butuh lebih lebar dari layar.
+   Atribut `title` pada sel Nama tetap dipertahankan (tidak berdampak apa
+   pun sekarang teksnya selalu terlihat utuh, tapi tidak mengganggu). */
 .lp-badge {
   display: inline-block;
   font-size: 0.68rem;
@@ -1159,29 +750,6 @@ a.lomba-card:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(1
   border-radius: 8px;
   box-shadow: var(--shadow-card);
 }
-/* ---------- Poster Rekap Pendaftar ---------- */
-.poster-rekap-toolbar { display: flex; justify-content: flex-end; }
-.poster-rekap-preview-wrap {
-  border: 1.5px dashed #cfd9d1;
-  border-radius: var(--radius-md);
-  padding: 12px;
-  margin: 12px 0;
-  text-align: center;
-  background: #faf9f4;
-}
-.poster-rekap-preview-wrap canvas {
-  max-width: 100%;
-  width: 320px;
-  height: auto;
-  border-radius: 8px;
-  box-shadow: var(--shadow-card);
-}
-#poster-caption-text {
-  font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
 .kartu-pos-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -1227,287 +795,6 @@ a.lomba-card:hover { transform: translateY(-4px); box-shadow: 0 16px 34px rgba(1
 }
 .btn-link:hover { text-decoration: underline; }
 
-/* Chip rekap kuota (kartu rekap di tab Data Pendaftar, & baris "L: x/y") —
-   ditampilkan sebagai "terisi/kapasitas" per jenjang & gender, jelas dan
-   tidak ambigu seperti angka kuota tunggal yang sudah dibagi diam-diam. */
-.rekap-card__gender { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-.rekap-chip {
-  display: inline-block;
-  font-size: 0.7rem;
-  color: var(--ink-600);
-  background: var(--yellow-100);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-/* Sel jenjang x gender yang sudah mencapai kuota efektifnya -- ditandai
-   merah supaya panitia langsung lihat sel mana yang penuh tanpa perlu
-   membandingkan angkanya satu-satu. */
-.rekap-chip--penuh {
-  background: var(--danger);
-  color: #fff;
-  font-weight: 700;
-}
-
-/* Kartu rekap lomba yang SEMUA sel-nya sudah penuh -- diberi badge besar
-   "KUOTA PENUH" di pojok kanan atas, mencolok (merah solid) supaya langsung
-   terlihat di tab "Data Pendaftar" tanpa perlu membuka detail. */
-.rekap-card--penuh {
-  position: relative;
-  border-color: var(--danger);
-  overflow: hidden;
-}
-.rekap-card__badge-penuh {
-  position: absolute;
-  top: 0;
-  right: 0;
-  background: var(--danger);
-  color: #fff;
-  font-weight: 800;
-  font-size: 0.62rem;
-  letter-spacing: 0.03em;
-  padding: 3px 8px 3px 10px;
-  border-bottom-left-radius: var(--radius-sm);
-}
-
-/* Baris tabel pendaftar tim (Futsal) — bisa diketuk untuk membuka popup
-   detail anggota tim */
-tr.row-clickable { cursor: pointer; transition: background 0.12s ease; }
-tr.row-clickable:hover { background: var(--green-100); }
-.lp-badge--tim {
-  background: var(--yellow-500);
-  color: var(--green-900);
-}
-.wa-status-note {
-  font-size: 0.68rem;
-  color: var(--ink-400);
-  white-space: nowrap;
-}
-
-/* Tombol "Kirim WA" (migrasi 0051) -- wrapper span yang diisi async oleh
-   renderTombolWALomba()/renderTombolWABazar(), ditaruh tepat setelah
-   dropdown status (popup detail Lomba & kolom status tabel Bazar). */
-.wa-kirim-wrap,
-.wa-kirim-wrap-bazar {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 0.78rem;
-  vertical-align: middle;
-}
-.btn-kirim-wa,
-.btn-kirim-wa-bazar {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-/* Banner notifikasi realtime pendaftar/tenant baru (migrasi 0051) -- muncul
-   di atas konten tab aktif begitu ada baris baru masuk ke `pendaftaran`/
-   `bazar_tenant` SELAMA halaman Panitia/Panitia Bazar ini terbuka (lihat
-   aktifkanRealtimePendaftarBaruLomba()/aktifkanRealtimePendaftarBaruBazar()
-   di view-admin.js/view-adminbazar.js). Dipakai BERSAMA oleh kedua halaman
-   (nama class sama, akhiran "Lomba"/"Bazar" cuma pada id elemennya). */
-.banner-pendaftar-baru {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  background: var(--yellow-100, #fff6d8);
-  border: 1px solid var(--yellow-500, #e0b400);
-  border-radius: 10px;
-  padding: 10px 16px;
-  margin-bottom: 16px;
-  font-size: 0.92rem;
-  color: var(--green-900, #16321f);
-}
-.banner-pendaftar-baru .btn-link {
-  font-weight: 600;
-}
-
-/* Popup/modal (dipakai untuk detail tim di halaman Panitia) */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(18, 41, 28, 0.55);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 1000;
-}
-.modal-box {
-  background: var(--white);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  max-width: 680px;
-  width: 100%;
-  max-height: 88vh;
-  overflow-y: auto;
-}
-.modal-box__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 22px;
-  border-bottom: 1.5px solid #f0eee4;
-  position: sticky;
-  top: 0;
-  background: var(--white);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-.modal-box__header h3 { margin: 0; font-size: 1.1rem; }
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 1.6rem;
-  line-height: 1;
-  color: var(--ink-400);
-  cursor: pointer;
-  padding: 4px 8px;
-}
-.modal-close:hover { color: var(--danger); }
-.modal-box__body { padding: 18px 22px 24px; }
-
-/* Panel Detail Pendaftar (Lomba) -- DOCKED DI KANAN layar, meniru panel
-   preview file di Windows Explorer (daftar/tabel di belakangnya tetap
-   kelihatan apa adanya, TIDAK digelapkan seperti .modal-overlay biasa di
-   atas). Dipakai KHUSUS untuk popup "Detail Peserta"/"Detail Tim" beserta
-   sub-layarnya (Edit Data, Alasan Penolakan) di tab "Data Pendaftar" --
-   lihat bukaPanelDetail()/tutupPanelDetail() di assets/js/view-admin.js.
-   Popup/modal LAIN di halaman Panitia (Kelola Lomba, Data Pendamping, dst)
-   TIDAK ikut berubah, tetap memakai .modal-overlay/.modal-box di atas. */
-.detail-panel-overlay {
-  position: fixed;
-  inset: 0;
-  background: transparent;
-  display: none;
-  z-index: 1000;
-  /* Transparan dengan sengaja -- backdrop ini cuma dipakai untuk menangkap
-     klik di luar panel supaya bisa ditutup (sama seperti .modal-overlay),
-     BUKAN untuk menggelapkan layar seperti modal biasa. */
-}
-.detail-panel-overlay.is-visible { display: block; }
-.detail-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 460px;
-  max-width: 100vw;
-  background: var(--white);
-  box-shadow: -10px 0 30px rgba(18, 41, 28, 0.18);
-  border-left: 1.5px solid #f0eee4;
-  display: flex;
-  flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 0.22s ease;
-}
-.detail-panel-overlay.is-visible .detail-panel { transform: translateX(0); }
-.detail-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 22px;
-  border-bottom: 1.5px solid #f0eee4;
-  flex: 0 0 auto;
-}
-.detail-panel__header h3 { margin: 0; font-size: 1.1rem; }
-.detail-panel__body { padding: 18px 22px 24px; overflow-y: auto; flex: 1 1 auto; }
-
-@media (max-width: 640px) {
-  /* Layar sempit: panel memenuhi lebar penuh, sama seperti modal yang
-     dempet ke tepi layar di breakpoint yang sama (lihat ".modal-overlay"
-     di bawah). */
-  .detail-panel { width: 100vw; }
-}
-
-/* Popup detail pendaftar (Lomba) dirapikan jadi grid dua kolom per field
-   (label kecil di atas, nilai di bawahnya -- bukan "Label: Nilai" sebaris
-   seperti sebelumnya yang jadi padat/susah dipindai sekilas), dipakai
-   bukaModalIndividu()/bukaModalTim() di view-admin.js. Jatuh ke satu kolom
-   otomatis di layar sempit lewat auto-fit. */
-.modal-field-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px 20px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px dashed #e3e0d3;
-}
-.modal-field__label {
-  display: block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--ink-400);
-  margin-bottom: 2px;
-}
-.modal-field__value { font-size: 0.92rem; color: var(--ink-900); }
-/* Field yang sengaja melebar penuh (nama lengkap, nomor pendaftaran) --
-   supaya tidak ikut dipotong jadi 1-dari-N-kolom seperti field pendek. */
-.modal-field--full { grid-column: 1 / -1; }
-
-/* Status ditampilkan sebagai pil berwarna (bukan cuma teks tebal merah
-   seperti sebelumnya) -- pakai palet yang SAMA dengan warna baris tabel
-   (".status-row--...") supaya konsisten, lihat kelasBarisStatusLomba() /
-   kelasBarisStatusBazar(). */
-.status-pill {
-  display: inline-block;
-  padding: 3px 12px;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-.status-pill--pending { background: #fdf6e3; color: #8a6d1a; }
-.status-pill--warn { background: #fde7cf; color: #a4480c; }
-.status-pill--success { background: var(--green-100); color: var(--green-900); }
-.status-pill--danger { background: rgba(194, 58, 46, 0.12); color: var(--danger); }
-
-.modal-status-hint {
-  color: var(--danger);
-  font-size: 0.82rem;
-  margin: -6px 0 16px;
-  padding: 8px 12px;
-  background: rgba(194, 58, 46, 0.06);
-  border-radius: var(--radius-sm);
-}
-
-/* Bagian "Berkas" dirapikan jadi baris chip yang bisa diklik (bukan daftar
-   link bertitik "·" sebaris seperti sebelumnya), dipakai bukaModalIndividu/
-   bukaModalTim. Tiap chip = satu link berkas (atau placeholder "-" kalau
-   belum ada). */
-.modal-section-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--ink-400);
-  margin: 0 0 8px;
-}
-.modal-berkas-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
-.modal-berkas-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  border: 1.5px solid #e3e0d3;
-  background: var(--page-bg);
-  font-size: 0.8rem;
-  text-decoration: none;
-  color: var(--green-700);
-  font-weight: 600;
-}
-.modal-berkas-chip:hover { border-color: var(--green-500); background: var(--green-100); }
-.modal-berkas-chip--kosong { color: var(--ink-400); font-weight: 400; cursor: default; }
-.modal-berkas-chip--kosong:hover { border-color: #e3e0d3; background: var(--page-bg); }
-
-.modal-table { font-size: 0.82rem; margin-top: 6px; }
-.modal-table th, .modal-table td { white-space: normal; }
-.row-usia-warn td { background: rgba(194, 58, 46, 0.08); color: var(--danger); }
-
 /* ==========================================================================
    TAMPILAN MOBILE (≤640px)
    ==========================================================================
@@ -1519,14 +806,12 @@ tr.row-clickable:hover { background: var(--green-100); }
   .container { padding: 0 16px; }
   .bunting { padding: 0 16px; height: 16px; gap: 4px; }
 
-  /* Navbar -- flex-wrap supaya 4 link (Beranda/Lomba/Bazar/Daftar) tidak
-     berdesakan atau kepotong di layar sempit, turun ke baris kedua kalau
-     perlu. */
-  .navbar { padding: 12px 16px; flex-wrap: wrap; row-gap: 8px; }
+  /* Navbar */
+  .navbar { padding: 12px 16px; }
   .navbar__brand { font-size: 1rem; gap: 8px; }
   .navbar__brand span.mark { width: 32px; height: 32px; font-size: 0.95rem; }
   .navbar__brand-logo { height: 30px; max-width: 110px; }
-  .navbar__links { gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
+  .navbar__links { gap: 2px; }
   .nav-link { padding: 7px 12px; font-size: 0.82rem; }
 
   /* Tombol, dipakai di mana-mana */
@@ -1608,59 +893,9 @@ tr.row-clickable:hover { background: var(--green-100); }
   .rekap-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
   .rekap-card { padding: 10px 12px; }
   .rekap-card__total { font-size: 1.2rem; }
-  .rekap-chip { font-size: 0.66rem; padding: 2px 6px; }
-
-  /* Popup detail tim: dempet ke tepi layar supaya isinya lega di HP */
-  .modal-overlay { padding: 10px; }
-  .modal-box { max-height: 92vh; border-radius: var(--radius-md); }
-  .modal-box__header { padding: 14px 16px; }
-  .modal-box__body { padding: 14px 16px 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   * { transition: none !important; animation: none !important; }
-}
-
-/* ==========================================================================
-   Gerbang "Pendaftaran Belum Dibuka" (lihat assets/js/router.js) — overlay
-   penuh layar, muncul sekali per sesi browser saat
-   site_settings.pendaftaran_dibuka = false, dengan pesan lucu + tombol PIN
-   panitia untuk uji coba.
-   ========================================================================== */
-.gate-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(18, 41, 28, 0.72);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 2000;
-}
-.gate-overlay.is-visible { display: flex; }
-.gate-box {
-  background: var(--white);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  max-width: 440px;
-  width: 100%;
-  padding: 32px 28px;
-  text-align: center;
-}
-.gate-box__emoji { font-size: 3rem; margin-bottom: 10px; }
-.gate-box h2 { margin: 0 0 10px; font-size: 1.3rem; }
-.gate-box p { color: var(--ink-400); font-size: 0.94rem; margin: 0 0 20px; }
-.gate-box__actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.gate-box__actions .btn { width: 100%; }
-.gate-pin-wrap { margin-top: 18px; padding-top: 18px; border-top: 1.5px solid #f0eee4; text-align: left; }
-.gate-pin-wrap label { display: block; font-weight: 600; font-size: 0.86rem; margin-bottom: 6px; color: var(--green-900); }
-.gate-pin-row { display: flex; gap: 8px; }
-.gate-pin-row input { flex: 1; }
-.gate-pin-row .btn { white-space: nowrap; }
-.gate-pin-error { color: var(--danger); font-size: 0.82rem; margin-top: 8px; }
-
-@media (max-width: 480px) {
-  .gate-box { padding: 26px 20px; }
-  .gate-pin-row { flex-direction: column; }
 }
