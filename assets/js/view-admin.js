@@ -1119,19 +1119,21 @@ async function bukaModalTimEdit(row, rule) {
         : ('<input type="text" id="edit-jenjang-tim" value="' + escapeHTML(row.jenjang) + '">')) +
     '</div>' +
     '<p class="modal-section-title" style="margin-top:18px;">Anggota Tim</p>' +
-    '<p class="hint">Menambah/menghapus anggota tidak bisa lewat form ini -- hanya membetulkan data anggota yang sudah ada.</p>' +
-    '<div class="table-wrap"><table class="admin-table modal-table modal-table--edit"><thead><tr><th>#</th><th>Nama</th><th>Tempat Lahir</th><th>Tanggal Lahir</th><th>Kelas</th><th>No. Punggung</th></tr></thead><tbody>' +
+    '<p class="hint">Tempat Lahir, Tanggal Lahir, dan No. Punggung boleh dikosongkan. Ketuk "+ Tambah Anggota" untuk menambah pemain baru (klik ikon &times; di baris untuk membatalkan baris yang belum disimpan).</p>' +
+    '<div class="table-wrap"><table class="admin-table modal-table modal-table--edit" id="tabel-edit-anggota"><thead><tr><th>#</th><th>Nama</th><th>Tempat Lahir</th><th>Tanggal Lahir</th><th>Kelas</th><th>No. Punggung</th><th></th></tr></thead><tbody id="tbody-edit-anggota">' +
     (anggota && anggota.length ? anggota.map(function (a, i) {
       return '<tr data-anggota-id="' + escapeHTML(a.id) + '">' +
-        '<td>' + (i + 1) + '</td>' +
+        '<td class="urut-anggota">' + (i + 1) + '</td>' +
         '<td><input type="text" class="edit-anggota-nama" value="' + escapeHTML(a.nama || "") + '"></td>' +
         '<td><input type="text" class="edit-anggota-tempat" value="' + escapeHTML(a.tempat_lahir || "") + '"></td>' +
         '<td><input type="date" class="edit-anggota-tanggal" value="' + escapeHTML(a.tanggal_lahir || "") + '"></td>' +
         '<td><input type="text" class="edit-anggota-kelas" value="' + escapeHTML(a.kelas || "") + '"></td>' +
         '<td><input type="number" min="1" max="99" class="edit-anggota-punggung" value="' + (a.nomor_punggung != null ? a.nomor_punggung : "") + '"></td>' +
+        '<td><button type="button" class="btn-hapus-baris-anggota" title="Batalkan baris ini">&times;</button></td>' +
       '</tr>';
-    }).join("") : '<tr><td colspan="6">Belum ada data anggota.</td></tr>') +
+    }).join("") : '') +
     '</tbody></table></div>' +
+    '<div class="submit-row" style="justify-content:flex-start;margin-top:6px;"><button type="button" class="btn btn--ghost" id="btn-tambah-anggota">+ Tambah Anggota</button></div>' +
     '<p class="modal-section-title" style="margin-top:18px;">Ganti Berkas</p>' +
     '<p class="hint">Kosongkan kotak mana pun yang tidak perlu diganti -- berkas lamanya tetap dipakai apa adanya.</p>' +
     '<div class="field"><label for="edit-file-delegasi">Surat Delegasi' + (row.url_surat_delegasi ? ' (<a href="' + row.url_surat_delegasi + '" target="_blank" rel="noopener">lihat berkas saat ini</a>)' : ' (belum ada)') + '</label><input type="file" id="edit-file-delegasi" accept="image/*,.pdf"></div>' +
@@ -1153,6 +1155,46 @@ async function bukaModalTimEdit(row, rule) {
   bukaPanelDetail("Edit Data Tim — " + row.nama_tim, formHTML);
   buatKolomBisaDitarik(document.querySelector("#detail-panel-body table.modal-table--edit"));
 
+  // Nomor urut (#) di kolom pertama dihitung ulang setiap kali baris
+  // ditambah/dihapus, supaya tetap berurutan 1, 2, 3, ... walau ada baris
+  // baru yang disisipkan atau baris yang dibatalkan.
+  function hitungUlangNomorAnggota() {
+    Array.from(document.querySelectorAll("#tbody-edit-anggota tr")).forEach(function (tr, i) {
+      const sel = tr.querySelector(".urut-anggota");
+      if (sel) sel.textContent = i + 1;
+    });
+  }
+
+  function pasangHapusBaris(tr) {
+    const btnHapus = tr.querySelector(".btn-hapus-baris-anggota");
+    if (btnHapus) {
+      btnHapus.addEventListener("click", function () {
+        tr.remove();
+        hitungUlangNomorAnggota();
+      });
+    }
+  }
+
+  Array.from(document.querySelectorAll("#tbody-edit-anggota tr")).forEach(pasangHapusBaris);
+
+  document.getElementById("btn-tambah-anggota").addEventListener("click", function () {
+    const tbody = document.getElementById("tbody-edit-anggota");
+    const tr = document.createElement("tr");
+    tr.setAttribute("data-anggota-baru", "1");
+    tr.innerHTML =
+      '<td class="urut-anggota"></td>' +
+      '<td><input type="text" class="edit-anggota-nama"></td>' +
+      '<td><input type="text" class="edit-anggota-tempat"></td>' +
+      '<td><input type="date" class="edit-anggota-tanggal"></td>' +
+      '<td><input type="text" class="edit-anggota-kelas"></td>' +
+      '<td><input type="number" min="1" max="99" class="edit-anggota-punggung"></td>' +
+      '<td><button type="button" class="btn-hapus-baris-anggota" title="Batalkan baris ini">&times;</button></td>';
+    tbody.appendChild(tr);
+    pasangHapusBaris(tr);
+    hitungUlangNomorAnggota();
+    tr.querySelector(".edit-anggota-nama").focus();
+  });
+
   document.getElementById("btn-batal-edit-tim").addEventListener("click", function () {
     bukaModalTim(row, rule);
   });
@@ -1169,7 +1211,12 @@ async function bukaModalTimEdit(row, rule) {
       return;
     }
 
-    const barisAnggota = Array.from(document.querySelectorAll("#detail-panel-body tr[data-anggota-id]"));
+    // Baris yang SUDAH ADA (punya data-anggota-id, di-UPDATE) dan baris BARU
+    // yang baru ditambah lewat "+ Tambah Anggota" (punya data-anggota-baru,
+    // belum punya id -- di-INSERT) diproses bersama di sini, dibedakan lagi
+    // nanti saat dikirim ke Supabase. Tempat Lahir, Tanggal Lahir, dan No.
+    // Punggung boleh dikosongkan (null) -- hanya Nama dan Kelas yang wajib.
+    const barisAnggota = Array.from(document.querySelectorAll("#tbody-edit-anggota tr"));
     const anggotaBaru = [];
     const punggungTerpakai = [];
     for (const tr of barisAnggota) {
@@ -1180,8 +1227,8 @@ async function bukaModalTimEdit(row, rule) {
       const kelasAnggota = tr.querySelector(".edit-anggota-kelas").value.trim();
       const punggungStr = tr.querySelector(".edit-anggota-punggung").value.trim();
 
-      if (!nama || !tempat || !tanggal || !kelasAnggota) {
-        alert("Nama, Tempat Lahir, Tanggal Lahir, dan Kelas setiap anggota wajib diisi.");
+      if (!nama || !kelasAnggota) {
+        alert("Nama dan Kelas setiap anggota wajib diisi (Tempat/Tanggal Lahir dan No. Punggung boleh dikosongkan).");
         return;
       }
 
@@ -1199,7 +1246,15 @@ async function bukaModalTimEdit(row, rule) {
         punggungTerpakai.push(punggung);
       }
 
-      anggotaBaru.push({ id: idAnggota, nama: nama, tempat_lahir: tempat, tanggal_lahir: tanggal, kelas: kelasAnggota, nomor_punggung: punggung });
+      anggotaBaru.push({
+        id: idAnggota || null,
+        baru: !idAnggota,
+        nama: nama,
+        tempat_lahir: tempat || null,
+        tanggal_lahir: tanggal || null,
+        kelas: kelasAnggota,
+        nomor_punggung: punggung
+      });
     }
 
     const btnSimpan = document.getElementById("btn-simpan-edit-tim");
@@ -1265,7 +1320,18 @@ async function bukaModalTimEdit(row, rule) {
 
     berkasLamaUntukDihapus.forEach(function (u) { hapusBerkasLamaAdmin(u); });
 
+    // Baris lama (punya id) di-UPDATE; baris baru dari "+ Tambah Anggota"
+    // (a.baru === true, belum punya id) di-INSERT, memakai nomor_pendaftaran
+    // & nama_tim dari baris tim ini supaya tetap satu grup.
     const hasilAnggota = await Promise.all(anggotaBaru.map(function (a) {
+      if (a.baru) {
+        return supabaseClient.from("anggota_tim").insert({
+          pendaftaran_id: row.id,
+          nomor_pendaftaran: row.nomor_pendaftaran,
+          nama_tim: namaTimBaru,
+          nama: a.nama, tempat_lahir: a.tempat_lahir, tanggal_lahir: a.tanggal_lahir, kelas: a.kelas, nomor_punggung: a.nomor_punggung
+        });
+      }
       return supabaseClient.from("anggota_tim").update({
         nama: a.nama, tempat_lahir: a.tempat_lahir, tanggal_lahir: a.tanggal_lahir, kelas: a.kelas, nomor_punggung: a.nomor_punggung
       }).eq("id", a.id);
