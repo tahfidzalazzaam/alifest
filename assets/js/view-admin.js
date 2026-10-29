@@ -148,6 +148,7 @@ async function renderDashboard(root, session) {
     // ".detail-panel..." di style.css.
     '<div class="detail-panel-overlay" id="detail-panel-overlay">' +
       '<div class="detail-panel" id="detail-panel">' +
+        '<div class="detail-panel__resize-handle" id="detail-panel-resize" title="Seret untuk melebarkan panel"></div>' +
         '<div class="detail-panel__header">' +
           '<h3 id="detail-panel-title"></h3>' +
           '<button type="button" class="modal-close" id="detail-panel-close-btn" aria-label="Tutup">&times;</button>' +
@@ -184,6 +185,13 @@ async function renderDashboard(root, session) {
     await supabaseClient.auth.signOut();
     renderLogin(root);
   });
+
+  // Panel Detail (docked kanan) bisa DILEBARKAN MANUAL ke tengah layar
+  // (permintaan panitia) -- seret pegangan tipis di tepi kiri panel.
+  // Dipasang SEKALI di sini (bukan tiap bukaPanelDetail()) karena elemen
+  // kerangka panel ini cuma dibuat sekali saat dashboard dirender, isinya
+  // (judul/body) saja yang diganti-ganti lewat bukaPanelDetail().
+  pasangResizeDetailPanel();
 
   // Notifikasi realtime pendaftar baru (migrasi 0051) -- lihat blok besar
   // di bawah file ini untuk detail lengkapnya.
@@ -345,6 +353,99 @@ function bukaPanelDetail(judul, isiHTML) {
 
 function tutupPanelDetail() {
   document.getElementById("detail-panel-overlay").classList.remove("is-visible");
+}
+
+// Seret pegangan tipis di tepi KIRI ".detail-panel" (docked kanan) untuk
+// melebarkannya manual ke tengah layar -- permintaan panitia, supaya form
+// Edit Data (tabel Anggota Tim yang berkolom banyak) bisa dilapangkan
+// sendiri kalau dirasa masih sempit, tanpa terpaku pada lebar bawaan
+// (460px, lihat CSS ".detail-panel"). Lebar hasil seret disimpan di
+// `style.width` elemen panel langsung (inline, menimpa lebar CSS bawaan),
+// dibatasi minimum 360px (supaya tidak kelewat sempit) dan maksimum 92%
+// lebar jendela (supaya tidak menutupi seluruh layar/menabrak navbar kiri).
+// Mati otomatis di layar sempit (≤640px, lihat CSS media query) karena di
+// sana panel sudah dipaksa selebar penuh (100vw) -- menyeret tidak ada
+// gunanya di ukuran itu.
+function pasangResizeDetailPanel() {
+  const handle = document.getElementById("detail-panel-resize");
+  const panel = document.getElementById("detail-panel");
+  if (!handle || !panel) return;
+
+  let mulaiX = 0, lebarMulai = 0;
+
+  function gerak(ev) {
+    const delta = mulaiX - ev.clientX; // geser ke KIRI (ke tengah layar) = tambah lebar
+    const batasMaks = Math.round(window.innerWidth * 0.92);
+    const lebarBaru = Math.min(batasMaks, Math.max(360, Math.round(lebarMulai + delta)));
+    panel.style.width = lebarBaru + "px";
+  }
+  function lepas() {
+    handle.classList.remove("is-dragging");
+    document.removeEventListener("pointermove", gerak);
+    document.removeEventListener("pointerup", lepas);
+  }
+
+  handle.addEventListener("pointerdown", function (ev) {
+    if (window.innerWidth <= 640) return; // layar sempit: panel sudah 100vw, tidak perlu diseret
+    ev.preventDefault();
+    mulaiX = ev.clientX;
+    lebarMulai = panel.getBoundingClientRect().width;
+    handle.classList.add("is-dragging");
+    document.addEventListener("pointermove", gerak);
+    document.addEventListener("pointerup", lepas);
+  });
+}
+
+// Membuat tiap kolom tabel bisa ditarik lebarnya sendiri secara manual
+// (permintaan panitia) -- dipakai KHUSUS untuk tabel Anggota Tim di mode
+// EDIT (class ".modal-table--edit", lihat bukaModalTimEdit()), yang
+// kolomnya berisi <input>, bukan tabel baca-saja biasa. Dipanggil SEKALI
+// tiap kali tabelnya baru dirender (sesudah elemen-elemennya ada di DOM,
+// supaya lebar awal tiap kolom bisa dibaca dari ukuran yang benar-benar
+// tampil di layar).
+//
+// `table-layout: fixed` dipasang di sini (bukan lewat CSS statis) --
+// begitu dipasang, lebar kolom HARUS ditentukan oleh lebar th-nya
+// masing-masing (diambil dari ukuran terendernya SAAT INI, supaya tidak
+// ada lompatan tampilan begitu beralih dari "auto" ke "fixed"), lalu
+// tinggal diubah manual lewat drag.
+function buatKolomBisaDitarik(table) {
+  if (!table) return;
+  const ths = Array.from(table.querySelectorAll("thead th"));
+  if (ths.length === 0) return;
+
+  table.style.tableLayout = "fixed";
+  ths.forEach(function (th) {
+    th.style.width = th.getBoundingClientRect().width + "px";
+  });
+
+  // Kolom terakhir (No. Punggung) sengaja TIDAK diberi pegangan di tepi
+  // kanannya -- tidak ada kolom lain di sebelah kanannya untuk ditarik.
+  ths.slice(0, -1).forEach(function (th) {
+    const handle = document.createElement("span");
+    handle.className = "th-resize-handle";
+    th.appendChild(handle);
+
+    let mulaiX = 0, lebarMulai = 0;
+    function gerak(ev) {
+      const lebarBaru = Math.max(32, Math.round(lebarMulai + (ev.clientX - mulaiX)));
+      th.style.width = lebarBaru + "px";
+    }
+    function lepas() {
+      handle.classList.remove("is-dragging");
+      document.removeEventListener("pointermove", gerak);
+      document.removeEventListener("pointerup", lepas);
+    }
+    handle.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      mulaiX = ev.clientX;
+      lebarMulai = th.getBoundingClientRect().width;
+      handle.classList.add("is-dragging");
+      document.addEventListener("pointermove", gerak);
+      document.addEventListener("pointerup", lepas);
+    });
+  });
 }
 
 /* ==================== TAB 1: DATA PENDAFTAR ==================== */
@@ -1050,6 +1151,7 @@ async function bukaModalTimEdit(row, rule) {
     '</div>';
 
   bukaPanelDetail("Edit Data Tim — " + row.nama_tim, formHTML);
+  buatKolomBisaDitarik(document.querySelector("#detail-panel-body table.modal-table--edit"));
 
   document.getElementById("btn-batal-edit-tim").addEventListener("click", function () {
     bukaModalTim(row, rule);
