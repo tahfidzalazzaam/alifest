@@ -3893,8 +3893,9 @@ function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiP
     // Sertifikat: SEMUA field rata tengah, font Times New Roman tebal
     // (permintaan panitia). Kartu tetap memakai aturan lama.
     const align = (gayaSertifikat || KARTU_FIELD_RATA_TENGAH[f.key]) ? "center" : "left";
+    const teksField = (gayaSertifikat && f.key === "nama") ? namaProperSertifikat(data[f.key]) : data[f.key];
     gambarTeksPasKotak(
-      ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar, align,
+      ctx, teksField || "-", pos.x, pos.y, pos.font, lebar, align,
       gayaSertifikat ? SERTIFIKAT_FAMILI_FONT : null, gayaSertifikat ? "700" : null
     );
   });
@@ -4824,6 +4825,13 @@ async function cetakKartuPDF(jenis) {
 // KHUSUS untuk tampilan di Sertifikat (permintaan panitia), TIDAK mengubah
 // data aslinya di database maupun tampilan di tempat lain (Kartu, Data
 // Pendaftar, dst. tetap menampilkan nama lomba lengkap seperti biasa).
+// Nama orang di Sertifikat ditulis "proper": huruf besar di awal tiap kata,
+// sisanya kecil (setelah spasi, tanda hubung, apostrof, titik, atau kurung buka).
+function namaProperSertifikat(nama) {
+  return String(nama || "").trim().replace(/\s+/g, " ").toLowerCase()
+    .replace(/(^|[\s\-'’.(])(\p{L})/gu, function (m, pemisah, huruf) { return pemisah + huruf.toUpperCase(); });
+}
+
 function singkatNamaLomba(nama) {
   return (nama || "").replace(/^lomba\s+/i, "").trim();
 }
