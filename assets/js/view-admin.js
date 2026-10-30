@@ -5226,6 +5226,175 @@ async function cetakKartuTerpilihPDF(templatesSemua) {
   statusEl.textContent = "Selesai — " + terpilih.length + " kartu (" + totalHalaman + " lembar A4) terunduh.";
 }
 
+// ======================= KARTU KOSONG "ORDER MENU" (cetak tanpa nama & nomor) =======================
+// Mencetak kartu POLOS (hanya desain template + logo sponsor, TANPA Nama &
+// Nomor Pendaftaran) untuk cabang lomba tertentu dalam jumlah tertentu,
+// sekali cetak -- mis. cadangan kartu yang diisi tangan di lokasi. Tampilan
+// ala "pesan menu": satu baris per template yang sudah diunggah, tombol
+// -/+ untuk jumlahnya, lalu satu tombol cetak. Tiap jenis kartu dimulai di
+// halaman baru supaya satu lembar A4 (2x2) isinya satu jenis saja.
+let _kartuKosongBaris = [];
+
+function susunBarisKartuKosong(templatesSemua, semuaLomba) {
+  const baris = [];
+  const namaLomba = {};
+  (semuaLomba || []).forEach(function (r) { namaLomba[r.id] = r.nama; });
+  function labelGender(g) { return g === "laki-laki" ? "Laki-laki" : g === "perempuan" ? "Perempuan" : g; }
+  [["peserta", "Peserta"], ["pesertaTim", "Peserta Tim"]].forEach(function (par) {
+    const kumpulan = templatesSemua[par[0]] || {};
+    Object.keys(kumpulan).forEach(function (kunci) {
+      if (!kumpulan[kunci] || !kumpulan[kunci].url) return;
+      const bagian = kunci.split("|");
+      baris.push({
+        id: par[0] + "|" + kunci, jenis: par[0], kunci: kunci, jumlah: 0,
+        label: (namaLomba[bagian[0]] || bagian[0]) + (bagian[1] ? " — " + labelGender(bagian[1]) : ""),
+        tag: par[1]
+      });
+    });
+  });
+  if (templatesSemua.pendamping && templatesSemua.pendamping.url) {
+    baris.push({ id: "pendamping", jenis: "pendamping", kunci: "pendamping", jumlah: 0, label: "Kartu Pendamping", tag: "Pendamping" });
+  }
+  baris.sort(function (a, b) { return a.label.localeCompare(b.label, "id"); });
+  return baris;
+}
+
+function panelKartuKosongHTML() {
+  return (
+    '<div class="form-shell" style="margin-top:20px;max-width:720px;">' +
+      '<h3>🧾 Cetak Kartu Kosong (pesan jumlah)</h3>' +
+      '<p>Cetak kartu <strong>tanpa nama &amp; nomor</strong> (hanya desain + logo sponsor) sesuai jumlah yang dipesan per cabang lomba. Tekan <strong>+</strong> / <strong>−</strong> atau ketik jumlahnya, lalu cetak sekali jalan. Hanya template yang sudah diunggah di panel Kartu di atas yang muncul.</p>' +
+      '<div id="kartu-kosong-menu"></div>' +
+      '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap;">' +
+        '<button type="button" class="btn btn--primary" id="btn-kartu-kosong-cetak">Cetak Kartu Kosong (PDF)</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-kartu-kosong-reset">Kosongkan Pesanan</button>' +
+        '<span class="hint" id="kartu-kosong-ringkas">0 kartu</span>' +
+      '</div>' +
+      '<p class="hint" id="kartu-kosong-status"></p>' +
+    '</div>'
+  );
+}
+
+function perbaruiRingkasKartuKosong() {
+  const total = _kartuKosongBaris.reduce(function (a, b) { return a + b.jumlah; }, 0);
+  const halaman = _kartuKosongBaris.reduce(function (a, b) { return a + Math.ceil(b.jumlah / 4); }, 0);
+  const el = document.getElementById("kartu-kosong-ringkas");
+  if (el) el.textContent = total + " kartu (" + halaman + " lembar A4)";
+}
+
+function renderMenuKartuKosong() {
+  const wrap = document.getElementById("kartu-kosong-menu");
+  if (!wrap) return;
+  if (_kartuKosongBaris.length === 0) {
+    wrap.innerHTML = '<p class="hint">Belum ada template kartu yang diunggah.</p>';
+    return;
+  }
+  wrap.innerHTML = _kartuKosongBaris.map(function (b, i) {
+    return (
+      '<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #eee;">' +
+        '<div style="flex:1;min-width:0;"><strong>' + escapeHTML(b.label) + '</strong> <span class="hint">(' + escapeHTML(b.tag) + ')</span></div>' +
+        '<button type="button" class="btn btn--ghost kk-kurang" data-i="' + i + '" style="min-width:38px;">−</button>' +
+        '<input type="number" class="kk-jumlah" data-i="' + i + '" min="0" max="500" value="' + b.jumlah + '" style="width:70px;text-align:center;" />' +
+        '<button type="button" class="btn btn--ghost kk-tambah" data-i="' + i + '" style="min-width:38px;">+</button>' +
+      '</div>'
+    );
+  }).join("");
+
+  function setJumlah(i, n) {
+    n = Math.max(0, Math.min(500, Math.floor(Number(n) || 0)));
+    _kartuKosongBaris[i].jumlah = n;
+    wrap.querySelector('.kk-jumlah[data-i="' + i + '"]').value = n;
+    perbaruiRingkasKartuKosong();
+  }
+  wrap.querySelectorAll(".kk-kurang").forEach(function (b) {
+    b.addEventListener("click", function () { const i = Number(b.dataset.i); setJumlah(i, _kartuKosongBaris[i].jumlah - 1); });
+  });
+  wrap.querySelectorAll(".kk-tambah").forEach(function (b) {
+    b.addEventListener("click", function () { const i = Number(b.dataset.i); setJumlah(i, _kartuKosongBaris[i].jumlah + 1); });
+  });
+  wrap.querySelectorAll(".kk-jumlah").forEach(function (inp) {
+    inp.addEventListener("input", function () { _kartuKosongBaris[Number(inp.dataset.i)].jumlah = Math.max(0, Math.min(500, Math.floor(Number(inp.value) || 0))); perbaruiRingkasKartuKosong(); });
+    inp.addEventListener("change", function () { setJumlah(Number(inp.dataset.i), inp.value); });
+  });
+}
+
+function setupKartuKosong(templatesSemua, semuaLomba) {
+  _kartuKosongBaris = susunBarisKartuKosong(templatesSemua, semuaLomba);
+  renderMenuKartuKosong();
+  perbaruiRingkasKartuKosong();
+
+  document.getElementById("btn-kartu-kosong-reset").addEventListener("click", function () {
+    _kartuKosongBaris.forEach(function (b) { b.jumlah = 0; });
+    renderMenuKartuKosong();
+    perbaruiRingkasKartuKosong();
+  });
+  document.getElementById("btn-kartu-kosong-cetak").addEventListener("click", function () { cetakKartuKosongPDF(templatesSemua); });
+}
+
+async function cetakKartuKosongPDF(templatesSemua) {
+  const statusEl = document.getElementById("kartu-kosong-status");
+  const pesanan = _kartuKosongBaris.filter(function (b) { return b.jumlah > 0; });
+  if (pesanan.length === 0) { alert("Isi dulu jumlah kartu yang ingin dicetak (tekan + di salah satu baris)."); return; }
+
+  statusEl.textContent = "Menyiapkan kartu kosong, mohon tunggu...";
+  let logo = null;
+  if (templatesSemua.logoSponsor && templatesSemua.logoSponsor.url) {
+    try {
+      const logoImg = await muatGambar(templatesSemua.logoSponsor.url);
+      logo = Object.assign({ img: logoImg }, templatesSemua.logoSponsor);
+    } catch (e) { /* logo gagal dimuat -- kartu tetap dicetak tanpa logo */ }
+  }
+
+  // Grid 2x2 per lembar A4 portrait -- sama persis dengan cetakKartuPDF()/
+  // cetakKartuTerpilihPDF(), supaya ukuran fisik & tata letaknya konsisten.
+  const GAP = 0.2, A4_L = 21, A4_T = 29.7;
+  const marginX = (A4_L - (2 * KARTU_LEBAR_CM + GAP)) / 2;
+  const marginY = (A4_T - (2 * KARTU_TINGGI_CM + GAP)) / 2;
+  const canvas = document.createElement("canvas");
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "portrait" });
+  let halamanPertama = true;
+  let totalKartu = 0, totalHalaman = 0;
+
+  for (const b of pesanan) {
+    const entri = b.jenis === "pendamping" ? templatesSemua.pendamping : templatesSemua[b.jenis][b.kunci];
+    let img;
+    try { img = await muatGambar(entri.url); }
+    catch (e) { statusEl.textContent = ""; alert('Gagal memuat gambar template untuk "' + b.label + '".'); return; }
+    const layout = entri.layout || DEFAULT_LAYOUT_KARTU[b.jenis];
+
+    // Tanpa field sama sekali -> hanya template + logo yang tergambar.
+    gambarKartu(canvas, img, layout, {}, [], null, null, logo);
+    const imgData = canvas.toDataURL("image/png");
+
+    const halaman = Math.ceil(b.jumlah / 4);
+    for (let h = 0; h < halaman; h++) {
+      if (!halamanPertama) doc.addPage("a4", "portrait");
+      halamanPertama = false;
+      totalHalaman++;
+      const sisa = Math.min(4, b.jumlah - h * 4);
+      for (let slot = 0; slot < sisa; slot++) {
+        const x = marginX + (slot % 2) * (KARTU_LEBAR_CM + GAP);
+        const y = marginY + Math.floor(slot / 2) * (KARTU_TINGGI_CM + GAP);
+        doc.addImage(imgData, "PNG", x, y, KARTU_LEBAR_CM, KARTU_TINGGI_CM);
+      }
+      const tengahX = marginX + KARTU_LEBAR_CM + GAP / 2;
+      const tengahY = marginY + KARTU_TINGGI_CM + GAP / 2;
+      doc.setDrawColor(190);
+      doc.setLineWidth(0.01);
+      doc.setLineDashPattern([0.1, 0.1], 0);
+      doc.line(tengahX, marginY - 0.3, tengahX, marginY + 2 * KARTU_TINGGI_CM + GAP + 0.3);
+      doc.line(marginX - 0.3, tengahY, marginX + 2 * KARTU_LEBAR_CM + GAP + 0.3, tengahY);
+      doc.setLineDashPattern([], 0);
+      doc.setLineWidth(0.2);
+    }
+    totalKartu += b.jumlah;
+  }
+
+  doc.save("kartu-kosong-alif5.pdf");
+  statusEl.textContent = "Selesai — " + totalKartu + " kartu kosong (" + totalHalaman + " lembar A4) terunduh.";
+}
+
 async function loadTabKartu() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat...</p>';
@@ -5298,7 +5467,8 @@ async function loadTabKartu() {
       '<p class="hint">"Kartu Peserta" di atas HANYA mengikutkan pendaftar individu; "Kartu Peserta Futsal/Tim" mencetak SATU KARTU PER ANGGOTA tim (bukan satu per tim). Filter "Cabang Lomba" berlaku untuk semua tombol. Kalau ada kombinasi lomba+jenis kelamin yang templatenya belum diunggah, proses cetak dibatalkan dan akan diberi tahu kombinasi mana yang kurang. <strong>"Unduh Sertifikat Peserta"</strong> mencetak SATU sertifikat per peserta individu dan SATU per anggota tim (status "Diterima" saja) jadi satu PDF (satu sertifikat per halaman A4 landscape) -- sertifikat untuk PENDAMPING TIDAK ikut tercetak di sini, melainkan diunduh sendiri lewat link token yang dibuat dari popup detail pendaftar (tab "Data Pendaftar") -- lihat bagian 12 README.</p>' +
       '<p class="hint" id="cetak-status"></p>' +
     '</div>' +
-    panelCetakSusulanHTML(opsiLombaCetak);
+    panelCetakSusulanHTML(opsiLombaCetak) +
+    panelKartuKosongHTML();
 
   await setupKartuPerLomba("peserta", FIELD_PESERTA, lombaIndividu, templatesSemua, logoAktif);
   await setupKartuPerLomba("pesertaTim", FIELD_PESERTA_TIM, lombaTim, templatesSemua, logoAktif);
@@ -5307,6 +5477,7 @@ async function loadTabKartu() {
   setupSertifikat(FIELD_SERTIFIKAT, templatesSemua);
   setupLinkSertifikatPeserta();
   setupCetakSusulan(templatesSemua);
+  setupKartuKosong(templatesSemua, semuaLomba);
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
   document.getElementById("btn-cetak-peserta-tim").addEventListener("click", function () { cetakKartuPDF("pesertaTim"); });
