@@ -536,6 +536,7 @@ function ekstrakPathBerkas(url) {
 // README).
 function kelasBarisStatusLomba(status) {
   if (status === "Diterima") return "status-row--success";
+  if (status === "Sudah Ikut Lomba") return "status-row--done";
   if (status === "Ditolak") return "status-row--danger";
   if (status === "Perlu Verifikasi Usia" || status === "Perlu Tambah Nomor Punggung") return "status-row--warn";
   return "status-row--pending"; // "Menunggu Verifikasi"
@@ -649,11 +650,18 @@ async function commitPerubahanStatusLomba(row, statusBaru, alasanPenolakan, isTi
   // ambil_nomor_berikutnya(), supaya bisa dipakai pendaftar lain) selalu
   // ikut dikerjakan ATOMIK bersama perubahan status itu sendiri, termasuk
   // menyamakan salinan nomor_pendaftaran di anggota_tim untuk pendaftar tim.
-  const { data, error } = await supabaseClient.rpc("ubah_status_pendaftaran", {
-    p_id: row.id,
-    p_status_baru: statusBaru,
-    p_alasan_penolakan: statusBaru === "Ditolak" ? alasanPenolakan : null
-  });
+  // Migrasi 0057: perpindahan Diterima <-> "Sudah Ikut Lomba" lewat RPC
+  // sendiri (tanpa urusan nomor pendaftaran); selain itu tetap RPC lama.
+  const pakaiRpcSudahIkut =
+    (statusBaru === "Sudah Ikut Lomba" && statusLama === "Diterima") ||
+    (statusBaru === "Diterima" && statusLama === "Sudah Ikut Lomba");
+  const { data, error } = pakaiRpcSudahIkut
+    ? await supabaseClient.rpc("ubah_status_sudah_ikut", { p_id: row.id, p_status_baru: statusBaru })
+    : await supabaseClient.rpc("ubah_status_pendaftaran", {
+        p_id: row.id,
+        p_status_baru: statusBaru,
+        p_alasan_penolakan: statusBaru === "Ditolak" ? alasanPenolakan : null
+      });
 
   if (error || !data || data.success === false) {
     alert("Gagal mengubah status: " + ((data && data.message) || (error && error.message) || "Kesalahan tidak dikenal."));
@@ -782,8 +790,8 @@ async function bukaModalAlasanPenolakanPopup(row, statusLama, isTim, rule) {
 // note" lama yang dulu menampilkan status kirim OTOMATIS lewat Fonnte.
 function statusSelectPopupHTML(id, status, isTim) {
   const opsi = isTim
-    ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Ditolak"]
-    : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Ditolak"];
+    ? ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Perlu Tambah Nomor Punggung", "Diterima", "Sudah Ikut Lomba", "Ditolak"]
+    : ["Menunggu Verifikasi", "Perlu Verifikasi Usia", "Diterima", "Sudah Ikut Lomba", "Ditolak"];
   return (
     '<select id="modal-status-select" class="status-select">' +
       opsi.map(function (s) {
@@ -4884,6 +4892,78 @@ async function cetakSertifikatPDF() {
   statusEl.textContent = "Selesai — " + daftarData.length + " sertifikat (" + daftarData.length + " lembar A4) terunduh.";
 }
 
+// ======================= LINK SERTIFIKAT PESERTA PER KELOMPOK (migrasi 0057) =======================
+// Satu link = satu kelompok (cabang lomba x jenis kelamin x jenjang). Hanya
+// peserta berstatus "Sudah Ikut Lomba" yang bisa mengunduh; panitia
+// menghidupkan/mematikan linknya di sini lalu mengirimkannya ke grup WA.
+// Halaman publiknya: "#/sertifikat?grup=TOKEN" (view-sertifikat.js).
+function panelLinkSertifikatPesertaHTML() {
+  return (
+    '<div class="form-shell" style="margin-top:20px;">' +
+      '<h3>🔗 Link Sertifikat Peserta (per kelompok)</h3>' +
+      '<p>Ubah status peserta yang sudah mengikuti lomba menjadi <strong>"Sudah Ikut Lomba"</strong> (dropdown status di popup detail pendaftar). Kelompok (cabang lomba + jenis kelamin + jenjang) yang punya peserta berstatus itu muncul di sini. <strong>Hidupkan</strong> linknya, lalu salin & kirim ke grup WA peserta -- peserta mencari namanya sendiri, melihat pratinjau, dan mengunduh. Lomba tim: tiap anggota tim dapat satu sertifikat.</p>' +
+      '<button type="button" class="btn btn--ghost" id="btn-muat-ulang-link-sertifikat" style="margin-bottom:10px;">Muat Ulang</button>' +
+      '<div id="daftar-link-sertifikat"><p class="hint">Memuat...</p></div>' +
+    '</div>'
+  );
+}
+
+function setupLinkSertifikatPeserta() {
+  const wadah = document.getElementById("daftar-link-sertifikat");
+  if (!wadah) return;
+
+  async function muat() {
+    wadah.innerHTML = '<p class="hint">Memuat...</p>';
+    const { data, error } = await supabaseClient.rpc("daftar_grup_sertifikat");
+    if (error) { wadah.innerHTML = '<p class="hint">Gagal memuat: ' + escapeHTML(error.message) + ' (sudah menjalankan migrasi 0057?)</p>'; return; }
+    const grup = data || [];
+    if (grup.length === 0) {
+      wadah.innerHTML = '<p class="hint">Belum ada peserta berstatus "Sudah Ikut Lomba".</p>';
+      return;
+    }
+    const settings = await ambilSiteSettingsWALomba();
+    const dasar = (settings.site_url || window.location.origin).replace(/\/+$/, "");
+
+    wadah.innerHTML =
+      '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr>' +
+        '<th>Cabang Lomba</th><th>Jenis Kelamin</th><th>Jenjang</th><th>Jumlah</th><th>Link Aktif</th><th>Link</th>' +
+      '</tr></thead><tbody>' +
+      grup.map(function (g, i) {
+        const jk = g.jenis_kelamin === "laki-laki" ? "Laki-laki" : g.jenis_kelamin === "perempuan" ? "Perempuan" : "-";
+        return '<tr>' +
+          '<td>' + escapeHTML(g.lomba_nama) + '</td><td>' + jk + '</td><td>' + escapeHTML(g.jenjang || "-") + '</td><td>' + g.jumlah + '</td>' +
+          '<td><label><input type="checkbox" class="chk-link-sertifikat" data-i="' + i + '"' + (g.aktif ? " checked" : "") + ' /> ' + (g.aktif ? "Hidup" : "Mati") + '</label></td>' +
+          '<td>' + (g.token ? '<button type="button" class="btn btn--ghost btn-salin-link-sertifikat" data-i="' + i + '"' + (g.aktif ? "" : " disabled") + '>Salin Link</button>' : '<span class="hint">Hidupkan dulu</span>') + '</td>' +
+        '</tr>';
+      }).join("") +
+      '</tbody></table></div>';
+
+    function linkDari(g) { return dasar + "/#/sertifikat?grup=" + g.token; }
+
+    wadah.querySelectorAll(".chk-link-sertifikat").forEach(function (chk) {
+      chk.addEventListener("change", async function () {
+        const g = grup[Number(chk.dataset.i)];
+        chk.disabled = true;
+        const { error: err } = await supabaseClient.rpc("atur_grup_sertifikat", {
+          p_lomba_id: g.lomba_id, p_jenis_kelamin: g.jenis_kelamin, p_jenjang: g.jenjang, p_aktif: chk.checked
+        });
+        if (err) { alert("Gagal mengubah link: " + err.message); }
+        muat();
+      });
+    });
+    wadah.querySelectorAll(".btn-salin-link-sertifikat").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const link = linkDari(grup[Number(btn.dataset.i)]);
+        try { await navigator.clipboard.writeText(link); btn.textContent = "✓ Tersalin"; setTimeout(function () { btn.textContent = "Salin Link"; }, 2000); }
+        catch (e) { prompt("Salin (Ctrl+C) link ini:", link); }
+      });
+    });
+  }
+
+  document.getElementById("btn-muat-ulang-link-sertifikat").addEventListener("click", muat);
+  muat();
+}
+
 // ======================= CETAK ULANG/SUSULAN (pilih peserta tertentu, BARU) =======================
 // Beda dari "Unduh Kartu Peserta (PDF)"/"Unduh Kartu Peserta Futsal/Tim
 // (PDF)" di atas (yang SELALU mencetak SEMUA pendaftar "Diterima" sekaligus)
@@ -5182,6 +5262,7 @@ async function loadTabKartu() {
     panelKartuPendampingHTML() +
     panelLogoSponsorHTML() +
     panelSertifikatHTML() +
+    panelLinkSertifikatPesertaHTML() +
     '<div class="form-shell" style="margin-top:20px;max-width:560px;">' +
       '<h3>Cetak Kartu &amp; Sertifikat</h3>' +
       '<div class="field"><label>Cabang Lomba</label><select id="cetak-filter-lomba"><option value="">Semua Lomba</option>' + opsiLombaCetak + '</select></div>' +
@@ -5203,6 +5284,7 @@ async function loadTabKartu() {
   setupKartuPendamping(FIELD_PENDAMPING, templatesSemua, logoAktif);
   setupLogoSponsor(templatesSemua);
   setupSertifikat(FIELD_SERTIFIKAT, templatesSemua);
+  setupLinkSertifikatPeserta();
   setupCetakSusulan(templatesSemua);
 
   document.getElementById("btn-cetak-peserta").addEventListener("click", function () { cetakKartuPDF("peserta"); });
