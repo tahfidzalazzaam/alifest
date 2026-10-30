@@ -3795,6 +3795,9 @@ const KARTU_FONT_MIN_RASIO = 0.55;
 // drag-and-drop untuk menggeser) -- cuma titik gambar teksnya yang
 // dipindah ke tengah kotak lewat gambarTeksPasKotak() di bawah, untuk
 // field yang disebut di sini.
+// Font Sertifikat (permintaan panitia): Times New Roman, tebal. Daftar
+// cadangan untuk perangkat tanpa Times New Roman (Android/Linux).
+const SERTIFIKAT_FAMILI_FONT = "'Times New Roman', Times, 'Liberation Serif', 'Tinos', serif";
 const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim: true, nama_anggota: true, peserta: true };
 
 // Menggambar satu baris teks (`teks`) supaya PAS di dalam kotak pembatas
@@ -3811,13 +3814,15 @@ const KARTU_FIELD_RATA_TENGAH = { nama: true, nomor_pendaftaran: true, nama_tim:
 // `align` ("left"/"center", default "left") -- lihat KARTU_FIELD_RATA_TENGAH
 // di atas; untuk "center" teks digambar di tengah kotak (x + lebarMaks/2),
 // "x" sendiri tetap tepi kiri kotak, tidak berubah artinya.
-function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align) {
+function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align, famili, berat) {
+  famili = famili || "'Plus Jakarta Sans', sans-serif";
+  berat = berat || "600";
   teks = teks || "-";
   align = align === "center" ? "center" : "left";
 
   if (!lebarMaks) {
     ctx.textAlign = align;
-    ctx.font = "600 " + fontAwal + "px 'Plus Jakarta Sans', sans-serif";
+    ctx.font = berat + " " + fontAwal + "px " + famili;
     ctx.fillText(teks, x, y);
     ctx.textAlign = "left"; // dikembalikan supaya tidak mempengaruhi field lain
     return;
@@ -3825,10 +3830,10 @@ function gambarTeksPasKotak(ctx, teks, x, y, fontAwal, lebarMaks, align) {
 
   const fontMin = Math.max(14, Math.round(fontAwal * KARTU_FONT_MIN_RASIO));
   let font = fontAwal;
-  ctx.font = "600 " + font + "px 'Plus Jakarta Sans', sans-serif";
+  ctx.font = berat + " " + font + "px " + famili;
   while (font > fontMin && ctx.measureText(teks).width > lebarMaks) {
     font -= 2;
-    ctx.font = "600 " + font + "px 'Plus Jakarta Sans', sans-serif";
+    ctx.font = berat + " " + font + "px " + famili;
   }
 
   if (ctx.measureText(teks).width > lebarMaks) {
@@ -3876,6 +3881,7 @@ function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiP
   }
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "top";
+  const gayaSertifikat = fields.some(function (f) { return f.key === "lomba_sertifikat"; });
   fields.forEach(function (f) {
     const pos = (layout && layout[f.key]) || { x: 40, y: 40, font: 22, lebar: 880 };
     // Lebar kotak: pakai yang diatur panitia -- untuk layout LAMA (sebelum
@@ -3884,8 +3890,13 @@ function gambarKartu(canvas, templateImg, layout, data, fields, lebarPx, tinggiP
     // yang sudah pernah diatur sebelum ini tetap ikut terlindung dari nama
     // yang meluber tanpa panitia perlu mengatur ulang satu-satu.
     const lebar = pos.lebar || Math.max(100, lebarPx - pos.x - 40);
-    const align = KARTU_FIELD_RATA_TENGAH[f.key] ? "center" : "left";
-    gambarTeksPasKotak(ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar, align);
+    // Sertifikat: SEMUA field rata tengah, font Times New Roman tebal
+    // (permintaan panitia). Kartu tetap memakai aturan lama.
+    const align = (gayaSertifikat || KARTU_FIELD_RATA_TENGAH[f.key]) ? "center" : "left";
+    gambarTeksPasKotak(
+      ctx, data[f.key] || "-", pos.x, pos.y, pos.font, lebar, align,
+      gayaSertifikat ? SERTIFIKAT_FAMILI_FONT : null, gayaSertifikat ? "700" : null
+    );
   });
 }
 
@@ -4817,6 +4828,13 @@ function singkatNamaLomba(nama) {
   return (nama || "").replace(/^lomba\s+/i, "").trim();
 }
 
+// Teks field "Cabang Lomba" di Sertifikat: nama lomba + jenjang + Putra/Putri,
+// mis. "Panahan SD Putra". Bagian yang kosong/tidak dikenal dilewati.
+function labelLombaSertifikat(namaLomba, jenjang, jenisKelamin) {
+  const jk = jenisKelamin === "laki-laki" ? "Putra" : jenisKelamin === "perempuan" ? "Putri" : "";
+  return [singkatNamaLomba(namaLomba), (jenjang || "").trim(), jk].filter(Boolean).join(" ");
+}
+
 // ======================= CETAK SERTIFIKAT (PDF, BARU) =======================
 // Mencetak SATU sertifikat PER HALAMAN A4 landscape (beda dari Kartu yang
 // 4-per-halaman) untuk peserta INDIVIDU dan tiap ANGGOTA tim (status
@@ -4849,14 +4867,14 @@ async function cetakSertifikatPDF() {
   // nama cabangnya (lihat definisi fungsi itu).
   const daftarData = [];
   rows.filter(function (r) { return r.tipe !== "tim"; }).forEach(function (r) {
-    daftarData.push({ nama: r.nama_lengkap, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(r.lomba_nama) });
+    daftarData.push({ nama: r.nama_lengkap, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(r.lomba_nama, r.jenjang, r.jenis_kelamin) });
   });
   for (const r of rows.filter(function (r) { return r.tipe === "tim"; })) {
     const { data: anggota, error: errAnggota } = await supabaseClient
       .from("anggota_tim").select("nama").eq("nomor_pendaftaran", r.nomor_pendaftaran).order("created_at");
     if (errAnggota) { alert("Gagal memuat anggota tim \"" + r.nama_tim + "\": " + errAnggota.message); return; }
     (anggota || []).forEach(function (a) {
-      daftarData.push({ nama: a.nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(r.lomba_nama) });
+      daftarData.push({ nama: a.nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(r.lomba_nama, r.jenjang, r.jenis_kelamin) });
     });
   }
 
