@@ -1684,6 +1684,53 @@ async function renderTombolWALomba(row, rule) {
   });
 }
 
+// ======================= RINGKASAN JUMLAH PESERTA DITERIMA =======================
+// "Diterima" di sini = status "Diterima" ATAU "Sudah Ikut Lomba" (keduanya
+// sudah lolos verifikasi). Peserta individu dihitung 1 orang; pendaftar tim
+// (Futsal dkk.) dihitung per ANGGOTA tim (tabel anggota_tim), bukan 1 per tim.
+const STATUS_DITERIMA_RINGKAS = ["Diterima", "Sudah Ikut Lomba"];
+
+// Peta { pendaftaran_id: jumlah anggota } -- dibaca bertahap (1000 baris per
+// permintaan, batas bawaan PostgREST) supaya tidak terpotong.
+async function ambilJumlahAnggotaTimMap() {
+  const peta = {};
+  const UKURAN = 1000;
+  for (let dari = 0; ; dari += UKURAN) {
+    const { data, error } = await supabaseClient
+      .from("anggota_tim").select("pendaftaran_id").order("id").range(dari, dari + UKURAN - 1);
+    if (error) throw error;
+    (data || []).forEach(function (a) { peta[a.pendaftaran_id] = (peta[a.pendaftaran_id] || 0) + 1; });
+    if (!data || data.length < UKURAN) break;
+  }
+  return peta;
+}
+
+function hitungRingkasanDiterima(rows, anggotaMap) {
+  const hasil = { individu: 0, tim: 0, anggota: 0, total: 0, perLomba: {} };
+  rows.forEach(function (r) {
+    if (STATUS_DITERIMA_RINGKAS.indexOf(r.status) === -1) return;
+    let n;
+    if (r.tipe === "tim") { n = anggotaMap[r.id] || 0; hasil.tim++; hasil.anggota += n; }
+    else { n = 1; hasil.individu++; }
+    hasil.total += n;
+    hasil.perLomba[r.lomba_id] = (hasil.perLomba[r.lomba_id] || 0) + n;
+  });
+  return hasil;
+}
+
+function ringkasanDiterimaHTML(h, rules) {
+  const perLomba = rules.filter(function (r) { return h.perLomba[r.id]; }).map(function (r) {
+    return '<span class="rekap-chip">' + escapeHTML(r.nama) + ': ' + h.perLomba[r.id] + '</span>';
+  }).join(" ");
+  return (
+    '<div class="form-shell" style="max-width:none;margin:0 0 14px;padding:12px 16px;">' +
+      '<strong>Total peserta/anggota diterima: ' + h.total + ' orang</strong>' +
+      ' <span class="hint">(' + h.individu + ' peserta individu + ' + h.anggota + ' anggota dari ' + h.tim + ' tim; status "Diterima" dan "Sudah Ikut Lomba")</span>' +
+      (perLomba ? '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' + perLomba + '</div>' : '') +
+    '</div>'
+  );
+}
+
 async function loadTabPendaftar() {
   const content = document.getElementById("admin-content");
   content.innerHTML = '<p class="hint">Memuat data pendaftar...</p>';
@@ -1701,6 +1748,7 @@ async function loadTabPendaftar() {
   let lombaFilter = ""; // diatur dengan mengetuk kartu rekap, bukan dropdown lagi
 
   content.innerHTML =
+    '<div id="ringkas-diterima"></div>' +
     '<div class="rekap-grid" id="rekap-grid"></div>' +
     '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' +
       '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap">🖼️ Buat Poster Rekap</button>' +
@@ -1732,9 +1780,20 @@ async function loadTabPendaftar() {
      tetap dipakai apa adanya untuk tabel pendaftar & unduhan XLSX di bawah --
      admin tetap perlu melihat/mengunduh baris yang ditolak, cuma tidak ikut
      masuk hitungan rekap. */
+  let anggotaMapRingkas = null;
+  function renderRingkasDiterima() {
+    const el = document.getElementById("ringkas-diterima");
+    if (!el) return;
+    if (!anggotaMapRingkas) { el.innerHTML = '<p class="hint">Menghitung total peserta diterima...</p>'; return; }
+    el.innerHTML = ringkasanDiterimaHTML(hitungRingkasanDiterima(rows, anggotaMapRingkas), rules);
+  }
+  ambilJumlahAnggotaTimMap().then(function (m) { anggotaMapRingkas = m; renderRingkasDiterima(); })
+    .catch(function (e) { const el = document.getElementById("ringkas-diterima"); if (el) el.innerHTML = '<p class="hint">Gagal menghitung total peserta diterima: ' + escapeHTML(e.message) + '</p>'; });
+
   function renderRekap() {
     const rekapEl = document.getElementById("rekap-grid");
     if (!rekapEl) return;
+    renderRingkasDiterima();
 
     const rowsRekap = rows.filter(function (r) { return r.status !== "Ditolak"; });
 
@@ -2142,7 +2201,28 @@ async function loadTabPendamping() {
 
   const jumlahGanda = kelompok.filter(function (k) { return k.adaGanda; }).length;
 
+  // Ringkasan jumlah peserta diterima + pendaftar (berstatus diterima) yang
+  // TIDAK mengisi nama pendamping sama sekali.
+  let anggotaMapP = {};
+  try { anggotaMapP = await ambilJumlahAnggotaTimMap(); } catch (e) { /* ringkasan tetap tampil tanpa hitungan anggota */ }
+  const ringkasP = hitungRingkasanDiterima(rows || [], anggotaMapP);
+  const tanpaPendamping = (rows || []).filter(function (r) {
+    return STATUS_DITERIMA_RINGKAS.indexOf(r.status) !== -1 &&
+      !(r.pembina || r.penanggung_jawab_lembaga || r.nama_pendamping || "").trim();
+  });
+  let orangTanpa = 0;
+  tanpaPendamping.forEach(function (r) { orangTanpa += r.tipe === "tim" ? (anggotaMapP[r.id] || 0) : 1; });
+  const ringkasPendampingHTML =
+    '<div class="form-shell" style="max-width:none;margin:0 0 14px;padding:12px 16px;">' +
+      '<div><strong>Total peserta/anggota diterima: ' + ringkasP.total + ' orang</strong> <span class="hint">(' + ringkasP.individu + ' individu + ' + ringkasP.anggota + ' anggota dari ' + ringkasP.tim + ' tim)</span></div>' +
+      '<div style="margin-top:6px;">Pendamping unik tercatat: <strong>' + kelompok.length + '</strong> &nbsp;·&nbsp; ' +
+        'Tidak mengisi nama pendamping: <strong style="color:' + (tanpaPendamping.length ? 'var(--danger)' : 'inherit') + ';">' + tanpaPendamping.length + ' pendaftaran</strong> <span class="hint">(' + orangTanpa + ' peserta/anggota)</span> ' +
+        (tanpaPendamping.length ? '<button type="button" class="btn btn--ghost" id="btn-lihat-tanpa-pendamping" style="margin-left:6px;">Lihat daftarnya</button>' : '') +
+      '</div>' +
+    '</div>';
+
   content.innerHTML =
+    ringkasPendampingHTML +
     '<p class="hint">Daftar pendamping UNIK (guru pendamping Futsal, penanggung jawab Perwakilan Lembaga, atau Nama Pendamping individu kalau diisi) -- pendamping yang mendampingi lebih dari satu peserta/tim/lomba sudah digabung jadi satu baris, dicocokkan lewat nama (ejaan dirapikan) dan/atau nomor WA. <strong>Ketuk baris</strong> untuk melihat detail siapa saja yang didampingi. Pendaftaran berstatus "Ditolak" tidak ikut dihitung.' +
       (jumlahGanda > 0 ? ' <strong style="color:var(--danger);">⚠️ Ada ' + jumlahGanda + ' pendamping dengan peserta/tim yang ternyata tercatat ganda (didampingi >1 pendamping) -- lihat detailnya di popup.</strong>' : '') +
     '</p>' +
@@ -2189,6 +2269,18 @@ async function loadTabPendamping() {
 
   renderBaris();
   document.getElementById("filter-cari-pendamping").addEventListener("input", renderBaris);
+
+  const btnTanpa = document.getElementById("btn-lihat-tanpa-pendamping");
+  if (btnTanpa) btnTanpa.addEventListener("click", function () {
+    const baris = tanpaPendamping.map(function (r) {
+      const peserta = r.tipe === "tim" ? (r.nama_tim || r.nama_lengkap) : r.nama_lengkap;
+      const jml = r.tipe === "tim" ? (anggotaMapP[r.id] || 0) + " anggota" : "1 orang";
+      return '<tr><td>' + escapeHTML(peserta || "-") + '</td><td>' + escapeHTML(r.lomba_nama || r.lomba_id || "-") + '</td><td>' + escapeHTML(r.nomor_pendaftaran || "-") + '</td><td>' + jml + '</td><td>' + escapeHTML(r.whatsapp || "-") + '</td></tr>';
+    }).join("");
+    bukaModal("Pendaftaran tanpa nama pendamping (" + tanpaPendamping.length + ")",
+      '<p class="hint">Pendaftar berstatus "Diterima"/"Sudah Ikut Lomba" yang kolom pendampingnya kosong. Nomor WA di sini milik pendaftar/penanggung jawab pendaftarannya.</p>' +
+      '<div class="table-wrap"><table class="admin-table modal-table"><thead><tr><th>Peserta/Tim</th><th>Lomba</th><th>Nomor Pendaftaran</th><th>Jumlah</th><th>No. WA</th></tr></thead><tbody>' + baris + '</tbody></table></div>');
+  });
 }
 
 // Popup "siapa saja yang didampingi" oleh satu kelompok pendamping --
