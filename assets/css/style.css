@@ -1029,6 +1029,7 @@ textarea { resize: vertical; min-height: 80px; }
 .admin-table tr.status-row--pending td { background: #fdf6e3; }
 .admin-table tr.status-row--warn td { background: #fde7cf; }
 .admin-table tr.status-row--success td { background: var(--green-100); }
+.admin-table tr.status-row--done td { background: #dcebf7; }
 .admin-table tr.status-row--danger td { background: rgba(194, 58, 46, 0.1); }
 /* Dropdown status & tombol di dalam baris berwarna tetap diberi latar putih
    sendiri supaya kontras & jelas bisa diklik, tidak "tenggelam" ke warna
@@ -1463,6 +1464,7 @@ tr.row-clickable:hover { background: var(--green-100); }
 .status-pill--pending { background: #fdf6e3; color: #8a6d1a; }
 .status-pill--warn { background: #fde7cf; color: #a4480c; }
 .status-pill--success { background: var(--green-100); color: var(--green-900); }
+.status-pill--done { background: #dcebf7; color: #1b4f7a; }
 .status-pill--danger { background: rgba(194, 58, 46, 0.12); color: var(--danger); }
 
 .modal-status-hint {
