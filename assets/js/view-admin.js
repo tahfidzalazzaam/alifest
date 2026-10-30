@@ -5002,6 +5002,7 @@ function panelCetakSusulanHTML(opsiLombaCetak) {
       '<div style="display:flex;gap:12px;align-items:center;margin-top:10px;flex-wrap:wrap;">' +
         '<button type="button" class="btn btn--primary" id="btn-susulan-cetak">Cetak Kartu Terpilih (PDF)</button>' +
         '<span class="hint" id="susulan-jumlah-terpilih">0 dipilih</span>' +
+        '<button type="button" class="btn btn--ghost" id="btn-susulan-kosongkan">Kosongkan Pilihan</button>' +
       '</div>' +
       '<p class="hint" id="susulan-status"></p>' +
     '</div>'
@@ -5065,6 +5066,10 @@ function setupCetakSusulan(templatesSemua) {
 
     if (error) { alert("Gagal memuat data: " + error.message); return; }
 
+    // Pilihan (centang) dari muat sebelumnya DIPERTAHANKAN: panitia bisa
+    // memilih nama di satu cabang lomba, ganti filter, muat lagi, lalu
+    // memilih nama di cabang lain -- semuanya dicetak dalam satu PDF.
+    const pilihanLama = _susulanItems.filter(function (it) { return it.dipilih; });
     _susulanItems = [];
     (rows || []).filter(function (r) { return r.tipe !== "tim"; }).forEach(function (r) {
       _susulanItems.push({
@@ -5093,6 +5098,16 @@ function setupCetakSusulan(templatesSemua) {
       });
     }
 
+    // Gabungkan kembali pilihan lama: yang ada di daftar baru dicentang
+    // lagi, yang dari cabang lain ditambahkan ke daftar (tetap tercentang).
+    let adaDariCabangLain = false;
+    pilihanLama.forEach(function (lama) {
+      const sama = _susulanItems.find(function (x) { return x.id === lama.id; });
+      if (sama) sama.dipilih = true;
+      else { _susulanItems.push(lama); adaDariCabangLain = true; }
+    });
+    if (adaDariCabangLain) _susulanLombaSlug = "gabungan";
+
     inputCari.disabled = false;
     inputCari.value = "";
     renderDaftarSusulan();
@@ -5104,6 +5119,12 @@ function setupCetakSusulan(templatesSemua) {
   });
 
   inputCari.addEventListener("input", renderDaftarSusulan);
+
+  document.getElementById("btn-susulan-kosongkan").addEventListener("click", function () {
+    _susulanItems.forEach(function (it) { it.dipilih = false; });
+    renderDaftarSusulan();
+    perbaruiJumlahSusulanTerpilih();
+  });
 
   document.getElementById("btn-susulan-cetak").addEventListener("click", function () { cetakKartuTerpilihPDF(templatesSemua); });
 }
