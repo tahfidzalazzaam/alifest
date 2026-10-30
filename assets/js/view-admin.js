@@ -826,71 +826,6 @@ function pasangListenerStatusPopup(row, isTim, rule) {
   // pasangListenerStatusPopup lagi) supaya selalu menampilkan pesan & status
   // "sudah terkirim" yang sesuai dengan `row` TERBARU.
   renderTombolWALomba(row, rule);
-  renderTombolSertifikatPendamping(row);
-}
-
-// Nama "pendamping" untuk SATU baris pendaftaran -- COALESCE dari TIGA
-// kolom yang mutually-exclusive (lihat juga kumpulkanEntriPendamping() di
-// tab "Data Pendamping"): pembina (tim/Futsal), penanggung_jawab_lembaga
-// (Perwakilan Lembaga), atau nama_pendamping (individu biasa, opsional,
-// migrasi 0027). Dipakai renderTombolSertifikatPendamping() di bawah untuk
-// menentukan apakah baris ini PUNYA pendamping sama sekali (kalau tidak,
-// tombol link sertifikatnya tidak relevan/tidak ditampilkan).
-function namaPendampingUntukSertifikat(row) {
-  return row.pembina || row.penanggung_jawab_lembaga || row.nama_pendamping || "";
-}
-
-// Mengisi `.sertifikat-link-wrap[data-id=...]` (field "Sertifikat
-// Pendamping" di popup detail Tim/Individu, lihat bukaModalTim/
-// bukaModalIndividu) -- BERBEDA dari "Kirim WA": tombol ini TIDAK otomatis
-// mengirim apa pun, cuma MEMBUAT (kalau belum ada) & MENAMPILKAN link
-// rahasia yang panitia salin & kirimkan SENDIRI secara manual ke pendamping
-// (lewat WA/kanal apa pun pilihan panitia) -- permintaan panitia, berbeda
-// dari link {link_lengkapi} yang otomatis tertaut ke pesan status WA.
-// HANYA relevan kalau baris ini punya nama pendamping (lihat
-// namaPendampingUntukSertifikat() di atas) DAN statusnya PERSIS "Diterima"
-// (gating yang sama dipakai ulang di server oleh RPC ambil_sertifikat(),
-// migrasi 0055 -- jadi walau tombol ini sempat tampil lalu statusnya
-// berubah lagi, link yang SUDAH terkirim otomatis tidak berlaku lagi).
-async function renderTombolSertifikatPendamping(row) {
-  const wrap = document.querySelector('.sertifikat-link-wrap[data-id="' + row.id + '"]');
-  if (!wrap) return;
-
-  const namaPendamping = namaPendampingUntukSertifikat(row);
-  if (!namaPendamping) {
-    wrap.innerHTML = '<span class="hint">Tidak ada data pendamping/penanggung jawab untuk pendaftaran ini.</span>';
-    return;
-  }
-  if (row.status !== "Diterima") {
-    wrap.innerHTML = '<span class="hint">Link baru aktif begitu status pendaftaran ini "Diterima".</span>';
-    return;
-  }
-
-  wrap.innerHTML = '<button type="button" class="btn-link btn-link-sertifikat" data-id="' + escapeHTML(row.id) + '">🎓 Buat/Lihat Link Sertifikat</button>';
-  wrap.querySelector(".btn-link-sertifikat").addEventListener("click", async function () {
-    const btn = this;
-    const labelAsli = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "Menyiapkan...";
-    try {
-      const { data: token, error } = await supabaseClient.rpc("pastikan_token_sertifikat", { p_id: row.id });
-      if (error) throw error;
-      const settings = await ambilSiteSettingsWALomba();
-      const link = settings.site_url
-        ? (settings.site_url + "/#/sertifikat?token=" + token)
-        : ("#/sertifikat?token=" + token);
-      // prompt() dipakai (bukan alert()) supaya panitia bisa langsung
-      // menyalin teksnya (Ctrl+C) tanpa harus select manual -- link ini
-      // sengaja TIDAK dikirim otomatis, panitia yang memutuskan kapan &
-      // lewat kanal apa mengirimkannya ke pendamping.
-      prompt('Link Sertifikat untuk "' + namaPendamping + '" -- salin (Ctrl+C) lalu kirimkan sendiri ke pendamping:', link);
-    } catch (e) {
-      alert("Gagal menyiapkan link sertifikat: " + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = labelAsli;
-    }
-  });
 }
 
 /* -------- Popup detail tim (Futsal): dibuka dengan mengetuk baris -------- */
@@ -909,7 +844,6 @@ async function bukaModalTim(row, rule) {
       '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, true) + '</span></div>' +
-      '<div class="modal-field modal-field--full"><span class="modal-field__label">Sertifikat Pendamping</span><span class="modal-field__value"><span class="sertifikat-link-wrap" data-id="' + escapeHTML(row.id) + '"></span></span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Ada anggota tim yang usianya di luar syarat jenjang lomba ini (disorot merah di tabel bawah) -- silakan cek Surat Delegasi sebelum memutuskan status akhirnya.</p>'
@@ -1383,7 +1317,6 @@ function bukaModalIndividu(row, rule) {
       '<div class="modal-field"><span class="modal-field__label">Nomor Pendaftaran</span><span class="modal-field__value">' + escapeHTML(row.nomor_pendaftaran) + '</span></div>' +
       '<div class="modal-field"><span class="modal-field__label">Tipe Pendaftar</span><span class="modal-field__value">' + labelTipePendaftarHTML(row) + '</span></div>' +
       '<div class="modal-field modal-field--full"><span class="modal-field__label">Status (ketuk untuk ubah)</span><span class="modal-field__value">' + statusSelectPopupHTML(row.id, row.status, false) + '</span></div>' +
-      '<div class="modal-field modal-field--full"><span class="modal-field__label">Sertifikat Pendamping</span><span class="modal-field__value"><span class="sertifikat-link-wrap" data-id="' + escapeHTML(row.id) + '"></span></span></div>' +
     '</div>' +
     (row.status === "Perlu Verifikasi Usia"
       ? '<p class="modal-status-hint">Usia peserta ini di luar syarat jenjang lomba pada tanggal pelaksanaan -- silakan cek data sebelum memutuskan status akhirnya.</p>'
@@ -4549,8 +4482,7 @@ function setupKartuPendamping(fields, templatesSemua, logoAktif) {
 // Beda dari ketiga jenis Kartu di atas (per Cabang Lomba x Jenis Kelamin,
 // atau satu templat global khusus Pendamping) -- Sertifikat SATU-SATUNYA
 // templat untuk SEMUA penerima (peserta individu, tiap anggota tim, &
-// pendamping yang mengunduh lewat link publik, lihat cetakSertifikatPDF()
-// & "Link Sertifikat Pendamping" di popup detail Data Pendaftar) -- cuma
+// lihat cetakSertifikatPDF() & link per kelompok, migrasi 0057) -- cuma
 // isi teksnya (Nama/Cabang Lomba/Nomor Pendaftaran) yang beda per orang.
 // Memakai editor drag-and-drop YANG SAMA (buatEditorDrag()) dengan Kartu,
 // cuma dioper opsi kanvas A4 landscape lewat parameter "opsi" di akhir.
@@ -4558,7 +4490,7 @@ function panelSertifikatHTML() {
   return (
     '<div class="form-shell" style="margin-bottom:20px;">' +
       '<h3>🎓 Sertifikat (templat generik, untuk semua penerima)</h3>' +
-      '<p>Satu desain sertifikat ini dipakai untuk SEMUA penerima -- peserta individu, tiap anggota tim, dan pendamping -- cuma teks Nama/Cabang Lomba/Nomor Pendaftaran yang berbeda-beda per orang. Idealnya berukuran/rasio A4 LANDSCAPE (' + SERTIFIKAT_LEBAR_CM + ' × ' + SERTIFIKAT_TINGGI_CM + ' cm).</p>' +
+      '<p>Satu desain sertifikat ini dipakai untuk SEMUA penerima -- peserta individu & tiap anggota tim (BUKAN pendamping) -- cuma teks Nama/Cabang Lomba/Nomor Pendaftaran yang berbeda-beda per orang. Idealnya berukuran/rasio A4 LANDSCAPE (' + SERTIFIKAT_LEBAR_CM + ' × ' + SERTIFIKAT_TINGGI_CM + ' cm).</p>' +
       '<div class="field">' +
         '<label>Template (PNG)</label>' +
         '<input type="file" id="input-template-sertifikat" accept=".png,image/png" />' +
@@ -4847,9 +4779,7 @@ function labelLombaSertifikat(namaLomba, jenjang, jenisKelamin) {
 // Mencetak SATU sertifikat PER HALAMAN A4 landscape (beda dari Kartu yang
 // 4-per-halaman) untuk peserta INDIVIDU dan tiap ANGGOTA tim (status
 // "Diterima" saja, sama seperti Kartu) -- TIDAK mengikutkan Pendamping di
-// sini (pendamping mengunduh sertifikatnya SENDIRI lewat link token publik,
-// lihat "Link Sertifikat Pendamping" di popup detail Data Pendaftar &
-// migrasi 0055 -- bukan dicetak massal panitia). Memakai SATU templat
+// sini (sertifikat HANYA untuk peserta, pendamping tidak mendapat sertifikat). Memakai SATU templat
 // generik (templatesSemua.sertifikat), bukan per lomba+gender seperti Kartu.
 async function cetakSertifikatPDF() {
   const statusEl = document.getElementById("cetak-status");
@@ -4926,8 +4856,12 @@ async function cetakSertifikatPDF() {
 function panelLinkSertifikatPesertaHTML() {
   return (
     '<div class="form-shell" style="margin-top:20px;">' +
-      '<h3>🔗 Link Sertifikat Peserta (per kelompok)</h3>' +
-      '<p>Ubah status peserta yang sudah mengikuti lomba menjadi <strong>"Sudah Ikut Lomba"</strong> (dropdown status di popup detail pendaftar). Kelompok (cabang lomba + jenis kelamin + jenjang) yang punya peserta berstatus itu muncul di sini. <strong>Hidupkan</strong> linknya, lalu salin & kirim ke grup WA peserta -- peserta mencari namanya sendiri, melihat pratinjau, dan mengunduh. Lomba tim: tiap anggota tim dapat satu sertifikat.</p>' +
+      '<h3>🔗 Link Sertifikat Peserta (satu link untuk semua)</h3>' +
+      '<p>Ubah status peserta yang sudah mengikuti lomba menjadi <strong>"Sudah Ikut Lomba"</strong> (dropdown status di popup detail pendaftar). Kelompok (cabang lomba + jenjang + jenis kelamin) yang punya peserta berstatus itu muncul di tabel di bawah. <strong>Hidupkan</strong> kelompok yang sertifikatnya sudah boleh diunduh, lalu salin <strong>satu link</strong> di bawah dan kirim ke grup WA peserta. Peserta memfilter <em>Cabang → Jenjang → Jenis Kelamin</em>, mencentang nama (boleh lintas kelompok), lalu mengunduh. Lomba tim: tiap anggota tim dapat satu sertifikat.</p>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-salin-link-sertifikat-umum">📋 Salin Link Sertifikat</button>' +
+        '<span class="hint" id="info-link-sertifikat-umum"></span>' +
+      '</div>' +
       '<button type="button" class="btn btn--ghost" id="btn-muat-ulang-link-sertifikat" style="margin-bottom:10px;">Muat Ulang</button>' +
       '<div id="daftar-link-sertifikat"><p class="hint">Memuat...</p></div>' +
     '</div>'
@@ -4938,6 +4872,25 @@ function setupLinkSertifikatPeserta() {
   const wadah = document.getElementById("daftar-link-sertifikat");
   if (!wadah) return;
 
+  document.getElementById("btn-salin-link-sertifikat-umum").addEventListener("click", async function () {
+    const btn = this;
+    const info = document.getElementById("info-link-sertifikat-umum");
+    btn.disabled = true;
+    try {
+      const { data: token, error } = await supabaseClient.rpc("token_sertifikat_umum");
+      if (error) throw error;
+      const settings = await ambilSiteSettingsWALomba();
+      const dasar = (settings.site_url || window.location.origin).replace(/\/+$/, "");
+      const link = dasar + "/#/sertifikat?k=" + token;
+      try { await navigator.clipboard.writeText(link); info.textContent = "✓ Link tersalin: " + link; }
+      catch (e) { prompt("Salin (Ctrl+C) link ini:", link); }
+    } catch (e) {
+      info.textContent = "Gagal menyiapkan link: " + e.message + " (sudah menjalankan migrasi 0058?)";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   async function muat() {
     wadah.innerHTML = '<p class="hint">Memuat...</p>';
     const { data, error } = await supabaseClient.rpc("daftar_grup_sertifikat");
@@ -4947,24 +4900,19 @@ function setupLinkSertifikatPeserta() {
       wadah.innerHTML = '<p class="hint">Belum ada peserta berstatus "Sudah Ikut Lomba".</p>';
       return;
     }
-    const settings = await ambilSiteSettingsWALomba();
-    const dasar = (settings.site_url || window.location.origin).replace(/\/+$/, "");
 
     wadah.innerHTML =
       '<div style="overflow-x:auto;"><table class="admin-table"><thead><tr>' +
-        '<th>Cabang Lomba</th><th>Jenis Kelamin</th><th>Jenjang</th><th>Jumlah</th><th>Link Aktif</th><th>Link</th>' +
+        '<th>Cabang Lomba</th><th>Jenjang</th><th>Jenis Kelamin</th><th>Jumlah</th><th>Dibuka di Link</th>' +
       '</tr></thead><tbody>' +
       grup.map(function (g, i) {
-        const jk = g.jenis_kelamin === "laki-laki" ? "Laki-laki" : g.jenis_kelamin === "perempuan" ? "Perempuan" : "-";
+        const jk = g.jenis_kelamin === "laki-laki" ? "Putra" : g.jenis_kelamin === "perempuan" ? "Putri" : "-";
         return '<tr>' +
-          '<td>' + escapeHTML(g.lomba_nama) + '</td><td>' + jk + '</td><td>' + escapeHTML(g.jenjang || "-") + '</td><td>' + g.jumlah + '</td>' +
+          '<td>' + escapeHTML(g.lomba_nama) + '</td><td>' + escapeHTML(g.jenjang || "-") + '</td><td>' + jk + '</td><td>' + g.jumlah + '</td>' +
           '<td><label><input type="checkbox" class="chk-link-sertifikat" data-i="' + i + '"' + (g.aktif ? " checked" : "") + ' /> ' + (g.aktif ? "Hidup" : "Mati") + '</label></td>' +
-          '<td>' + (g.token ? '<button type="button" class="btn btn--ghost btn-salin-link-sertifikat" data-i="' + i + '"' + (g.aktif ? "" : " disabled") + '>Salin Link</button>' : '<span class="hint">Hidupkan dulu</span>') + '</td>' +
         '</tr>';
       }).join("") +
       '</tbody></table></div>';
-
-    function linkDari(g) { return dasar + "/#/sertifikat?grup=" + g.token; }
 
     wadah.querySelectorAll(".chk-link-sertifikat").forEach(function (chk) {
       chk.addEventListener("change", async function () {
@@ -4973,15 +4921,8 @@ function setupLinkSertifikatPeserta() {
         const { error: err } = await supabaseClient.rpc("atur_grup_sertifikat", {
           p_lomba_id: g.lomba_id, p_jenis_kelamin: g.jenis_kelamin, p_jenjang: g.jenjang, p_aktif: chk.checked
         });
-        if (err) { alert("Gagal mengubah link: " + err.message); }
+        if (err) { alert("Gagal mengubah: " + err.message); }
         muat();
-      });
-    });
-    wadah.querySelectorAll(".btn-salin-link-sertifikat").forEach(function (btn) {
-      btn.addEventListener("click", async function () {
-        const link = linkDari(grup[Number(btn.dataset.i)]);
-        try { await navigator.clipboard.writeText(link); btn.textContent = "✓ Tersalin"; setTimeout(function () { btn.textContent = "Salin Link"; }, 2000); }
-        catch (e) { prompt("Salin (Ctrl+C) link ini:", link); }
       });
     });
   }
