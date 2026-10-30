@@ -145,7 +145,7 @@ async function initSertifikatGrupPublik(root, grup) {
       const canvas = document.createElement("canvas");
       gambarKartu(
         canvas, templateImg, layout,
-        { nama: nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(data.lomba) },
+        { nama: nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(data.lomba, data.jenjang, data.jenis_kelamin) },
         FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
       );
       canvas.style.cssText = "width:100%;height:auto;border:1px solid #ccc;border-radius:6px;";
@@ -252,7 +252,7 @@ function renderUnduhSertifikatPublik(root, data) {
       const canvas = document.createElement("canvas");
       gambarKartu(
         canvas, templateImg, layout,
-        { nama: data.nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(data.lomba) },
+        { nama: data.nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(data.lomba, data.jenjang, data.jenis_kelamin) },
         FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
       );
 
