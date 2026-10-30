@@ -216,6 +216,7 @@ async function loadTabTenant() {
     '<div class="pendapatan-bazar-box" id="bazar-pendapatan-box"></div>' +
     '<div class="poster-rekap-toolbar" style="margin:4px 0 16px;display:flex;gap:10px;flex-wrap:wrap;">' +
       '<button type="button" class="btn btn--ghost" id="btn-buka-poster-rekap-bazar">🖼️ Buat Poster Rekap Stand</button>' +
+      '<button type="button" class="btn btn--ghost" id="btn-buka-carousel-tenant-bazar">🎠 Buat Carousel Tenant</button>' +
       '<button type="button" class="btn btn--ghost" id="btn-unduh-xlsx-tenant">⬇️ Unduh Data Tenant (XLSX)</button>' +
     '</div>' +
     '<div class="admin-filters">' +
@@ -806,6 +807,10 @@ async function loadTabTenant() {
 
   document.getElementById("btn-buka-poster-rekap-bazar").addEventListener("click", function () {
     bukaPosterRekapBazar(rows);
+  });
+
+  document.getElementById("btn-buka-carousel-tenant-bazar").addEventListener("click", function () {
+    bukaCarouselTenantBazar();
   });
 
   document.getElementById("btn-unduh-xlsx-tenant").addEventListener("click", function () {
@@ -2744,6 +2749,693 @@ async function bukaPosterRekapBazar(tenantRows) {
     );
     document.getElementById("btn-coba-lagi-poster-bazar").addEventListener("click", function () {
       bukaPosterRekapBazar(tenantRows);
+    });
+  }
+}
+
+/* ==================== CAROUSEL TENANT (SLIDE PENGUMUMAN) ==================== */
+// Tombol "🎠 Buat Carousel Tenant" di tab "Data Tenant" membuat deretan
+// slide siap-posting (PNG 1080x1350, rasio 4:5) untuk mengumumkan tenant yang
+// sudah diterima: slide 1 = COVER ("Selamat Bergabung Tenant ALIF 5.0"),
+// slide berikutnya = daftar tenant, SATU SLIDE BERISI 5 TENANT (nama stand,
+// nomor stand, lokasi stand, foto). Desain "B3" (hijau mint, ilustrasi
+// bazar kartun, hiasan festival di sekeliling slide) yang disetujui panitia.
+//
+// Aturan data (disetujui panitia):
+//  - Yang masuk: tenant berstatus "Diterima" -- TERMASUK tenant "Milik
+//    Panitia" (berbeda dari rekap/poster yang mengecualikannya).
+//  - Foto: Poster Promosi (url_foto_produk[1]); kalau tidak ada, Logo Usaha
+//    (url_foto_produk[0]); kalau dua-duanya tidak ada, kotak warna polos.
+//  - Nomor stand: kode petak yang ditempati ("DA-7"); kalau menyewa lebih
+//    dari satu petak, ditulis "DA-7 +1".
+//  - Lokasi stand: nama area dari kode petak -- SM = Samping Masjid,
+//    A = Depan Masjid, DA = Depan Asrama, PSB = Depan Kantor PSB.
+//  - Logo: logo situs (site_settings.logo_url, diunggah di panel admin),
+//    digambar apa adanya tanpa latar.
+// Semua nama di blok ini berawalan "Carousel" supaya tidak bentrok dengan
+// file lain (semua <script> klasik berbagi SATU scope global).
+
+const CAROUSEL_LEBAR_PX = 1080;
+const CAROUSEL_TINGGI_PX = 1350;
+const CAROUSEL_PER_SLIDE = 5;
+const CAROUSEL_AREA_LOKASI = { SM: "Samping Masjid", A: "Depan Masjid", DA: "Depan Asrama", PSB: "Depan Kantor PSB" };
+const CAROUSEL_WARNA_FOTO_KOSONG = ["#0F6B43", "#E0562F", "#2F6FA8", "#B07A10", "#16140F"];
+
+// Ilustrasi cover: bazar festival islami (stand beratap belang, masjid,
+// bendera, balon, pengunjung) -- 952x480, digambar ke kanvas sebagai gambar.
+const CAROUSEL_SVG_COVER = `<svg xmlns="http://www.w3.org/2000/svg" width="952" height="480" viewBox="0 0 952 480">
+<defs>
+<clipPath id="panel"><rect width="952" height="480" rx="36"/></clipPath>
+<g id="stall">
+<path d="M8 334V372M142 334V372" stroke="#16140F" stroke-width="5" fill="none"/>
+<rect x="0" y="300" width="25" height="34" fill="currentColor"/><circle cx="12.5" cy="334" r="12.5" fill="currentColor"/>
+<rect x="25" y="300" width="25" height="34" fill="#FFFBF2"/><circle cx="37.5" cy="334" r="12.5" fill="#FFFBF2"/>
+<rect x="50" y="300" width="25" height="34" fill="currentColor"/><circle cx="62.5" cy="334" r="12.5" fill="currentColor"/>
+<rect x="75" y="300" width="25" height="34" fill="#FFFBF2"/><circle cx="87.5" cy="334" r="12.5" fill="#FFFBF2"/>
+<rect x="100" y="300" width="25" height="34" fill="currentColor"/><circle cx="112.5" cy="334" r="12.5" fill="currentColor"/>
+<rect x="125" y="300" width="25" height="34" fill="#FFFBF2"/><circle cx="137.5" cy="334" r="12.5" fill="#FFFBF2"/>
+<path d="M-6 300L14 268H136L156 300z" fill="currentColor" stroke="#16140F" stroke-width="3" stroke-linejoin="round"/>
+<rect x="0" y="372" width="150" height="58" rx="4" fill="currentColor" stroke="#16140F" stroke-width="3"/>
+<circle cx="75" cy="402" r="13" fill="#FFFBF2"/>
+<circle cx="81" cy="399" r="11" fill="currentColor"/>
+</g>
+</defs>
+<g clip-path="url(#panel)">
+<rect width="952" height="480" fill="#EAF7EE"/>
+<circle cx="880" cy="160" r="44" fill="#FFC93C" stroke="#16140F" stroke-width="3"/>
+<g fill="#FFFFFF" stroke="#16140F" stroke-width="2.5">
+<path d="M150 150a20 20 0 0 1 30-14a26 26 0 0 1 48 6a18 18 0 0 1-4 36H160a18 18 0 0 1-10-28z"/>
+<path d="M690 140a16 16 0 0 1 24-11a22 22 0 0 1 40 5a15 15 0 0 1-3 30H700a15 15 0 0 1-10-24z"/>
+</g>
+<path d="M80 195Q74 230 84 262M112 173Q120 215 92 262M50 175Q58 220 76 262" stroke="#16140F" stroke-width="2" fill="none"/>
+<ellipse cx="80" cy="170" rx="20" ry="25" fill="#F2542D" stroke="#16140F" stroke-width="3"/>
+<ellipse cx="112" cy="150" rx="18" ry="23" fill="#FFC93C" stroke="#16140F" stroke-width="3"/>
+<ellipse cx="50" cy="152" rx="18" ry="23" fill="#2F6FA8" stroke="#16140F" stroke-width="3"/>
+<rect x="346" y="170" width="26" height="135" fill="#5FB58A" stroke="#16140F" stroke-width="3"/>
+<path d="M342 170L359 138L376 170z" fill="#F2542D" stroke="#16140F" stroke-width="3" stroke-linejoin="round"/>
+<rect x="580" y="170" width="26" height="135" fill="#5FB58A" stroke="#16140F" stroke-width="3"/>
+<path d="M576 170L593 138L610 170z" fill="#F2542D" stroke="#16140F" stroke-width="3" stroke-linejoin="round"/>
+<rect x="396" y="215" width="160" height="95" fill="#5FB58A" stroke="#16140F" stroke-width="3"/>
+<path d="M406 215a70 70 0 0 1 140 0z" fill="#0F6B43" stroke="#16140F" stroke-width="3"/>
+<path d="M476 145V124" stroke="#16140F" stroke-width="3"/>
+<circle cx="476" cy="112" r="12" fill="#FFC93C" stroke="#16140F" stroke-width="2.5"/>
+<circle cx="481" cy="109" r="9" fill="#EAF7EE"/>
+<rect x="462" y="248" width="28" height="62" rx="14" fill="#FFFBF2" stroke="#16140F" stroke-width="2.5"/>
+<circle cx="430" cy="245" r="9" fill="#FFFBF2" stroke="#16140F" stroke-width="2.5"/>
+<circle cx="522" cy="245" r="9" fill="#FFFBF2" stroke="#16140F" stroke-width="2.5"/>
+<path d="M0 36Q476 100 952 36" stroke="#16140F" stroke-width="2.5" fill="none"/>
+<g stroke="#16140F" stroke-width="2" stroke-linejoin="round">
+<path d="M20 39L60 43L40 81z" fill="#F2542D"/>
+<path d="M99 48L139 52L119 90z" fill="#FFC93C"/>
+<path d="M178 55L218 59L198 97z" fill="#0F6B43"/>
+<path d="M258 60L298 64L278 102z" fill="#2F6FA8"/>
+<path d="M337 64L377 68L357 106z" fill="#F2542D"/>
+<path d="M416 66L456 70L436 108z" fill="#FFC93C"/>
+<path d="M496 66L536 70L516 108z" fill="#0F6B43"/>
+<path d="M575 64L615 68L595 106z" fill="#2F6FA8"/>
+<path d="M654 60L694 64L674 102z" fill="#F2542D"/>
+<path d="M734 55L774 59L754 97z" fill="#FFC93C"/>
+<path d="M813 48L853 52L833 90z" fill="#0F6B43"/>
+<path d="M892 39L932 43L912 81z" fill="#2F6FA8"/>
+</g>
+<rect x="0" y="430" width="952" height="50" fill="#F1DFB6"/>
+<path d="M0 430H952" stroke="#16140F" stroke-width="3"/>
+<use href="#stall" x="14" color="#F2542D"/>
+<use href="#stall" x="170" color="#0F6B43"/>
+<use href="#stall" x="326" color="#FFC93C"/>
+<use href="#stall" x="482" color="#2F6FA8"/>
+<use href="#stall" x="638" color="#C23B7A"/>
+<use href="#stall" x="794" color="#F2542D"/>
+<g stroke="#16140F" stroke-width="2">
+<circle cx="69" cy="362" r="9" fill="#7A4E2A"/><circle cx="89" cy="362" r="9" fill="#7A4E2A"/><circle cx="109" cy="362" r="9" fill="#7A4E2A"/>
+<rect x="210" y="350" width="22" height="22" rx="4" fill="#F4ECDD"/><rect x="234" y="350" width="22" height="22" rx="4" fill="#FFC93C"/><rect x="258" y="350" width="22" height="22" rx="4" fill="#E85D9A"/>
+<rect x="376" y="352" width="16" height="20" rx="3" fill="#FFFBF2"/><rect x="401" y="352" width="16" height="20" rx="3" fill="#FFFBF2"/><rect x="426" y="352" width="16" height="20" rx="3" fill="#FFFBF2"/>
+<rect x="527" y="364" width="60" height="8" fill="#0F6B43"/><rect x="532" y="356" width="50" height="8" fill="#F2542D"/><rect x="537" y="348" width="40" height="8" fill="#FFFBF2"/>
+<ellipse cx="698" cy="362" rx="18" ry="9" fill="#F2542D"/><ellipse cx="730" cy="362" rx="18" ry="9" fill="#FFC93C"/>
+<rect x="854" y="346" width="24" height="26" rx="6" fill="#FFC93C"/><path d="M866 338V346" fill="none"/>
+</g>
+<g stroke="#16140F" stroke-width="2.5">
+<rect x="66" y="420" width="28" height="46" rx="12" fill="#0F6B43"/><circle cx="80" cy="408" r="12" fill="#C68B5E"/><rect x="70" y="394" width="20" height="9" rx="3" fill="#16140F"/>
+<rect x="192" y="420" width="28" height="46" rx="12" fill="#E85D9A"/><circle cx="206" cy="407" r="15" fill="#E85D9A"/><circle cx="206" cy="409" r="9" fill="#E8B58A"/>
+<rect x="316" y="420" width="28" height="46" rx="12" fill="#FFFBF2"/><circle cx="330" cy="408" r="12" fill="#E8B58A"/><rect x="320" y="394" width="20" height="9" rx="3" fill="#16140F"/>
+<rect x="456" y="420" width="28" height="46" rx="12" fill="#2F6FA8"/><circle cx="470" cy="407" r="15" fill="#F4ECDD"/><circle cx="470" cy="409" r="9" fill="#C68B5E"/>
+<rect x="596" y="420" width="28" height="46" rx="12" fill="#F2542D"/><circle cx="610" cy="408" r="12" fill="#F1C9A0"/><rect x="600" y="394" width="20" height="9" rx="3" fill="#16140F"/>
+<rect x="716" y="420" width="28" height="46" rx="12" fill="#FFC93C"/><circle cx="730" cy="407" r="15" fill="#FFC93C"/><circle cx="730" cy="409" r="9" fill="#E8B58A"/>
+<rect x="866" y="420" width="28" height="46" rx="12" fill="#16140F"/><circle cx="880" cy="408" r="12" fill="#C68B5E"/><rect x="870" y="394" width="20" height="9" rx="3" fill="#F4ECDD"/>
+</g>
+</g>
+<rect x="1.75" y="1.75" width="948.5" height="476.5" rx="34.5" fill="none" stroke="#16140F" stroke-width="3.5"/>
+</svg>`;
+
+// Hiasan festival di sekeliling slide tenant: bendera di atas, balon di
+// kiri-kanan, deretan stand mini + masjid kecil di bawah. Transparan, hanya
+// menghias margin (tidak menimpa kartu tenant).
+const CAROUSEL_SVG_HIASAN = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350">
+<defs>
+<g id="mstall">
+<rect x="0" y="1288" width="14" height="12" fill="currentColor"/><circle cx="7" cy="1300" r="7" fill="currentColor"/>
+<rect x="14" y="1288" width="14" height="12" fill="#FFFBF2"/><circle cx="21" cy="1300" r="7" fill="#FFFBF2"/>
+<rect x="28" y="1288" width="14" height="12" fill="currentColor"/><circle cx="35" cy="1300" r="7" fill="currentColor"/>
+<rect x="42" y="1288" width="14" height="12" fill="#FFFBF2"/><circle cx="49" cy="1300" r="7" fill="#FFFBF2"/>
+<rect x="56" y="1288" width="14" height="12" fill="currentColor"/><circle cx="63" cy="1300" r="7" fill="currentColor"/>
+<path d="M-3 1288L8 1270H62L73 1288z" fill="currentColor" stroke="#16140F" stroke-width="2" stroke-linejoin="round"/>
+<rect x="0" y="1306" width="70" height="14" rx="2" fill="currentColor" stroke="#16140F" stroke-width="2"/>
+</g>
+</defs>
+<path d="M-10 22Q540 80 1090 22" stroke="#16140F" stroke-width="2.5" fill="none"/>
+<g stroke="#16140F" stroke-width="2" stroke-linejoin="round">
+<path d="M22 26L58 28L40 61z" fill="#F2542D"/>
+<path d="M102 33L138 35L120 68z" fill="#FFC93C"/>
+<path d="M182 39L218 41L200 74z" fill="#0F6B43"/>
+<path d="M262 44L298 46L280 79z" fill="#2F6FA8"/>
+<path d="M342 47L378 49L360 82z" fill="#F2542D"/>
+<path d="M422 49L458 51L440 84z" fill="#FFC93C"/>
+<path d="M502 50L538 52L520 85z" fill="#0F6B43"/>
+<path d="M582 50L618 52L600 85z" fill="#2F6FA8"/>
+<path d="M662 48L698 50L680 83z" fill="#F2542D"/>
+<path d="M742 45L778 47L760 80z" fill="#FFC93C"/>
+<path d="M822 41L858 43L840 76z" fill="#0F6B43"/>
+<path d="M902 36L938 38L920 71z" fill="#2F6FA8"/>
+<path d="M982 30L1018 32L1000 65z" fill="#F2542D"/>
+</g>
+<g stroke="#16140F" stroke-width="2" fill="none">
+<path d="M24 545Q14 590 26 635M30 725Q40 770 28 815M22 905Q12 950 24 995"/>
+<path d="M1056 625Q1066 670 1054 715M1050 805Q1040 850 1052 895M1058 985Q1068 1030 1056 1075"/>
+</g>
+<g stroke="#16140F" stroke-width="2.5">
+<ellipse cx="24" cy="520" rx="18" ry="24" fill="#F2542D"/>
+<ellipse cx="30" cy="700" rx="18" ry="24" fill="#FFC93C"/>
+<ellipse cx="22" cy="880" rx="18" ry="24" fill="#2F6FA8"/>
+<ellipse cx="1056" cy="600" rx="18" ry="24" fill="#E85D9A"/>
+<ellipse cx="1050" cy="780" rx="18" ry="24" fill="#0F6B43"/>
+<ellipse cx="1058" cy="960" rx="18" ry="24" fill="#F2542D"/>
+</g>
+<rect x="0" y="1318" width="1080" height="32" fill="#F1DFB6"/>
+<path d="M0 1318H1080" stroke="#16140F" stroke-width="3"/>
+<rect x="478" y="1240" width="16" height="78" fill="#5FB58A" stroke="#16140F" stroke-width="2.5"/>
+<path d="M475 1240L486 1218L497 1240z" fill="#F2542D" stroke="#16140F" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="586" y="1240" width="16" height="78" fill="#5FB58A" stroke="#16140F" stroke-width="2.5"/>
+<path d="M583 1240L594 1218L605 1240z" fill="#F2542D" stroke="#16140F" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="498" y="1268" width="84" height="50" fill="#5FB58A" stroke="#16140F" stroke-width="2.5"/>
+<path d="M503 1268a37 37 0 0 1 74 0z" fill="#0F6B43" stroke="#16140F" stroke-width="2.5"/>
+<path d="M540 1231V1218" stroke="#16140F" stroke-width="2.5"/>
+<circle cx="540" cy="1211" r="7" fill="#FFC93C" stroke="#16140F" stroke-width="2"/>
+<circle cx="543" cy="1209" r="5.5" fill="#CDEBD3"/>
+<rect x="528" y="1290" width="24" height="28" rx="12" fill="#FFFBF2" stroke="#16140F" stroke-width="2"/>
+<use href="#mstall" x="30" color="#F2542D"/>
+<use href="#mstall" x="112" color="#0F6B43"/>
+<use href="#mstall" x="194" color="#FFC93C"/>
+<use href="#mstall" x="276" color="#2F6FA8"/>
+<use href="#mstall" x="640" color="#C23B7A"/>
+<use href="#mstall" x="722" color="#F2542D"/>
+<use href="#mstall" x="804" color="#0F6B43"/>
+<use href="#mstall" x="886" color="#FFC93C"/>
+<use href="#mstall" x="968" color="#2F6FA8"/>
+<g stroke="#16140F" stroke-width="2">
+<rect x="368" y="1296" width="18" height="30" rx="8" fill="#0F6B43"/><circle cx="377" cy="1288" r="8" fill="#C68B5E"/><rect x="370" y="1278" width="14" height="6" rx="2" fill="#16140F"/>
+<rect x="420" y="1296" width="18" height="30" rx="8" fill="#E85D9A"/><circle cx="429" cy="1288" r="10" fill="#E85D9A"/><circle cx="429" cy="1289" r="6" fill="#E8B58A"/>
+<rect x="604" y="1296" width="18" height="30" rx="8" fill="#FFC93C"/><circle cx="613" cy="1288" r="8" fill="#F1C9A0"/><rect x="606" y="1278" width="14" height="6" rx="2" fill="#16140F"/>
+</g>
+</svg>`;
+
+function pad2CarouselBazar(n) { return (n < 10 ? "0" : "") + n; }
+
+function aturSpasiHurufCarouselBazar(ctx, nilaiPx) {
+  try { ctx.letterSpacing = nilaiPx; } catch (e) { /* browser lama: dilewati */ }
+}
+
+// "B-DA-07" -> { area: "DA", label: "DA-7" }; "A-01" (jenis A, tanpa kode
+// area) -> { area: "A", label: "A-1" }.
+function uraiKodeStandCarouselBazar(kode) {
+  const bagian = String(kode || "").split("-");
+  if (bagian.length >= 3) {
+    const nomor = parseInt(bagian[bagian.length - 1], 10);
+    const area = bagian.slice(1, -1).join("-");
+    return { area: area, label: area + "-" + (isNaN(nomor) ? bagian[bagian.length - 1] : nomor) };
+  }
+  if (bagian.length === 2) {
+    const nomor = parseInt(bagian[1], 10);
+    return { area: "A", label: "A-" + (isNaN(nomor) ? bagian[1] : nomor) };
+  }
+  return { area: "", label: String(kode || "") };
+}
+
+// Susun daftar tenant untuk slide: hanya status "Diterima" (tenant Milik
+// Panitia TETAP ikut), diurutkan menurut kode petaknya.
+function susunTenantCarouselBazar(tenantRows, standRows) {
+  const kodePerTenant = {};
+  (standRows || []).forEach(function (s) {
+    if (!s.tenant_id) return;
+    if (!kodePerTenant[s.tenant_id]) kodePerTenant[s.tenant_id] = [];
+    kodePerTenant[s.tenant_id].push(s.kode);
+  });
+  const urut = function (a, b) { return String(a).localeCompare(String(b), "id", { numeric: true }); };
+
+  return (tenantRows || []).filter(function (t) { return t.status === "Diterima"; }).map(function (t) {
+    const kodeList = (kodePerTenant[t.id] || []).slice().sort(urut);
+    if (!kodeList.length && t.nomor_pendaftaran) kodeList.push(t.nomor_pendaftaran);
+    const terurai = kodeList.map(uraiKodeStandCarouselBazar);
+    const namaArea = [];
+    terurai.forEach(function (p) {
+      const nama = CAROUSEL_AREA_LOKASI[p.area] || p.area;
+      if (nama && namaArea.indexOf(nama) === -1) namaArea.push(nama);
+    });
+    const foto = Array.isArray(t.url_foto_produk) ? t.url_foto_produk : [];
+    return {
+      nama: t.nama_usaha || "-",
+      nomor: terurai.length ? terurai[0].label + (terurai.length > 1 ? " +" + (terurai.length - 1) : "") : "-",
+      lokasi: namaArea.join(" & ") || "-",
+      fotoUrl: foto[1] || foto[0] || null,
+      fotoImg: null,
+      kunciUrut: kodeList[0] || ""
+    };
+  }).sort(function (a, b) { return urut(a.kunciUrut, b.kunciUrut); });
+}
+
+// Font slide (Bricolage Grotesque) tidak dimuat index.html -- disisipkan
+// sekali dari sini, lalu ditunggu sampai siap supaya canvas tidak menggambar
+// dengan font cadangan. Kalau gagal/lambat (>6 dtk), lanjut dengan font
+// cadangan (Outfit dari index.html).
+let _fontCarouselBazarPromise = null;
+function pastikanFontCarouselBazar() {
+  if (_fontCarouselBazarPromise) return _fontCarouselBazarPromise;
+  _fontCarouselBazarPromise = new Promise(function (resolve) {
+    const batas = setTimeout(resolve, 6000);
+    function muatFont() {
+      Promise.all([
+        document.fonts.load("800 100px 'Bricolage Grotesque'"),
+        document.fonts.load("500 30px 'Bricolage Grotesque'")
+      ]).then(function () { clearTimeout(batas); resolve(); }).catch(function () { clearTimeout(batas); resolve(); });
+    }
+    let link = document.getElementById("font-carousel-bazar");
+    if (!link) {
+      link = document.createElement("link");
+      link.id = "font-carousel-bazar";
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap";
+      link.onload = muatFont;
+      link.onerror = function () { clearTimeout(batas); resolve(); };
+      document.head.appendChild(link);
+    } else {
+      muatFont();
+    }
+  });
+  return _fontCarouselBazarPromise;
+}
+
+function muatSvgCarouselBazar(teksSvg) {
+  return new Promise(function (resolve, reject) {
+    const url = URL.createObjectURL(new Blob([teksSvg], { type: "image/svg+xml" }));
+    const img = new Image();
+    img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Gagal memuat ilustrasi carousel.")); };
+    img.src = url;
+  });
+}
+
+function bungkusTeksCarouselBazar(ctx, teks, lebarMaks, maksBaris) {
+  const kata = String(teks || "").split(/\s+/).filter(Boolean);
+  const baris = [];
+  let cur = "";
+  for (let i = 0; i < kata.length; i++) {
+    const coba = cur ? cur + " " + kata[i] : kata[i];
+    if (!cur || ctx.measureText(coba).width <= lebarMaks) cur = coba;
+    else { baris.push(cur); cur = kata[i]; }
+  }
+  if (cur) baris.push(cur);
+  if (baris.length > maksBaris) {
+    baris.length = maksBaris;
+    let akhir = baris[maksBaris - 1];
+    while (akhir.length > 1 && ctx.measureText(akhir + "…").width > lebarMaks) akhir = akhir.slice(0, -1);
+    baris[maksBaris - 1] = akhir + "…";
+  }
+  return baris;
+}
+
+function gambarLogoCarouselBazar(ctx, logoImg, boxX, boxY, boxW, boxH, rataKanan) {
+  if (!logoImg) return 0;
+  const skala = Math.min(boxW / logoImg.width, boxH / logoImg.height);
+  const lw = logoImg.width * skala, lh = logoImg.height * skala;
+  const x = rataKanan ? boxX + boxW - lw : boxX;
+  ctx.drawImage(logoImg, x, boxY + (boxH - lh) / 2, lw, lh);
+  return lw;
+}
+
+const CAROUSEL_FONT = "'Bricolage Grotesque', 'Outfit', sans-serif";
+const CAROUSEL_INK = "#16140F";
+
+function gambarCoverCarouselBazar(canvas, logoImg, sceneImg) {
+  const W = CAROUSEL_LEBAR_PX, H = CAROUSEL_TINGGI_PX;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#CDEBD3";
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "middle";
+
+  // Header: logo (maks 240x140, tanpa latar) + "ALIF 5.0", nama acara di kanan.
+  let teksX = 64;
+  const lw = gambarLogoCarouselBazar(ctx, logoImg, 64, 64, 240, 140, false);
+  if (lw) teksX = 64 + lw + 20;
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.textAlign = "left";
+  ctx.font = "800 30px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "1.8px");
+  ctx.fillText("ALIF 5.0", teksX, 134);
+  ctx.textAlign = "right";
+  ctx.font = "500 26px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "0.5px");
+  ctx.fillText("Al Azzaam Islamic Fair", W - 64, 134);
+
+  ctx.drawImage(sceneImg, 64, 239, 952, 480);
+
+  // Judul besar.
+  ctx.textAlign = "left";
+  // Ukuran huruf judul dikecilkan otomatis kalau "BERGABUNG" tidak muat di
+  // lebar 952px (mis. font Bricolage belum termuat & dipakai font cadangan
+  // yang lebih lebar) -- dua baris selalu memakai ukuran yang sama.
+  let ukuranJudul = 172;
+  aturSpasiHurufCarouselBazar(ctx, "-6px");
+  ctx.font = "800 " + ukuranJudul + "px " + CAROUSEL_FONT;
+  while (ukuranJudul > 90 && ctx.measureText("BERGABUNG").width > 952) {
+    ukuranJudul -= 4;
+    ctx.font = "800 " + ukuranJudul + "px " + CAROUSEL_FONT;
+  }
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.fillText("SELAMAT", 64, 830);
+  ctx.fillText("BERGABUNG", 64, 985);
+
+  // Stiker "Tenant ALIF 5.0" (miring -2 derajat).
+  ctx.font = "800 78px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "-1.5px");
+  const teksSticker = "Tenant ALIF 5.0";
+  const lebarSticker = ctx.measureText(teksSticker).width + 80;
+  ctx.save();
+  ctx.translate(64, 1160);
+  ctx.rotate(-2 * Math.PI / 180);
+  ctx.fillStyle = "#0F6B43";
+  kotakBulat(ctx, 0, -61, lebarSticker, 122, 22);
+  ctx.fill();
+  ctx.fillStyle = "#F4ECDD";
+  ctx.fillText(teksSticker, 40, 2);
+  ctx.restore();
+
+  // Footer: ajakan geser + panah.
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.textAlign = "left";
+  ctx.font = "800 24px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "1px");
+  ctx.fillText("GESER UNTUK LIHAT TENANT", 64, 1284);
+  gambarPanahCarouselBazar(ctx, W - 64 - 64, 1284);
+  aturSpasiHurufCarouselBazar(ctx, "0px");
+}
+
+function gambarPanahCarouselBazar(ctx, x, y) {
+  ctx.save();
+  ctx.strokeStyle = CAROUSEL_INK;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(x + 2, y); ctx.lineTo(x + 60, y);
+  ctx.moveTo(x + 48, y - 9); ctx.lineTo(x + 60, y); ctx.lineTo(x + 48, y + 9);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function gambarKartuTenantCarouselBazar(ctx, t, x, y, w, h, indeksWarna) {
+  // Kartu krem berbingkai tebal.
+  ctx.fillStyle = "#FFFBF2";
+  kotakBulat(ctx, x, y, w, h, 28);
+  ctx.fill();
+  ctx.strokeStyle = CAROUSEL_INK;
+  ctx.lineWidth = 2.5;
+  kotakBulat(ctx, x + 1.25, y + 1.25, w - 2.5, h - 2.5, 27);
+  ctx.stroke();
+
+  const tinggiTeks = 128;
+  const fx = x + 12, fy = y + 12, fw = w - 24, fh = h - 12 - 18 - 14 - tinggiTeks;
+
+  // Foto (potong rapi mengisi kotak) atau kotak warna polos kalau belum ada.
+  if (t.fotoImg) {
+    ctx.save();
+    kotakBulat(ctx, fx, fy, fw, fh, 18);
+    ctx.clip();
+    const skala = Math.max(fw / t.fotoImg.width, fh / t.fotoImg.height);
+    const dw = t.fotoImg.width * skala, dh = t.fotoImg.height * skala;
+    ctx.drawImage(t.fotoImg, fx + (fw - dw) / 2, fy + (fh - dh) / 2, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = CAROUSEL_WARNA_FOTO_KOSONG[indeksWarna % CAROUSEL_WARNA_FOTO_KOSONG.length];
+    kotakBulat(ctx, fx, fy, fw, fh, 18);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "800 18px " + CAROUSEL_FONT;
+    aturSpasiHurufCarouselBazar(ctx, "2px");
+    ctx.fillText("FOTO BELUM ADA", fx + fw / 2, fy + fh / 2);
+  }
+
+  // Lencana nomor stand di pojok kiri-atas foto.
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = "800 34px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "-0.3px");
+  const lebarLencana = Math.min(fw - 24, ctx.measureText(t.nomor).width + 28);
+  ctx.fillStyle = "#CDEBD3";
+  kotakBulat(ctx, fx + 12, fy + 12, lebarLencana, 52, 14);
+  ctx.fill();
+  ctx.strokeStyle = CAROUSEL_INK;
+  ctx.lineWidth = 2.5;
+  kotakBulat(ctx, fx + 12, fy + 12, lebarLencana, 52, 14);
+  ctx.stroke();
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.fillText(t.nomor, fx + 12 + 14, fy + 12 + 27);
+
+  // Nama usaha (maks 2 baris) + lokasi (maks 2 baris) dengan ikon pin.
+  const tx = x + 20, lebarTeks = w - 40;
+  const ty = y + h - 18 - tinggiTeks;
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "800 31px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "-0.5px");
+  bungkusTeksCarouselBazar(ctx, t.nama, lebarTeks, 2).forEach(function (baris, i) {
+    ctx.fillText(baris, tx, ty + 30 + i * 33);
+  });
+
+  ctx.font = "500 22px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "0px");
+  const yLokasi = ty + 66 + 10;
+  gambarPinCarouselBazar(ctx, tx, yLokasi + 4);
+  bungkusTeksCarouselBazar(ctx, t.lokasi, lebarTeks - 30, 2).forEach(function (baris, i) {
+    ctx.fillText(baris, tx + 30, yLokasi + 21 + i * 26);
+  });
+}
+
+function gambarPinCarouselBazar(ctx, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = "#F2542D";
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(11, 21);
+  ctx.bezierCurveTo(11, 21, 4, 15, 4, 10);
+  ctx.arc(11, 9.5, 7, Math.PI, 0, false);
+  ctx.bezierCurveTo(18, 15, 11, 21, 11, 21);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(11, 9.5, 2.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Satu slide tenant: header "TENANT" + pil nomor urut + logo, hiasan festival
+// di sekeliling, kartu tenant (3 baris atas + 2 baris bawah), footer.
+function gambarSlideTenantCarouselBazar(canvas, logoImg, hiasanImg, tenantSlide, awalIndeks, adalahTerakhir) {
+  const W = CAROUSEL_LEBAR_PX, H = CAROUSEL_TINGGI_PX;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#CDEBD3";
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(hiasanImg, 0, 0, W, H);
+
+  // Header.
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.font = "800 108px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "-3.8px");
+  ctx.fillText("TENANT", 64, 150);
+
+  const kiriLogo = W - 64 - 190;
+  gambarLogoCarouselBazar(ctx, logoImg, kiriLogo, 88, 190, 110, true);
+  const rentang = tenantSlide.length === 1
+    ? pad2CarouselBazar(awalIndeks + 1)
+    : pad2CarouselBazar(awalIndeks + 1) + " - " + pad2CarouselBazar(awalIndeks + tenantSlide.length);
+  ctx.font = "800 34px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "0px");
+  const lebarPil = ctx.measureText(rentang).width + 52;
+  ctx.fillStyle = "#0F6B43";
+  kotakBulat(ctx, kiriLogo - 16 - lebarPil, 143 - 31, lebarPil, 62, 31);
+  ctx.fill();
+  ctx.fillStyle = "#F4ECDD";
+  ctx.textAlign = "center";
+  ctx.fillText(rentang, kiriLogo - 16 - lebarPil / 2, 145);
+
+  // Kartu: 3 di baris atas (lebar 304), 2 di baris bawah (lebar 466).
+  const barisTop = 222, tinggiKartu = 464.5, jarak = 20;
+  tenantSlide.forEach(function (t, i) {
+    let x, y, w;
+    if (i < 3) { w = 304; x = 64 + i * (304 + 20); y = barisTop; }
+    else { w = 466; x = 64 + (i - 3) * (466 + 20); y = barisTop + tinggiKartu + jarak; }
+    gambarKartuTenantCarouselBazar(ctx, t, x, y, w, tinggiKartu, awalIndeks + i);
+  });
+
+  // Footer.
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = CAROUSEL_INK;
+  ctx.textAlign = "left";
+  ctx.font = "800 22px " + CAROUSEL_FONT;
+  aturSpasiHurufCarouselBazar(ctx, "0.9px");
+  ctx.fillText("AL AZZAAM ISLAMIC FAIR", 64, 1208);
+  if (!adalahTerakhir) {
+    ctx.textAlign = "right";
+    ctx.fillText("GESER", W - 64 - 56 - 14, 1208);
+    gambarPanahCarouselBazar(ctx, W - 64 - 56, 1208);
+  }
+  aturSpasiHurufCarouselBazar(ctx, "0px");
+}
+
+function buatCaptionCarouselBazar(tenants) {
+  const baris = tenants.map(function (t) { return "🏪 " + t.nama + " — Stand " + t.nomor + " (" + t.lokasi + ")"; }).join("\n");
+  return (
+    "🎉 SELAMAT BERGABUNG TENANT ALIF 5.0! — Al Azzaam Islamic Fair\n\n" +
+    "Terima kasih telah menjadi bagian dari bazar kami. Tenant yang sudah terdaftar:\n\n" +
+    baris + "\n\n" +
+    "Sampai jumpa di ALIF 5.0! 🛍️🔥\n" +
+    "#ALIF5 #BazarALIF #AlAzzaamIslamicFair #PPTQAlAzzaam"
+  );
+}
+
+async function bukaCarouselTenantBazar() {
+  const JUDUL = "🎠 Carousel Tenant ALIF 5.0";
+  bukaModal(JUDUL, '<p class="hint">Mengambil data tenant, logo, dan foto stand...</p>');
+
+  try {
+    const [{ data: tenantBaru, error: errTenant }, { data: standRows }, { data: siteSettingsData }] = await Promise.all([
+      supabaseClient.from("bazar_tenant").select("*"),
+      supabaseClient.from("bazar_stand").select("kode,tenant_id").not("tenant_id", "is", null),
+      supabaseClient.from("site_settings").select("logo_url").eq("id", 1).single()
+    ]);
+    if (errTenant) throw new Error(errTenant.message);
+
+    const tenants = susunTenantCarouselBazar(tenantBaru || [], standRows || []);
+    if (!tenants.length) {
+      bukaModal(JUDUL, '<p>Belum ada tenant berstatus <strong>Diterima</strong>, jadi belum ada yang bisa dimasukkan ke carousel.</p><p class="hint">Ubah status tenant jadi "Diterima" dulu di tab Data Tenant, lalu buka lagi.</p>');
+      return;
+    }
+
+    await pastikanFontCarouselBazar();
+    const logoUrl = siteSettingsData ? siteSettingsData.logo_url : null;
+    const [logoImg, sceneImg, hiasanImg] = await Promise.all([
+      logoUrl ? muatGambar(logoUrl).catch(function (e) { console.warn("Logo situs gagal dimuat untuk carousel:", e); return null; }) : Promise.resolve(null),
+      muatSvgCarouselBazar(CAROUSEL_SVG_COVER),
+      muatSvgCarouselBazar(CAROUSEL_SVG_HIASAN)
+    ]);
+    await Promise.all(tenants.map(function (t) {
+      if (!t.fotoUrl) return Promise.resolve();
+      return muatGambar(t.fotoUrl, 12000).then(function (img) { t.fotoImg = img; }).catch(function (e) {
+        console.warn("Foto tenant gagal dimuat untuk carousel:", t.nama, e);
+      });
+    }));
+
+    const overlay = document.getElementById("modal-overlay");
+    if (!overlay || overlay.style.display === "none") return; // modal sudah ditutup sebelum selesai
+
+    const kelompok = [];
+    for (let i = 0; i < tenants.length; i += CAROUSEL_PER_SLIDE) kelompok.push(tenants.slice(i, i + CAROUSEL_PER_SLIDE));
+    const totalSlide = kelompok.length + 1;
+
+    let slideHTML = "";
+    for (let s = 0; s < totalSlide; s++) {
+      slideHTML +=
+        '<div style="display:flex;flex-direction:column;gap:8px;">' +
+          '<canvas class="carousel-bazar-canvas" data-slide="' + s + '" style="width:100%;height:auto;border-radius:12px;border:1px solid #d8d4c8;display:block;"></canvas>' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<span class="hint" style="margin:0;">' + (s === 0 ? "Slide 1 — Cover" : "Slide " + (s + 1) + " — Tenant " + ((s - 1) * CAROUSEL_PER_SLIDE + 1) + "–" + Math.min(s * CAROUSEL_PER_SLIDE, tenants.length)) + '</span>' +
+            '<button type="button" class="btn btn--ghost btn-unduh-slide-carousel" data-slide="' + s + '">⬇️ PNG</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    bukaModal(
+      JUDUL,
+      '<p class="hint">' + tenants.length + ' tenant (status Diterima, termasuk milik panitia) → ' + totalSlide + ' slide, 1080×1350px (4:5) siap diunggah ke Instagram. Urutan slide = urutan unggah.</p>' +
+      '<div class="submit-row" style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 14px;">' +
+        '<button type="button" class="btn btn--primary" id="btn-unduh-semua-carousel">⬇️ Unduh Semua Slide</button>' +
+        '<button type="button" class="btn btn--ghost" id="btn-ulang-carousel-bazar">🔄 Muat Ulang Data</button>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">' + slideHTML + '</div>' +
+      '<div class="field" style="margin-top:18px;">' +
+        '<label for="carousel-bazar-caption">Caption (bisa diedit sebelum disalin)</label>' +
+        '<textarea id="carousel-bazar-caption" rows="10">' + escapeHTML(buatCaptionCarouselBazar(tenants)) + '</textarea>' +
+      '</div>' +
+      '<div class="submit-row" style="display:flex;gap:10px;">' +
+        '<button type="button" class="btn btn--ghost" id="btn-salin-caption-carousel-bazar">📋 Salin Caption</button>' +
+      '</div>' +
+      '<p class="hint" id="carousel-bazar-status" style="margin-top:8px;"></p>'
+    );
+
+    const canvases = Array.prototype.slice.call(document.querySelectorAll(".carousel-bazar-canvas"));
+    canvases.forEach(function (cv, s) {
+      if (s === 0) gambarCoverCarouselBazar(cv, logoImg, sceneImg);
+      else gambarSlideTenantCarouselBazar(cv, logoImg, hiasanImg, kelompok[s - 1], (s - 1) * CAROUSEL_PER_SLIDE, s === totalSlide - 1);
+    });
+
+    function unduhSlide(s) {
+      return new Promise(function (resolve) {
+        canvases[s].toBlob(function (blob) {
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "carousel-tenant-alif5-slide-" + pad2CarouselBazar(s + 1) + ".png";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+          }
+          resolve();
+        }, "image/png");
+      });
+    }
+
+    Array.prototype.slice.call(document.querySelectorAll(".btn-unduh-slide-carousel")).forEach(function (btn) {
+      btn.addEventListener("click", function () { unduhSlide(parseInt(btn.getAttribute("data-slide"), 10)); });
+    });
+
+    document.getElementById("btn-unduh-semua-carousel").addEventListener("click", async function () {
+      const statusEl = document.getElementById("carousel-bazar-status");
+      for (let s = 0; s < canvases.length; s++) {
+        statusEl.textContent = "Mengunduh slide " + (s + 1) + " dari " + canvases.length + "...";
+        await unduhSlide(s);
+        await new Promise(function (r) { setTimeout(r, 500); });
+      }
+      statusEl.textContent = "Selesai — kalau browser memunculkan izin unduhan beruntun, pilih Izinkan.";
+      setTimeout(function () { statusEl.textContent = ""; }, 5000);
+    });
+
+    document.getElementById("btn-ulang-carousel-bazar").addEventListener("click", function () {
+      bukaCarouselTenantBazar();
+    });
+
+    document.getElementById("btn-salin-caption-carousel-bazar").addEventListener("click", async function () {
+      const area = document.getElementById("carousel-bazar-caption");
+      const statusEl = document.getElementById("carousel-bazar-status");
+      try {
+        await navigator.clipboard.writeText(area.value);
+        statusEl.textContent = "Caption tersalin ke clipboard.";
+      } catch (e) {
+        area.focus();
+        area.select();
+        statusEl.textContent = "Tidak bisa menyalin otomatis -- teks sudah diseleksi, tekan Ctrl+C (atau Cmd+C).";
+      }
+      setTimeout(function () { statusEl.textContent = ""; }, 3500);
+    });
+  } catch (err) {
+    console.error("Carousel Tenant gagal dibuat:", err);
+    const overlayGagal = document.getElementById("modal-overlay");
+    if (!overlayGagal || overlayGagal.style.display === "none") return;
+    bukaModal(
+      JUDUL,
+      '<p>Gagal menyiapkan carousel: ' + escapeHTMLBazarAdmin((err && err.message) || String(err)) + '</p>' +
+      '<p class="hint">Coba lagi -- biasanya ini karena koneksi lambat/putus sesaat saat memuat logo, font, atau foto tenant.</p>' +
+      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-coba-lagi-carousel-bazar">🔄 Coba Lagi</button></div>'
+    );
+    document.getElementById("btn-coba-lagi-carousel-bazar").addEventListener("click", function () {
+      bukaCarouselTenantBazar();
     });
   }
 }
