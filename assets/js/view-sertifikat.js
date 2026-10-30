@@ -62,8 +62,129 @@ function ambilTokenDariUrlSertifikat() {
   return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("token") || "").trim();
 }
 
+// Token KELOMPOK ("#/sertifikat?grup=...", migrasi 0057) -- link sertifikat
+// PESERTA per cabang lomba + jenis kelamin + jenjang. Sengaja memakai rute
+// "#/sertifikat" yang sama dengan link pendamping (beda parameter saja).
+function ambilGrupDariUrlSertifikat() {
+  const dariQuery = new URLSearchParams(window.location.search).get("grup");
+  if (dariQuery) return dariQuery.trim();
+  const hash = window.location.hash || "";
+  const tandaTanya = hash.indexOf("?");
+  if (tandaTanya === -1) return "";
+  return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("grup") || "").trim();
+}
+
+async function initSertifikatGrupPublik(root, grup) {
+  root.innerHTML = '<div class="form-shell"><p class="hint">Memuat...</p></div>';
+  const { data, error } = await supabaseClient.rpc("ambil_grup_sertifikat", { p_token: grup });
+  if (error || !data || !data.success) {
+    root.innerHTML =
+      '<div class="form-shell"><h1>Link Belum Tersedia</h1><p>' +
+      escapeHTMLSertifikatPublik((data && data.message) || (error && error.message) || "Link ini tidak valid atau belum dibuka panitia.") +
+      '</p></div>';
+    return;
+  }
+
+  const jk = data.jenis_kelamin === "laki-laki" ? "Laki-laki" : data.jenis_kelamin === "perempuan" ? "Perempuan" : "";
+  root.innerHTML =
+    '<div class="form-shell">' +
+      '<h1>🎓 Sertifikat Peserta</h1>' +
+      '<p><strong>' + escapeHTMLSertifikatPublik(data.lomba) + '</strong>' +
+        (data.jenjang ? ' &middot; ' + escapeHTMLSertifikatPublik(data.jenjang) : '') +
+        (jk ? ' &middot; ' + jk : '') + '</p>' +
+      '<div class="field"><label for="sertifikat-cari-nama">Ketik nama kamu (minimal 3 huruf)</label>' +
+        '<input type="text" id="sertifikat-cari-nama" autocomplete="off" placeholder="Contoh: Ahmad" /></div>' +
+      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-cari-sertifikat">Cari</button></div>' +
+      '<p id="sertifikat-cari-pesan" class="hint" style="margin-top:10px;"></p>' +
+      '<div id="sertifikat-cari-hasil"></div>' +
+      '<div id="sertifikat-pratinjau" style="margin-top:14px;"></div>' +
+    '</div>';
+
+  const input = document.getElementById("sertifikat-cari-nama");
+  const pesan = document.getElementById("sertifikat-cari-pesan");
+  const hasil = document.getElementById("sertifikat-cari-hasil");
+  const pratinjau = document.getElementById("sertifikat-pratinjau");
+
+  async function cari() {
+    pesan.textContent = "";
+    hasil.innerHTML = "";
+    pratinjau.innerHTML = "";
+    const kata = input.value.trim();
+    if (kata.length < 3) { pesan.textContent = "Ketik minimal 3 huruf dari nama kamu."; return; }
+    pesan.textContent = "Mencari...";
+    const { data: res, error: err } = await supabaseClient.rpc("cari_peserta_sertifikat", { p_token: grup, p_kata: kata });
+    if (err || !res || !res.success) {
+      pesan.textContent = (res && res.message) || (err && err.message) || "Gagal mencari.";
+      return;
+    }
+    if (!res.nama || res.nama.length === 0) {
+      pesan.textContent = "Nama tidak ditemukan di kelompok ini. Cek ejaan, atau hubungi panitia kalau kamu yakin sudah ikut lomba.";
+      return;
+    }
+    pesan.textContent = res.nama.length === 1 ? "Ditemukan 1 nama:" : "Ditemukan " + res.nama.length + " nama, pilih namamu:";
+    hasil.innerHTML = res.nama.map(function (n, i) {
+      return '<button type="button" class="btn btn--ghost btn-pilih-nama-sertifikat" data-i="' + i + '" style="margin:4px 6px 4px 0;">' + escapeHTMLSertifikatPublik(n) + '</button>';
+    }).join("");
+    hasil.querySelectorAll(".btn-pilih-nama-sertifikat").forEach(function (b) {
+      b.addEventListener("click", function () { tampilkanPratinjau(res.nama[Number(b.dataset.i)]); });
+    });
+    if (res.nama.length === 1) tampilkanPratinjau(res.nama[0]);
+  }
+
+  async function tampilkanPratinjau(nama) {
+    pratinjau.innerHTML = '<p class="hint">Menyiapkan pratinjau...</p>';
+    try {
+      await pastikanLibKartu();
+      const templatesSemua = await ambilKartuTemplates();
+      if (!templatesSemua.sertifikat || !templatesSemua.sertifikat.url) {
+        pratinjau.innerHTML = '<p class="hint">Templat sertifikat belum disiapkan panitia. Mohon hubungi panitia.</p>';
+        return;
+      }
+      const templateImg = await muatGambar(templatesSemua.sertifikat.url);
+      const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
+      const canvas = document.createElement("canvas");
+      gambarKartu(
+        canvas, templateImg, layout,
+        { nama: nama, peserta: "Peserta", lomba_sertifikat: singkatNamaLomba(data.lomba) },
+        FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
+      );
+      canvas.style.cssText = "width:100%;height:auto;border:1px solid #ccc;border-radius:6px;";
+      pratinjau.innerHTML =
+        '<p><strong>' + escapeHTMLSertifikatPublik(nama) + '</strong></p>';
+      pratinjau.appendChild(canvas);
+      const baris = document.createElement("div");
+      baris.className = "submit-row";
+      baris.style.marginTop = "10px";
+      baris.innerHTML = '<button type="button" class="btn btn--primary" id="btn-unduh-sertifikat-grup">Unduh Sertifikat (PDF)</button>';
+      pratinjau.appendChild(baris);
+      const status = document.createElement("p");
+      status.className = "hint";
+      pratinjau.appendChild(status);
+
+      baris.querySelector("button").addEventListener("click", function () {
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "landscape" });
+          doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, SERTIFIKAT_LEBAR_CM, SERTIFIKAT_TINGGI_CM);
+          doc.save("sertifikat-" + nama.trim().replace(/[^a-z0-9]+/gi, "-") + "-alif5.pdf");
+          status.textContent = "✓ Selesai -- sertifikat terunduh.";
+        } catch (e) {
+          status.textContent = "Gagal membuat sertifikat: " + e.message;
+        }
+      });
+    } catch (e) {
+      pratinjau.innerHTML = '<p class="hint">Gagal menyiapkan pratinjau: ' + escapeHTMLSertifikatPublik(e.message) + '</p>';
+    }
+  }
+
+  document.getElementById("btn-cari-sertifikat").addEventListener("click", cari);
+  input.addEventListener("keydown", function (e) { if (e.key === "Enter") cari(); });
+}
+
 async function initSertifikatPublik() {
   const root = document.getElementById("sertifikat-publik-root");
+  const grup = ambilGrupDariUrlSertifikat();
+  if (grup) { initSertifikatGrupPublik(root, grup); return; }
   const token = ambilTokenDariUrlSertifikat();
 
   if (!token) {
