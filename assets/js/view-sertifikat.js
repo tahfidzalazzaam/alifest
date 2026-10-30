@@ -1,37 +1,16 @@
-// View: Unduh Sertifikat Pendamping ("#/sertifikat?token=..." ATAU
-// "/sertifikat?token=...") -- halaman PUBLIK, tidak butuh login, diakses
-// pendamping lewat link khusus yang DIBUAT & DIKIRIM MANUAL oleh panitia
-// (tombol "🎓 Buat/Lihat Link Sertifikat" di popup detail Data Pendaftar,
-// lihat renderTombolSertifikatPendamping() di assets/js/view-admin.js &
-// migrasi 0055). TIDAK ditautkan di navbar mana pun -- hanya bisa dicapai
-// lewat link itu sendiri.
+// View: Unduh Sertifikat PESERTA ("#/sertifikat?k=KUNCI" ATAU
+// "/sertifikat?k=KUNCI") -- halaman PUBLIK, tidak butuh login. SATU link untuk semua
+// kelompok (migrasi 0057/0058); kelompok yang tampil diatur panitia lewat
+// saklar di tab Kartu Peserta > "Link Sertifikat Peserta". Peserta memfilter
+// Cabang -> Jenjang -> Jenis Kelamin, mencentang nama, dan mengunduh PDF-nya
+// (digambar di browser memakai gambarKartu()/FIELD_SERTIFIKAT dari view-admin.js).
 //
-// Sama seperti "/lengkapi" (lihat view-lengkapi.js untuk alasan lengkapnya),
-// linknya memakai bentuk HASH ("#/sertifikat?token=...") sebagai jalur
-// UTAMA -- rute hash SELALU berfungsi murni di browser tanpa butuh
-// konfigurasi rewrite apa pun di sisi hosting, berbeda dari path langsung
-// yang bergantung pada "rewrites" vercel.json. Dukungan path langsung
-// ("/sertifikat?token=...") tetap ada di router.js/vercel.json sebagai
-// alternatif, tapi link yang DIBAGIKAN panitia selalu memakai bentuk hash.
+// Sertifikat hanya untuk PESERTA (individu & anggota tim), BUKAN pendamping:
+// fitur link sertifikat pendamping ("?token=...") sudah dihapus -- link lama
+// dengan token hanya menampilkan pemberitahuan.
 //
-// Alurnya:
-//  1. Baca token lewat ambilTokenDariUrlSertifikat().
-//  2. Panggil RPC ambil_sertifikat(token) -- HANYA berhasil kalau token
-//     cocok DAN status pendaftaran terkait PERSIS "Diterima" (gating di
-//     SERVER, migrasi 0055 -- "ini hanya bagi peserta yang terverifikasi
-//     saja"); kalau sukses, tampilkan nama pendamping & tombol unduh.
-//  3. Begitu tombol "Unduh Sertifikat (PDF)" ditekan, templat generik
-//     Sertifikat (site_settings.kartu_templates.sertifikat -- diatur
-//     panitia di panel "🎓 Sertifikat", tab Kartu Peserta) dimuat & PDF-nya
-//     di-GENERATE LANGSUNG di browser pendamping sendiri (satu halaman A4
-//     landscape) memakai fungsi gambar YANG SAMA dengan punya panitia --
-//     gambarKartu(), FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX/TINGGI_PX/
-//     LEBAR_CM/TINGGI_CM, DEFAULT_LAYOUT_KARTU, ambilKartuTemplates(),
-//     muatGambar(), pastikanLibKartu() -- semuanya SUDAH GLOBAL lewat
-//     assets/js/view-admin.js (dimuat di SEMUA halaman situs ini, lihat
-//     index.html), jadi TIDAK ADA duplikasi logika gambar/auto-mengecilkan
-//     teks sama sekali -- hasilnya pasti identik dengan yang dicetak massal
-//     panitia untuk peserta.
+// Linknya memakai bentuk HASH ("#/sertifikat?k=...") supaya selalu
+// berfungsi tanpa konfigurasi rewrite di hosting.
 
 const SERTIFIKAT_PUBLIK_TEMPLATE = `
 <main class="admin-page container">
@@ -45,230 +24,248 @@ function escapeHTMLSertifikatPublik(teks) {
   return div.innerHTML;
 }
 
-function ambilTokenDariUrlSertifikat() {
-  // 1) Query string ASLI -- berlaku kalau halaman ini diakses lewat path
-  //    langsung "/sertifikat?token=..." dan rewrite vercel.json-nya berhasil.
-  const dariQuery = new URLSearchParams(window.location.search).get("token");
-  if (dariQuery) return dariQuery.trim();
-
-  // 2) Bagian "?..." DI DALAM hash -- berlaku untuk bentuk utama
-  //    "#/sertifikat?token=...": semua yang di belakang "#" tidak pernah
-  //    dikirim ke server sama sekali (murni ditangani browser), jadi
-  //    window.location.search akan selalu kosong untuk bentuk ini -- perlu
-  //    diuraikan manual dari window.location.hash.
-  const hash = window.location.hash || "";
-  const tandaTanya = hash.indexOf("?");
-  if (tandaTanya === -1) return "";
-  return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("token") || "").trim();
-}
-
-// Token KELOMPOK ("#/sertifikat?grup=...", migrasi 0057) -- link sertifikat
-// PESERTA per cabang lomba + jenis kelamin + jenjang. Sengaja memakai rute
-// "#/sertifikat" yang sama dengan link pendamping (beda parameter saja).
-function ambilGrupDariUrlSertifikat() {
-  const dariQuery = new URLSearchParams(window.location.search).get("grup");
+// Kunci link tunggal ("#/sertifikat?k=...", migrasi 0058).
+function ambilKunciDariUrlSertifikat() {
+  const dariQuery = new URLSearchParams(window.location.search).get("k");
   if (dariQuery) return dariQuery.trim();
   const hash = window.location.hash || "";
   const tandaTanya = hash.indexOf("?");
   if (tandaTanya === -1) return "";
-  return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("grup") || "").trim();
+  return (new URLSearchParams(hash.slice(tandaTanya + 1)).get("k") || "").trim();
 }
 
-async function initSertifikatGrupPublik(root, grup) {
+function labelJenisKelaminSertifikat(jk) {
+  return jk === "laki-laki" ? "Putra" : jk === "perempuan" ? "Putri" : "Umum";
+}
+
+// Halaman pilih sertifikat: filter Cabang -> Jenjang -> Jenis Kelamin, daftar
+// nama bercentang (pilihan TETAP tersimpan saat filter diganti, jadi boleh
+// lintas kelompok), pratinjau, lalu unduh satu PDF berisi semua yang dicentang.
+async function initSertifikatPilihPublik(root, kunci) {
   root.innerHTML = '<div class="form-shell"><p class="hint">Memuat...</p></div>';
-  const { data, error } = await supabaseClient.rpc("ambil_grup_sertifikat", { p_token: grup });
+  const { data, error } = await supabaseClient.rpc("pilihan_sertifikat", { p_token: kunci });
   if (error || !data || !data.success) {
     root.innerHTML =
-      '<div class="form-shell"><h1>Link Belum Tersedia</h1><p>' +
-      escapeHTMLSertifikatPublik((data && data.message) || (error && error.message) || "Link ini tidak valid atau belum dibuka panitia.") +
+      '<div class="form-shell"><h1>Link Tidak Berlaku</h1><p>' +
+      escapeHTMLSertifikatPublik((data && data.message) || (error && error.message) || "Link ini tidak valid.") +
       '</p></div>';
     return;
   }
+  const grup = data.grup || [];
+  if (grup.length === 0) {
+    root.innerHTML = '<div class="form-shell"><h1>🎓 Sertifikat Peserta</h1><p>Sertifikat belum dibuka panitia. Silakan coba lagi nanti.</p></div>';
+    return;
+  }
 
-  const jk = data.jenis_kelamin === "laki-laki" ? "Laki-laki" : data.jenis_kelamin === "perempuan" ? "Perempuan" : "";
+  const dipilih = new Map(); // kunci unik -> { nama, lomba, jenjang, jk }
+  let namaTampil = [];       // hasil kelompok yang sedang difilter
+  let kelompokAktif = null;
+
   root.innerHTML =
     '<div class="form-shell">' +
       '<h1>🎓 Sertifikat Peserta</h1>' +
-      '<p><strong>' + escapeHTMLSertifikatPublik(data.lomba) + '</strong>' +
-        (data.jenjang ? ' &middot; ' + escapeHTMLSertifikatPublik(data.jenjang) : '') +
-        (jk ? ' &middot; ' + jk : '') + '</p>' +
-      '<div class="field"><label for="sertifikat-cari-nama">Ketik nama kamu (minimal 3 huruf)</label>' +
-        '<input type="text" id="sertifikat-cari-nama" autocomplete="off" placeholder="Contoh: Ahmad" /></div>' +
-      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-cari-sertifikat">Cari</button></div>' +
-      '<p id="sertifikat-cari-pesan" class="hint" style="margin-top:10px;"></p>' +
-      '<div id="sertifikat-cari-hasil"></div>' +
-      '<div id="sertifikat-pratinjau" style="margin-top:14px;"></div>' +
+      '<p class="hint">Pilih Cabang Lomba, Jenjang, dan Jenis Kelamin, lalu centang namamu. Kamu bisa ganti filter dan menambah nama lain -- centangan sebelumnya tetap tersimpan.</p>' +
+      '<div class="field"><label for="sf-lomba">Cabang Lomba</label><select id="sf-lomba"></select></div>' +
+      '<div class="field"><label for="sf-jenjang">Jenjang</label><select id="sf-jenjang"></select></div>' +
+      '<div class="field"><label for="sf-jk">Jenis Kelamin</label><select id="sf-jk"></select></div>' +
+      '<div id="sf-daftar" style="margin-top:10px;"></div>' +
+      '<div id="sf-pratinjau" style="margin-top:14px;"></div>' +
+      '<div id="sf-keranjang" style="margin-top:14px;"></div>' +
     '</div>';
 
-  const input = document.getElementById("sertifikat-cari-nama");
-  const pesan = document.getElementById("sertifikat-cari-pesan");
-  const hasil = document.getElementById("sertifikat-cari-hasil");
-  const pratinjau = document.getElementById("sertifikat-pratinjau");
+  const selLomba = document.getElementById("sf-lomba");
+  const selJenjang = document.getElementById("sf-jenjang");
+  const selJk = document.getElementById("sf-jk");
+  const boxDaftar = document.getElementById("sf-daftar");
+  const boxPratinjau = document.getElementById("sf-pratinjau");
+  const boxKeranjang = document.getElementById("sf-keranjang");
 
-  async function cari() {
-    pesan.textContent = "";
-    hasil.innerHTML = "";
-    pratinjau.innerHTML = "";
-    const kata = input.value.trim();
-    if (kata.length < 3) { pesan.textContent = "Ketik minimal 3 huruf dari nama kamu."; return; }
-    pesan.textContent = "Mencari...";
-    const { data: res, error: err } = await supabaseClient.rpc("cari_peserta_sertifikat", { p_token: grup, p_kata: kata });
-    if (err || !res || !res.success) {
-      pesan.textContent = (res && res.message) || (err && err.message) || "Gagal mencari.";
-      return;
-    }
-    if (!res.nama || res.nama.length === 0) {
-      pesan.textContent = "Nama tidak ditemukan di kelompok ini. Cek ejaan, atau hubungi panitia kalau kamu yakin sudah ikut lomba.";
-      return;
-    }
-    pesan.textContent = res.nama.length === 1 ? "Ditemukan 1 nama:" : "Ditemukan " + res.nama.length + " nama, pilih namamu:";
-    hasil.innerHTML = res.nama.map(function (n, i) {
-      return '<button type="button" class="btn btn--ghost btn-pilih-nama-sertifikat" data-i="' + i + '" style="margin:4px 6px 4px 0;">' + escapeHTMLSertifikatPublik(n) + '</button>';
-    }).join("");
-    hasil.querySelectorAll(".btn-pilih-nama-sertifikat").forEach(function (b) {
-      b.addEventListener("click", function () { tampilkanPratinjau(res.nama[Number(b.dataset.i)]); });
+  function unik(arr) { return Array.from(new Set(arr)); }
+  function opsi(el, daftar, placeholder) {
+    el.innerHTML = '<option value="">' + placeholder + '</option>' +
+      daftar.map(function (d) { return '<option value="' + escapeHTMLSertifikatPublik(d.v) + '">' + escapeHTMLSertifikatPublik(d.t) + '</option>'; }).join("");
+  }
+
+  const lombaUnik = unik(grup.map(function (g) { return g.lomba_id; }));
+  opsi(selLomba, lombaUnik.map(function (id) { return { v: id, t: grup.find(function (g) { return g.lomba_id === id; }).lomba }; }), "-- Pilih Cabang Lomba --");
+  opsi(selJenjang, [], "-- Pilih Jenjang --");
+  opsi(selJk, [], "-- Pilih Jenis Kelamin --");
+
+  selLomba.addEventListener("change", function () {
+    const js = unik(grup.filter(function (g) { return g.lomba_id === selLomba.value; }).map(function (g) { return g.jenjang; }));
+    opsi(selJenjang, js.map(function (j) { return { v: j, t: j || "Umum" }; }), "-- Pilih Jenjang --");
+    opsi(selJk, [], "-- Pilih Jenis Kelamin --");
+    kosongkanDaftar();
+    if (js.length === 1) { selJenjang.selectedIndex = 1; selJenjang.dispatchEvent(new Event("change")); }
+  });
+  selJenjang.addEventListener("change", function () {
+    if (selLomba.selectedIndex === 0 || selJenjang.selectedIndex === 0) { opsi(selJk, [], "-- Pilih Jenis Kelamin --"); kosongkanDaftar(); return; }
+    const jks = unik(grup.filter(function (g) { return g.lomba_id === selLomba.value && g.jenjang === selJenjang.value; }).map(function (g) { return g.jenis_kelamin; }));
+    opsi(selJk, jks.map(function (j) { return { v: j, t: labelJenisKelaminSertifikat(j) }; }), "-- Pilih Jenis Kelamin --");
+    kosongkanDaftar();
+    if (jks.length === 1) { selJk.selectedIndex = 1; selJk.dispatchEvent(new Event("change")); }
+  });
+  selJk.addEventListener("change", muatDaftar);
+
+  function kosongkanDaftar() { namaTampil = []; kelompokAktif = null; boxDaftar.innerHTML = ""; }
+
+  function kunciPilihan(g, nama) { return [g.lomba_id, g.jenjang, g.jenis_kelamin, nama].join("||"); }
+
+  async function muatDaftar() {
+    if (selLomba.selectedIndex === 0 || selJenjang.selectedIndex === 0 || selJk.selectedIndex === 0) { kosongkanDaftar(); return; }
+    const g = grup.find(function (x) { return x.lomba_id === selLomba.value && x.jenjang === selJenjang.value && x.jenis_kelamin === selJk.value; });
+    if (!g) { kosongkanDaftar(); return; }
+    kelompokAktif = g;
+    boxDaftar.innerHTML = '<p class="hint">Memuat nama...</p>';
+    const { data: res, error: err } = await supabaseClient.rpc("daftar_peserta_sertifikat", {
+      p_token: kunci, p_lomba_id: g.lomba_id, p_jenjang: g.jenjang, p_jenis_kelamin: g.jenis_kelamin
     });
-    if (res.nama.length === 1) tampilkanPratinjau(res.nama[0]);
+    if (err || !res || !res.success) {
+      boxDaftar.innerHTML = '<p class="hint">' + escapeHTMLSertifikatPublik((res && res.message) || (err && err.message) || "Gagal memuat nama.") + '</p>';
+      return;
+    }
+    namaTampil = res.nama || [];
+    renderDaftar();
   }
 
-  async function tampilkanPratinjau(nama) {
-    pratinjau.innerHTML = '<p class="hint">Menyiapkan pratinjau...</p>';
-    try {
-      await pastikanLibKartu();
-      const templatesSemua = await ambilKartuTemplates();
-      if (!templatesSemua.sertifikat || !templatesSemua.sertifikat.url) {
-        pratinjau.innerHTML = '<p class="hint">Templat sertifikat belum disiapkan panitia. Mohon hubungi panitia.</p>';
-        return;
-      }
-      const templateImg = await muatGambar(templatesSemua.sertifikat.url);
-      const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
-      const canvas = document.createElement("canvas");
-      gambarKartu(
-        canvas, templateImg, layout,
-        { nama: nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(data.lomba, data.jenjang, data.jenis_kelamin) },
-        FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
-      );
-      canvas.style.cssText = "width:100%;height:auto;border:1px solid #ccc;border-radius:6px;";
-      pratinjau.innerHTML =
-        '<p><strong>' + escapeHTMLSertifikatPublik(nama) + '</strong></p>';
-      pratinjau.appendChild(canvas);
-      const baris = document.createElement("div");
-      baris.className = "submit-row";
-      baris.style.marginTop = "10px";
-      baris.innerHTML = '<button type="button" class="btn btn--primary" id="btn-unduh-sertifikat-grup">Unduh Sertifikat (PDF)</button>';
-      pratinjau.appendChild(baris);
-      const status = document.createElement("p");
-      status.className = "hint";
-      pratinjau.appendChild(status);
+  function renderDaftar() {
+    if (namaTampil.length === 0) { boxDaftar.innerHTML = '<p class="hint">Belum ada nama di kelompok ini.</p>'; return; }
+    const g = kelompokAktif;
+    boxDaftar.innerHTML =
+      '<div class="field"><label for="sf-cari">Cari nama (opsional)</label><input type="text" id="sf-cari" placeholder="Ketik untuk menyaring..." autocomplete="off" /></div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0;">' +
+        '<button type="button" class="btn btn--ghost" id="sf-pilih-semua">Centang semua yang tampil</button>' +
+        '<button type="button" class="btn btn--ghost" id="sf-batal-semua">Batalkan centang yang tampil</button>' +
+      '</div>' +
+      '<div id="sf-baris" style="max-height:340px;overflow-y:auto;border:1px solid #e4e4e4;border-radius:8px;padding:8px;background:#fafafa;"></div>';
 
-      baris.querySelector("button").addEventListener("click", function () {
-        try {
-          const { jsPDF } = window.jspdf;
-          const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "landscape" });
-          doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, SERTIFIKAT_LEBAR_CM, SERTIFIKAT_TINGGI_CM);
-          doc.save("sertifikat-" + nama.trim().replace(/[^a-z0-9]+/gi, "-") + "-alif5.pdf");
-          status.textContent = "✓ Selesai -- sertifikat terunduh.";
-        } catch (e) {
-          status.textContent = "Gagal membuat sertifikat: " + e.message;
-        }
+    function gambarBaris() {
+      const kata = (document.getElementById("sf-cari").value || "").trim().toLowerCase();
+      const tampil = namaTampil.filter(function (n) { return !kata || n.toLowerCase().indexOf(kata) !== -1; });
+      const wadah = document.getElementById("sf-baris");
+      if (tampil.length === 0) { wadah.innerHTML = '<p class="hint" style="margin:0;">Tidak ada nama yang cocok.</p>'; return tampil; }
+      wadah.innerHTML = tampil.map(function (n, i) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:4px 2px;">' +
+          '<label style="flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" class="sf-cek" data-i="' + i + '"' + (dipilih.has(kunciPilihan(g, n)) ? " checked" : "") + ' /> <span>' + escapeHTMLSertifikatPublik(n) + '</span></label>' +
+          '<button type="button" class="btn btn--ghost sf-lihat" data-i="' + i + '">Lihat</button>' +
+        '</div>';
+      }).join("");
+      wadah.querySelectorAll(".sf-cek").forEach(function (c) {
+        c.addEventListener("change", function () {
+          const n = tampil[Number(c.dataset.i)];
+          if (c.checked) dipilih.set(kunciPilihan(g, n), { nama: n, lomba: g.lomba, jenjang: g.jenjang, jk: g.jenis_kelamin });
+          else dipilih.delete(kunciPilihan(g, n));
+          renderKeranjang();
+        });
       });
+      wadah.querySelectorAll(".sf-lihat").forEach(function (b) {
+        b.addEventListener("click", function () {
+          const n = tampil[Number(b.dataset.i)];
+          tampilkanPratinjau({ nama: n, lomba: g.lomba, jenjang: g.jenjang, jk: g.jenis_kelamin });
+        });
+      });
+      return tampil;
+    }
+    let tampilSekarang = gambarBaris();
+    document.getElementById("sf-cari").addEventListener("input", function () { tampilSekarang = gambarBaris(); });
+    document.getElementById("sf-pilih-semua").addEventListener("click", function () {
+      tampilSekarang.forEach(function (n) { dipilih.set(kunciPilihan(g, n), { nama: n, lomba: g.lomba, jenjang: g.jenjang, jk: g.jenis_kelamin }); });
+      tampilSekarang = gambarBaris(); renderKeranjang();
+    });
+    document.getElementById("sf-batal-semua").addEventListener("click", function () {
+      tampilSekarang.forEach(function (n) { dipilih.delete(kunciPilihan(g, n)); });
+      tampilSekarang = gambarBaris(); renderKeranjang();
+    });
+  }
+
+  async function siapkanKanvas(item) {
+    await pastikanLibKartu();
+    const templatesSemua = await ambilKartuTemplates();
+    if (!templatesSemua.sertifikat || !templatesSemua.sertifikat.url) throw new Error("Templat sertifikat belum disiapkan panitia.");
+    const templateImg = await muatGambar(templatesSemua.sertifikat.url);
+    const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
+    return { templateImg: templateImg, layout: layout };
+  }
+
+  function gambarSertifikat(canvas, tpl, item) {
+    gambarKartu(
+      canvas, tpl.templateImg, tpl.layout,
+      { nama: item.nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(item.lomba, item.jenjang, item.jk) },
+      FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
+    );
+  }
+
+  async function tampilkanPratinjau(item) {
+    boxPratinjau.innerHTML = '<p class="hint">Menyiapkan pratinjau...</p>';
+    try {
+      const tpl = await siapkanKanvas();
+      const canvas = document.createElement("canvas");
+      gambarSertifikat(canvas, tpl, item);
+      canvas.style.cssText = "width:100%;height:auto;border:1px solid #ccc;border-radius:6px;";
+      boxPratinjau.innerHTML = '<p><strong>Pratinjau:</strong> ' + escapeHTMLSertifikatPublik(item.nama) + '</p>';
+      boxPratinjau.appendChild(canvas);
     } catch (e) {
-      pratinjau.innerHTML = '<p class="hint">Gagal menyiapkan pratinjau: ' + escapeHTMLSertifikatPublik(e.message) + '</p>';
+      boxPratinjau.innerHTML = '<p class="hint">Gagal menyiapkan pratinjau: ' + escapeHTMLSertifikatPublik(e.message) + '</p>';
     }
   }
 
-  document.getElementById("btn-cari-sertifikat").addEventListener("click", cari);
-  input.addEventListener("keydown", function (e) { if (e.key === "Enter") cari(); });
+  function renderKeranjang() {
+    const n = dipilih.size;
+    if (n === 0) { boxKeranjang.innerHTML = '<p class="hint">Belum ada nama yang dicentang.</p>'; return; }
+    boxKeranjang.innerHTML =
+      '<p><strong>' + n + ' sertifikat dipilih</strong></p>' +
+      '<div class="submit-row"><button type="button" class="btn btn--primary" id="sf-unduh">Unduh Sertifikat (PDF)</button> ' +
+      '<button type="button" class="btn btn--ghost" id="sf-kosongkan">Kosongkan Pilihan</button></div>' +
+      '<p class="hint" id="sf-status" style="margin-top:8px;"></p>';
+    document.getElementById("sf-kosongkan").addEventListener("click", function () {
+      dipilih.clear(); renderKeranjang(); if (kelompokAktif) renderDaftar();
+    });
+    document.getElementById("sf-unduh").addEventListener("click", unduh);
+  }
+
+  async function unduh() {
+    const btn = document.getElementById("sf-unduh");
+    const statusEl = document.getElementById("sf-status");
+    const daftar = Array.from(dipilih.values());
+    btn.disabled = true;
+    try {
+      statusEl.textContent = "Menyiapkan...";
+      const tpl = await siapkanKanvas();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "landscape" });
+      const canvas = document.createElement("canvas");
+      for (let i = 0; i < daftar.length; i++) {
+        if (i > 0) doc.addPage("a4", "landscape");
+        gambarSertifikat(canvas, tpl, daftar[i]);
+        doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, SERTIFIKAT_LEBAR_CM, SERTIFIKAT_TINGGI_CM);
+        statusEl.textContent = "Membuat sertifikat " + (i + 1) + " dari " + daftar.length + "...";
+        await new Promise(function (r) { setTimeout(r, 0); }); // beri napas ke UI
+      }
+      const namaFile = daftar.length === 1
+        ? "sertifikat-" + daftar[0].nama.trim().replace(/[^a-z0-9]+/gi, "-") + "-alif5.pdf"
+        : "sertifikat-alif5-" + daftar.length + "-peserta.pdf";
+      doc.save(namaFile);
+      statusEl.textContent = "✓ Selesai -- " + daftar.length + " sertifikat terunduh.";
+    } catch (e) {
+      statusEl.textContent = "Gagal membuat sertifikat: " + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  renderKeranjang();
+  if (lombaUnik.length === 1) { selLomba.selectedIndex = 1; selLomba.dispatchEvent(new Event("change")); }
 }
 
 async function initSertifikatPublik() {
   const root = document.getElementById("sertifikat-publik-root");
-  const grup = ambilGrupDariUrlSertifikat();
-  if (grup) { initSertifikatGrupPublik(root, grup); return; }
-  const token = ambilTokenDariUrlSertifikat();
-
-  if (!token) {
-    root.innerHTML =
-      '<div class="form-shell">' +
-        '<h1>Link Tidak Lengkap</h1>' +
-        '<p>Link ini tidak menyertakan token. Mohon buka lagi link yang diberikan panitia, atau hubungi panitia kalau link tetap bermasalah.</p>' +
-      '</div>';
-    return;
-  }
-
-  root.innerHTML = '<div class="form-shell"><p class="hint">Memuat data sertifikat...</p></div>';
-
-  const { data, error } = await supabaseClient.rpc("ambil_sertifikat", { p_token: token });
-
-  if (error || !data || !data.success) {
-    root.innerHTML =
-      '<div class="form-shell">' +
-        '<h1>Link Tidak Berlaku</h1>' +
-        '<p>' + escapeHTMLSertifikatPublik((data && data.message) || (error && error.message) || "Link ini tidak valid atau sudah tidak berlaku.") + '</p>' +
-      '</div>';
-    return;
-  }
-
-  renderUnduhSertifikatPublik(root, data);
-}
-
-function renderUnduhSertifikatPublik(root, data) {
+  const kunci = ambilKunciDariUrlSertifikat();
+  if (kunci) { initSertifikatPilihPublik(root, kunci); return; }
   root.innerHTML =
     '<div class="form-shell">' +
-      '<h1>🎓 Sertifikat Pendamping</h1>' +
-      '<p><strong>Nama:</strong> ' + escapeHTMLSertifikatPublik(data.nama || "-") + '<br/>' +
-        '<strong>Cabang Lomba:</strong> ' + escapeHTMLSertifikatPublik(data.lomba || "-") + '<br/>' +
-        '<strong>Nomor Pendaftaran:</strong> ' + escapeHTMLSertifikatPublik(data.nomor_pendaftaran || "-") + '</p>' +
-      '<p class="hint">Sertifikat akan dibuat & diunduh langsung di perangkat ini, format PDF (satu halaman A4 landscape).</p>' +
-      '<div class="submit-row"><button type="button" class="btn btn--primary" id="btn-unduh-sertifikat-publik">Unduh Sertifikat (PDF)</button></div>' +
-      '<p id="sertifikat-publik-status" class="hint" style="margin-top:10px;"></p>' +
+      '<h1>Link Tidak Berlaku</h1>' +
+      '<p>Link sertifikat ini tidak lengkap atau sudah tidak digunakan. Sertifikat hanya diberikan kepada peserta lomba -- mohon buka link yang dikirim panitia ke grup peserta, atau hubungi panitia.</p>' +
     '</div>';
-
-  document.getElementById("btn-unduh-sertifikat-publik").addEventListener("click", async function () {
-    const btn = this;
-    const labelAsli = btn.textContent;
-    const statusEl = document.getElementById("sertifikat-publik-status");
-    btn.disabled = true;
-    btn.textContent = "Menyiapkan...";
-    statusEl.textContent = "";
-
-    try {
-      await pastikanLibKartu();
-      const templatesSemua = await ambilKartuTemplates();
-      if (!templatesSemua.sertifikat || !templatesSemua.sertifikat.url) {
-        statusEl.textContent = "Templat sertifikat belum disiapkan panitia. Mohon hubungi panitia.";
-        return;
-      }
-
-      const templateImg = await muatGambar(templatesSemua.sertifikat.url);
-      const layout = templatesSemua.sertifikat.layout || DEFAULT_LAYOUT_KARTU.sertifikat;
-
-      // Field "peserta" (label peran) SELALU "Peserta" untuk semua -- sama
-      // seperti cetakSertifikatPDF() di view-admin.js. "lomba_sertifikat"
-      // dilewatkan dulu ke singkatNamaLomba() (global, didefinisikan di
-      // view-admin.js) untuk membuang kata "Lomba" di depan nama cabangnya,
-      // supaya hasilnya identik dengan sertifikat yang dicetak massal
-      // panitia. Field "nomor_pendaftaran" sudah DIHAPUS dari Sertifikat.
-      const canvas = document.createElement("canvas");
-      gambarKartu(
-        canvas, templateImg, layout,
-        { nama: data.nama, peserta: "Peserta", lomba_sertifikat: labelLombaSertifikat(data.lomba, data.jenjang, data.jenis_kelamin) },
-        FIELD_SERTIFIKAT, SERTIFIKAT_LEBAR_PX, SERTIFIKAT_TINGGI_PX
-      );
-
-      const imgData = canvas.toDataURL("image/png");
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "cm", format: "a4", orientation: "landscape" });
-      doc.addImage(imgData, "PNG", 0, 0, SERTIFIKAT_LEBAR_CM, SERTIFIKAT_TINGGI_CM);
-      doc.save("sertifikat-" + (data.nama || "pendamping").trim().replace(/[^a-z0-9]+/gi, "-") + "-alif5.pdf");
-      statusEl.textContent = "✓ Selesai -- sertifikat terunduh.";
-    } catch (e) {
-      statusEl.textContent = "Gagal membuat sertifikat: " + e.message + " -- coba lagi, atau hubungi panitia kalau terus gagal.";
-    } finally {
-      btn.disabled = false;
-      btn.textContent = labelAsli;
-    }
-  });
 }
 
 window.ViewSertifikat = { template: SERTIFIKAT_PUBLIK_TEMPLATE, init: initSertifikatPublik };
